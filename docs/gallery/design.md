@@ -1,80 +1,90 @@
 # Gallery design system
 
-The gallery's screens are designed in Penpot from the tokens and components below, and the code implements the same
-tokens and components by name. A change goes to both: the Penpot file first, then [`tokens.json`](tokens.json) and the
-code. Behavior and content of each page are in [design.md](../design.md), section 10.
+The gallery's screens are designed in Penpot from a token set and components, and the code uses the same tokens and
+components by name. Three files carry the design into the code, and the implementation follows them exactly:
+
+- [`tokens.json`](tokens.json): the Penpot token set `artifacts`.
+- [`gallery.css`](../../packages/worker/src/gallery/gallery.css): the stylesheet the Worker serves. Every token is a
+  custom property, every component a class.
+- [`reference/`](reference/): one static page per screen (`index.html`, `archived.html`, `artifact.html`) with the
+  markup the Worker's templates must produce. They load `gallery.css` and render like the Penpot screens.
+
+A design change goes to all of them: the Penpot file first, then `tokens.json`, `gallery.css` and the reference pages,
+then the templates. Content and behavior of each page are in [design.md](../design.md), section 10.
 
 ## Ground rules
 
-- **Dark only.** The owner uses a dark color scheme, so the gallery has one theme: `:root { color-scheme: dark; }` and
-  the colors below. A light theme would be a second token set with the same names.
+- **Dark only.** The owner uses a dark color scheme, so the gallery has one theme (`color-scheme: dark`). A light theme
+  would be a second token set with the same names.
 - **No script, forms or frames** (design.md, section 10). Every state is a link or plain markup.
-- **Text scales with the user's setting.** The page opts in with `<meta name="text-scale" content="scale">`, never sets
-  a root `font-size`, and sizes text and the spacing around text in `rem`.
-- **Fonts are served by the Worker.** IBM Plex Sans and IBM Plex Mono (Latin subsets, `woff2`, `font-display: swap`),
-  with `system-ui` / `ui-monospace` fallbacks and `font-size-adjust: from-font`, so Japanese titles fall back to the
-  system font at the same x-height.
+- **Text scales with the user's setting.** Each page has `<meta name="text-scale" content="scale">`, no rule sets a
+  root `font-size`, and text and the spacing around it are in `rem`.
+- **Fonts are served by the Worker**: IBM Plex Sans and IBM Plex Mono (Latin subsets, `woff2`,
+  `font-display: swap`) in a separate `@font-face` stylesheet. `gallery.css` falls back to `system-ui` and
+  `ui-monospace` with `font-size-adjust: from-font`, so Japanese text falls back to the system font at the same
+  x-height. The reference pages load the same fonts from Google Fonts instead, for previewing only.
 
 ## Tokens
 
-[`tokens.json`](tokens.json) is the export of the Penpot token set `artifacts` in the Design Tokens Community Group
-format, and the source the code's custom properties are checked against.
+`tokens.json` has the Design Tokens format's shape as Penpot exports it: `$type` and `$value` per token, dimensions as
+strings with `px`, typography without letter spacing. It is not checked against the DTCG schema; the code checks its
+custom properties against it.
 
-| Token                                     | CSS                                                                      |
-| ----------------------------------------- | ------------------------------------------------------------------------ |
-| any token `a.b.c`                         | the custom property `--a-b-c` on `:root` (`space.0-5` → `--space-0-5`)   |
-| `color.*`                                 | the hex value; `color.focus` is `var(--color-accent)`                    |
-| `space.*`, `font.size.*`, `size.*`        | `px ÷ 16` in `rem` (`space.4` 16px → `1rem`)                             |
-| `radius.*`, `border.width`, `focus.width` | `px`                                                                     |
-| `font.family.sans`                        | `"IBM Plex Sans", system-ui, sans-serif`                                 |
-| `font.family.mono`                        | `"IBM Plex Mono", ui-monospace, monospace`                               |
-| `font.weight.*`                           | the number                                                               |
-| `type.*` (typography)                     | no custom property: the four declarations, written where a class uses it |
+| Token                                       | In `gallery.css`                                                                                                                                                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| every token except `type.*` and `size.page` | the custom property `--a-b-c` for `a.b.c` on `:root` (`space.0-5` → `--space-0-5`)                                                                                                                            |
+| `color.*`                                   | the hex value; a reference (`{color.accent}`) becomes `var(--color-accent)`                                                                                                                                   |
+| `space.*`, `font.size.*`, `size.*`          | `px ÷ 16` in `rem` (`space.4`: 16px → `1rem`)                                                                                                                                                                 |
+| `radius.*`, `border.width`, `focus.width`   | `px`                                                                                                                                                                                                          |
+| `font.family.sans` / `font.family.mono`     | the family, then `system-ui, sans-serif` / `ui-monospace, monospace`                                                                                                                                          |
+| `font.weight.*`                             | the number                                                                                                                                                                                                    |
+| `type.x` (typography)                       | one rule, headed by the comment `/* type.x */`, whose `font` shorthand is `var(--font-weight-…) var(--font-size-…) / <line height> var(--font-family-…)`; the selectors listed are every element that uses it |
+| `size.page`                                 | none: it is the width of the Penpot screens, not of the page                                                                                                                                                  |
 
-Values Penpot shows that are not tokens (a text's measured width, a board's height) are not part of the design.
+Values Penpot shows that are not tokens (a text's measured width, a board's height, the width of a table column) are
+not part of the design.
 
 ## Components
 
-Each Penpot component is one HTML pattern with one class. A variant is a modifier class or an attribute.
+Each Penpot component is one class in `gallery.css`; a variant is a modifier class or an attribute. The reference pages
+show each in place.
 
-| Penpot component  | Variants                                      | HTML                                                                                                              | Tokens                                                                                                                                                                                                                                      |
-| ----------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `site-header`     | —                                             | `<header class="site-header">` with `.brand` and `<nav class="site-nav">`                                         | `color.bg`; padding `space.3` / `space.7`; bottom border `border.width` `color.border`                                                                                                                                                      |
-| (brand text)      | —                                             | `<a class="brand" href="/">artifacts</a>`                                                                         | `type.brand`, `color.text`                                                                                                                                                                                                                  |
-| `nav-tab`         | `state=default`, `state=current`              | `<a class="nav-tab">` with `<span class="nav-tab__count">`; current: `aria-current="page"`                        | padding `space.1` / `space.3`, gap `space.2`, `radius.sm`; default `type.nav` `color.text-muted`; current `type.nav-current` `color.text`, `color.surface`, border `color.border`; count `type.meta` `color.text-muted`                     |
-| `artifact-row`    | —                                             | `<li class="artifact-row">` in `<ul class="artifact-list">`                                                       | padding `space.3` / `space.4`, gap `space.6`; title `type.row-title` `color.text` (a link to `/a/<id>`); description `type.body-sm` `color.text-muted`, one line; meta `type.meta` `color.text-muted`; open link `type.link` `color.accent` |
-| `badge`           | `kind=public`, `kind=archived`, `kind=latest` | `<span class="badge badge--public">` (`--archived`, `--latest`)                                                   | padding `space.0-5` / `space.2`, `radius.pill`, `type.label`; public `color.badge.public.*`; archived and latest `color.badge.neutral.*`                                                                                                    |
-| `pager`           | —                                             | `<nav class="pager" aria-label="Pagination">` with one link                                                       | `type.link`, `color.accent`, aligned to the end                                                                                                                                                                                             |
-| `back-link`       | —                                             | `<a class="back-link" href="/">← Artifacts</a>`                                                                   | `type.link`, `color.accent`                                                                                                                                                                                                                 |
-| `section-heading` | —                                             | `<h2 class="section-heading">` with `<span class="section-heading__count">`                                       | gap `space.2`; title `type.section-title` `color.text`; count `type.meta` `color.text-muted`                                                                                                                                                |
-| `info-row`        | `value=text`, `value=link`                    | `<div class="info-row"><dt>…</dt><dd>…</dd></div>` in `<dl class="info">`; link: `<dd class="info-row__link"><a>` | gap `space.4`; term width `size.label`, `type.body-sm` `color.text-muted`; text `type.body-sm` `color.text`; link `type.code` `color.accent`                                                                                                |
-| `table-cell`      | `style=head`, `text`, `mono`, `muted`, `link` | `<th>` (head) or `<td class="cell--mono">` (`--muted`, `--link`; text has no modifier)                            | padding `space.2` / `space.4`; head `type.label` `color.text-muted` on `color.surface`; text `type.body-sm` `color.text`; mono `type.code` `color.text`; muted `type.code` `color.text-muted`; link `type.link` `color.accent`              |
+| Penpot component  | Variant                                         | Markup                                                                                                          |
+| ----------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `site-header`     |                                                 | `header.site-header` > `a.brand` + `nav.site-nav`                                                               |
+| `nav-tab`         | `state=default`                                 | `a.nav-tab` > text + `span.nav-tab__count`                                                                      |
+|                   | `state=current`                                 | the same with `aria-current`: `"page"` on the list it links to, `"true"` on an artifact page in that section    |
+| `artifact-row`    |                                                 | `li.artifact-row` in `ul.artifact-list`; see `reference/index.html`                                             |
+| `badge`           | `kind=public` / `kind=archived` / `kind=latest` | `span.badge.badge--public` / `.badge--archived` / `.badge--latest`                                              |
+| `pager`           |                                                 | `nav.pager` with an `aria-label` > one `a`                                                                      |
+| `back-link`       |                                                 | `a.back-link`                                                                                                   |
+| `section-heading` |                                                 | `h2.section-heading` with an `id` > text + `span.section-heading__count`                                        |
+| `info-row`        | `value=text`                                    | `div.info-row` > `dt` + `dd`, in `dl.info`                                                                      |
+|                   | `value=link`                                    | the same with `dd.info-row__link` > `a`                                                                         |
+| `table-cell`      | `style=head`                                    | `thead th[scope=col]`                                                                                           |
+|                   | `style=text` / `mono` / `muted` / `link`        | `td` / `td.cell--mono` / `td.cell--muted` / `td.cell--link` > `a`; every `td` has `data-label`, its column name |
 
-Patterns the screens compose from those components, with their tokens:
+Screens also use `main.page` (`.page--detail` on an artifact page), `hgroup.page-heading`, `header.artifact-heading`,
+`section.section` and `div.data-table[role=region][tabindex=0][aria-labelledby]` around each `table`; `.cell--grow`
+marks the column that takes the remaining width (the version title, the file path).
 
-| Pattern          | HTML                                                                                                 | Tokens                                                                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Page             | `<body>`: `.site-header`, then `<main class="page">`                                                 | `color.bg`; `main` width `min(size.content, 100% − 2 × space.4)`, top padding `space.8` (lists) or `space.7` (detail), bottom `space.9` |
-| Page heading     | `<hgroup class="page-heading"><h1>` + `<p>`                                                          | gap `space.1`; `type.page-title` `color.text`; subtitle `type.body-sm` `color.text-muted`                                               |
-| Artifact list    | `<ul class="artifact-list">`                                                                         | `radius.md`, border `color.border`; rows separated by a `border.width` `color.border` line                                              |
-| Artifact heading | `<header class="artifact-heading">`: `<h1>` with badges, `<p class="artifact-heading__description">` | gap `space.2`; `type.page-title`; description `type.body` `color.text-muted`, wraps                                                     |
-| Info card        | `<dl class="info">`                                                                                  | padding `space.4` / `space.5`, gap `space.3`, `radius.md`, `color.surface`, border `color.border`                                       |
-| Data table       | `<div class="data-table" role="region" tabindex="0" aria-labelledby="…">` around `<table>`           | `radius.md`, border `color.border`; rows separated by `color.border`                                                                    |
-| Section          | `<section>`: `.section-heading`, the table, an optional `.pager`                                     | gap `space.3`; sections separated by `space.7`                                                                                          |
-| Focus            | every link                                                                                           | `outline: focus.width solid color.focus`, offset `space.0-5`, on `:focus-visible`                                                       |
+Penpot draws a container's stroke inside its box, and CSS draws a border outside the padding, so content inside a
+bordered container sits one pixel further in. The nav tab subtracts its border from its padding, because its size is
+part of the design; the other containers keep the one pixel.
 
 ## Behavior the static design does not show
 
-- **Current section.** The nav tab of the list a page belongs to is current: `/` and an artifact that is not archived
-  mark Active; `/archived` and an archived artifact mark Archived.
-- **Description in a row** stays on one line and ends with an ellipsis (`text-overflow: ellipsis`); the artifact page
-  shows it whole. The row's title link is the way to the full text, so no reveal is added.
-- **Archived rows** add the reason to the meta line: `archived by hand` or `archived: no updates for N days`.
-- **Narrow widths.** `main` keeps a `space.4` gutter. An artifact row stacks the open link under the summary when its
-  container is narrower than 36rem. A data table becomes stacked cards under 36rem of its own width (a container query),
-  each cell labelled with its column name; its region scrolls instead of the page when a value cannot wrap.
-- **Times** are rendered by the server in UTC as `YYYY-MM-DD HH:MM` in `<time datetime="…">`; list rows use a relative
-  form (`2 hours ago`) with the absolute time in the `datetime` attribute.
-- **Contrast.** Every text color is at least 5.8:1 on the background it sits on (the lowest is `color.badge.neutral.fg`
-  on `color.badge.neutral.bg`). Borders are separators, not control boundaries; the current tab is also marked by its
+- **Current section.** `/` and an artifact that is not archived mark Active; `/archived` and an archived artifact mark
+  Archived.
+- **A row's description** stays on one line and ends with an ellipsis; the artifact page shows it whole, and the row's
+  title links there.
+- **Archived rows** end their meta line with the reason: `archived by hand` or `archived: no updates for N days`.
+- **Narrow widths.** `main` keeps a `space.4` gutter. Under 36rem of the list's width an artifact row puts its open link
+  under the summary; under 36rem of a table's own width (`.data-table` is the query container) the table becomes one
+  card per row, without the header row, each cell prefixed by its `data-label`.
+- **Times** are UTC, `YYYY-MM-DD HH:MM`, in `<time datetime="YYYY-MM-DDTHH:MM:00Z">`; list rows show a relative time
+  (`2 hours ago`) with the same `datetime`.
+- **Focus.** Links and the scrollable table regions show `focus.width` of `color.focus` on `:focus-visible`.
+- **Contrast.** Every text color is at least 5.8:1 on its background (the lowest is `color.badge.neutral.fg` on
+  `color.badge.neutral.bg`). Borders are separators, not control boundaries; the current tab is also marked by its
   weight and `aria-current`.
