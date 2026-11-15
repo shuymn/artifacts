@@ -1,0 +1,475 @@
+/*
+ * The gallery's stylesheet: the Penpot design's tokens and components, one to one (docs/gallery/design.md).
+ * Each custom property is a token of docs/gallery/tokens.json; each comment `type.*` names the typography token a
+ * rule applies. Fonts (@font-face) are declared where the Worker serves them, not here.
+ */
+
+/* Tokens */
+:root {
+  color-scheme: dark;
+
+  --color-bg: #111317;
+  --color-surface: #181b21;
+  --color-border: #2a2f37;
+  --color-text: #e8eaed;
+  --color-text-muted: #9aa1ac;
+  --color-accent: #8fa8ff;
+  --color-focus: var(--color-accent);
+  --color-badge-public-bg: #173322;
+  --color-badge-public-fg: #7dd3a0;
+  --color-badge-neutral-bg: #22262d;
+  --color-badge-neutral-fg: #9aa1ac;
+
+  --space-0-5: 0.125rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 2.5rem;
+  --space-9: 4rem;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+  --focus-width: 2px;
+
+  --size-content: 60rem;
+  --size-prose: 45rem;
+  --size-label: 7.5rem;
+
+  --font-family-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-family-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-md: 0.875rem;
+  --font-size-lg: 1rem;
+  --font-size-xl: 1.5rem;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+}
+
+/* Typography tokens */
+
+/* type.body */
+body,
+.artifact-heading__description {
+  font: var(--font-weight-regular) var(--font-size-md) / 1.5 var(--font-family-sans);
+}
+
+/* type.page-title */
+.page-heading h1,
+.artifact-heading h1 {
+  font: var(--font-weight-semibold) var(--font-size-xl) / 1.25 var(--font-family-sans);
+}
+
+/* type.section-title */
+.section-heading {
+  font: var(--font-weight-semibold) var(--font-size-lg) / 1.25 var(--font-family-sans);
+}
+
+/* type.row-title */
+.artifact-row__title {
+  font: var(--font-weight-semibold) var(--font-size-lg) / 1.4 var(--font-family-sans);
+}
+
+/* type.body-sm */
+.page-heading p,
+.artifact-row__description,
+.info-row dt,
+.info-row dd,
+.data-table td {
+  font: var(--font-weight-regular) var(--font-size-sm) / 1.4 var(--font-family-sans);
+}
+
+/* type.link */
+.artifact-row__open,
+.pager a,
+.back-link,
+.data-table .cell--link {
+  font: var(--font-weight-medium) var(--font-size-sm) / 1.4 var(--font-family-sans);
+}
+
+/* type.nav */
+.nav-tab {
+  font: var(--font-weight-regular) var(--font-size-md) / 1.4 var(--font-family-sans);
+}
+
+/* type.nav-current */
+.nav-tab[aria-current] {
+  font: var(--font-weight-semibold) var(--font-size-md) / 1.4 var(--font-family-sans);
+}
+
+/* type.label */
+.badge,
+.data-table thead th,
+.data-table td::before {
+  font: var(--font-weight-medium) var(--font-size-xs) / 1.4 var(--font-family-sans);
+}
+
+/* type.meta */
+.nav-tab__count,
+.artifact-row__meta,
+.section-heading__count {
+  font: var(--font-weight-regular) var(--font-size-xs) / 1.4 var(--font-family-mono);
+}
+
+/* type.code */
+.info-row .info-row__link,
+.data-table .cell--mono,
+.data-table .cell--muted {
+  font: var(--font-weight-regular) var(--font-size-sm) / 1.4 var(--font-family-mono);
+}
+
+/* type.brand */
+.brand {
+  font: var(--font-weight-semibold) var(--font-size-lg) / 1.25 var(--font-family-mono);
+}
+
+/* Base: no browser margins or list styles, so only the rules below place anything. */
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size-adjust: from-font;
+}
+
+h1,
+h2,
+p,
+ul,
+dl,
+dd {
+  margin: 0;
+}
+
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+a:focus-visible,
+.data-table:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--space-0-5);
+}
+
+/* site-header */
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-7);
+  border-block-end: var(--border-width) solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.brand {
+  color: var(--color-text);
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* nav-tab: the border sits inside the padding, as Penpot's inner stroke does. */
+.nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: calc(var(--space-1) - var(--border-width)) calc(var(--space-3) - var(--border-width));
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+}
+
+.nav-tab[aria-current] {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.nav-tab__count {
+  color: var(--color-text-muted);
+}
+
+/* Page */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  inline-size: min(var(--size-content), 100% - 2 * var(--space-4));
+  margin-inline: auto;
+  padding-block: var(--space-8) var(--space-9);
+}
+
+.page--detail {
+  gap: var(--space-7);
+  padding-block-start: var(--space-7);
+}
+
+.page-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.page-heading p {
+  color: var(--color-text-muted);
+}
+
+/* artifact-list and artifact-row */
+.artifact-list {
+  overflow: clip;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  container-type: inline-size;
+}
+
+.artifact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-3) var(--space-4);
+}
+
+.artifact-row + .artifact-row {
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.artifact-row__summary {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.artifact-row__title-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.artifact-row__title {
+  color: var(--color-text);
+}
+
+.artifact-row__description {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-row__meta {
+  color: var(--color-text-muted);
+}
+
+.artifact-row__open {
+  flex: none;
+  color: var(--color-accent);
+}
+
+@container (width < 36rem) {
+  .artifact-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+
+  .artifact-row__summary {
+    inline-size: 100%;
+  }
+}
+
+/* badge */
+.badge {
+  display: inline-flex;
+  padding: var(--space-0-5) var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-badge-neutral-bg);
+  color: var(--color-badge-neutral-fg);
+}
+
+.badge--public {
+  background: var(--color-badge-public-bg);
+  color: var(--color-badge-public-fg);
+}
+
+/* pager and back-link */
+.pager {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pager a,
+.back-link {
+  color: var(--color-accent);
+}
+
+.back-link {
+  align-self: flex-start;
+}
+
+/* Artifact heading */
+.artifact-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.artifact-heading__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.artifact-heading__description {
+  max-inline-size: var(--size-prose);
+  color: var(--color-text-muted);
+}
+
+/* info-row in the info card */
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.info-row dt {
+  flex: none;
+  inline-size: var(--size-label);
+  color: var(--color-text-muted);
+}
+
+.info-row dd {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.info-row__link a {
+  color: var(--color-accent);
+}
+
+/* Sections */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.section-heading__count {
+  color: var(--color-text-muted);
+}
+
+/* data-table and table-cell */
+.data-table {
+  overflow: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  container-type: inline-size;
+}
+
+.data-table table {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.data-table th,
+.data-table td {
+  padding: var(--space-2) var(--space-4);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.data-table thead th {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+
+.data-table tbody > tr > * {
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.data-table td {
+  color: var(--color-text);
+}
+
+.data-table .cell--grow {
+  inline-size: 100%;
+}
+
+.data-table .cell--muted {
+  color: var(--color-text-muted);
+}
+
+.data-table .cell--link a {
+  color: var(--color-accent);
+}
+
+@container (width < 36rem) {
+  .data-table table,
+  .data-table tbody,
+  .data-table tr,
+  .data-table td {
+    display: block;
+  }
+
+  .data-table thead {
+    display: none;
+  }
+
+  .data-table tbody > tr > * {
+    border-block-start: 0;
+  }
+
+  .data-table tbody > tr + tr {
+    border-block-start: var(--border-width) solid var(--color-border);
+  }
+
+  .data-table td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .data-table td::before {
+    content: attr(data-label) ": ";
+    color: var(--color-text-muted);
+  }
+}
