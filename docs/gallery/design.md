@@ -54,7 +54,7 @@ show each in place.
 | `site-header`     |                                                 | `header.site-header` > `a.brand` + `nav.site-nav`                                                               |
 | `nav-tab`         | `state=default`                                 | `a.nav-tab` > text + `span.nav-tab__count`                                                                      |
 |                   | `state=current`                                 | the same with `aria-current`: `"page"` on the list it links to, `"true"` on an artifact page in that section    |
-| `artifact-row`    |                                                 | `li.artifact-row` in `ul.artifact-list`; see `reference/index.html`                                             |
+| `artifact-row`    |                                                 | `li.artifact-row` in `ul.artifact-list[role=list]`; see `reference/index.html`                                  |
 | `badge`           | `kind=public` / `kind=archived` / `kind=latest` | `span.badge.badge--public` / `.badge--archived` / `.badge--latest`                                              |
 | `pager`           |                                                 | `nav.pager` with an `aria-label` > one `a`                                                                      |
 | `back-link`       |                                                 | `a.back-link`                                                                                                   |
@@ -67,6 +67,10 @@ show each in place.
 Screens also use `main.page` (`.page--detail` on an artifact page), `hgroup.page-heading`, `header.artifact-heading`,
 `section.section` and `div.data-table[role=region][tabindex=0][aria-labelledby]` around each `table`; `.cell--grow`
 marks the column that takes the remaining width (the version title, the file path).
+
+Lists and tables carry their roles explicitly (`role=list`; `table`, `rowgroup`, `row`, `columnheader`, `cell`):
+Safari drops list semantics without list markers, and browsers may drop table semantics when the narrow layout
+changes a table's `display`.
 
 Penpot draws a container's stroke inside its box, and CSS draws a border outside the padding, so content inside a
 bordered container sits one pixel further in. The nav tab subtracts its border from its padding, because its size is
@@ -81,7 +85,8 @@ part of the design; the other containers keep the one pixel.
 - **Archived rows** end their meta line with the reason: `archived by hand` or `archived: no updates for N days`.
 - **Narrow widths.** `main` keeps a `space.4` gutter. Under 36rem of the list's width an artifact row puts its open link
   under the summary; under 36rem of a table's own width (`.data-table` is the query container) the table becomes one
-  card per row, without the header row, each cell prefixed by its `data-label`.
+  card per row, each cell prefixed by its `data-label`. The header row is hidden visually but stays for screen readers,
+  and the prefix is hidden from them.
 - **Times** are UTC, `YYYY-MM-DD HH:MM`, in `<time datetime="YYYY-MM-DDTHH:MM:00Z">`; list rows show a relative time
   (`2 hours ago`) with the same `datetime`.
 - **Focus.** Links and the scrollable table regions show `focus.width` of `color.focus` on `:focus-visible`.
