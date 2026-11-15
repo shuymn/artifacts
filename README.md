@@ -3,7 +3,11 @@
 A personal, self-hosted artifact host on Cloudflare Workers: AI agents publish HTML pages and their files over MCP,
 a REST API or a CLI, and each artifact is served from its own origin behind Cloudflare Access.
 
-Status: under construction. The design is in [docs/design.md](docs/design.md) once it lands.
+Status: under construction.
+
+- [Design](docs/design.md): purpose, principles, decisions and acceptance criteria
+- [Threat model](docs/threat-model.md): assets, adversaries and security invariants
+- [Decisions](docs/decisions.md): libraries and code patterns
 
 ## Development
 
