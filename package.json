@@ -9,7 +9,8 @@
     "fmt": "oxfmt --check",
     "fmt:fix": "oxfmt",
     "typecheck": "pnpm -r --no-bail run typecheck",
-    "test": "pnpm -r --no-bail run test"
+    "test": "pnpm -r --no-bail run test",
+    "github-app": "node scripts/github-app.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.4",
