@@ -1,0 +1,17 @@
+// The Worker's public configuration. Bindings are added as the design decides them.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "artifacts",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-10",
+  // The Worker is reached only on its routes: no workers.dev URL and no preview URLs.
+  "workers_dev": false,
+  "preview_urls": false,
+  // Console output is kept. Invocation logs are off: they record the request, and API requests carry bearer tokens in
+  // their Authorization header.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "invocation_logs": false },
+  },
+}
