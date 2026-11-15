@@ -16,6 +16,7 @@ import { createServer } from "node:http";
 import { parseArgs } from "node:util";
 
 const TIMEOUT_MS = 10 * 60 * 1000;
+const GH_TIMEOUT_MS = 60 * 1000;
 const PERMISSIONS = { contents: "write", pull_requests: "write" };
 
 function fail(message) {
@@ -23,8 +24,17 @@ function fail(message) {
   process.exit(1);
 }
 
+// gh's HTTP debugging (GH_DEBUG=api) would print the conversion response, private key included, so it is turned off.
+const { GH_DEBUG: _ghDebug, DEBUG: _debug, ...GH_ENV } = process.env;
+
 function gh(args, input) {
-  const result = spawnSync("gh", args, { encoding: "utf8", input, stdio: ["pipe", "pipe", "inherit"] });
+  const result = spawnSync("gh", args, {
+    encoding: "utf8",
+    env: GH_ENV,
+    input,
+    stdio: ["pipe", "pipe", "inherit"],
+    timeout: GH_TIMEOUT_MS,
+  });
   if (result.status !== 0) fail(`gh ${args.slice(0, 2).join(" ")} failed`);
   return result.stdout;
 }
@@ -82,9 +92,23 @@ const server = createServer((request, response) => {
     done = true;
     const app = JSON.parse(gh(["api", "-X", "POST", `app-manifests/${code}/conversions`]));
     const target = `${repo.owner.login}/${repo.name}`;
-    gh(["variable", "set", "APP_CLIENT_ID", "--repo", target, "--body", app.client_id]);
+    console.log(`Created ${app.html_url}`);
+    // The browser may be signed in to another account, which would own the App and could not be installed here.
+    if (app.owner?.login !== repo.owner.login) {
+      fail(
+        `the App belongs to ${app.owner?.login}, not ${repo.owner.login}; delete it and run again signed in as the owner`,
+      );
+    }
+    for (const [permission, access] of Object.entries(PERMISSIONS)) {
+      if (app.permissions?.[permission] !== access)
+        fail(`the App lacks ${permission}: ${access}; delete it and run again`);
+    }
+    // The secret goes first: if it fails, both values still name the previous App; if the variable then fails, rerunning
+    // `gh variable set APP_CLIENT_ID` with the client ID below completes the pair.
     gh(["secret", "set", "APP_PRIVATE_KEY", "--repo", target], app.pem);
-    console.log(`Created ${app.html_url} and set APP_CLIENT_ID and APP_PRIVATE_KEY on ${target}.`);
+    console.log(`Set APP_PRIVATE_KEY on ${target}; the App's client ID is ${app.client_id}.`);
+    gh(["variable", "set", "APP_CLIENT_ID", "--repo", target, "--body", app.client_id]);
+    console.log(`Set APP_CLIENT_ID on ${target}.`);
     const install = `https://github.com/apps/${app.slug}/installations/new`;
     response.writeHead(302, { location: install }).end();
     console.log(`Install it with "Only select repositories" set to ${repo.name}: ${install}`);
