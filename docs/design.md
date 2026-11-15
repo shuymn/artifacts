@@ -1,353 +1,300 @@
 # Design
 
 What `artifacts` is for, the principles every decision is measured against, the decisions, and the acceptance criteria
-that say when the first release is done. Security invariants are in [threat-model.md](threat-model.md) (IDs such as
-`ISO-2`); libraries and code patterns are in [decisions.md](decisions.md).
+that say when the first release is done. Security invariants (IDs such as `ISO-2`) are in
+[threat-model.md](threat-model.md); libraries and code patterns are in [decisions.md](decisions.md).
 
 ## Purpose
 
 AI agents (Claude, Codex, Gemini CLI, scripts) publish HTML pages with their CSS, JavaScript and images to a host the
 owner runs on Cloudflare. The owner opens each page in a browser at its own origin. Every update is a new version, and
-earlier versions stay viewable. A gallery lists everything. An artifact can be shared through a public link.
+earlier versions stay viewable. A gallery lists everything, with old artifacts archived out of its default list. An
+artifact can be shared through a public link.
 
 One person deploys and uses a deployment. It is not a multi-tenant or open service.
 
 ## Principles
 
-| ID  | Principle                                                                                                                                                                                                                                                                                                                                                                                   |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1  | **One owner.** Every legitimate caller is the owner or an agent the owner gave a token. Defenses target three things: a page an agent wrote that is buggy or prompt-injected, a leaked API token, and outsiders reaching the hosts. Nothing is built against untrusted users (quotas, rate limits, tenant separation). A safe default is taken when it is cheap; it is never a requirement. |
-| P2  | **Each artifact is its own origin.** Artifact JavaScript reads its own files and storage and nothing else this host serves.                                                                                                                                                                                                                                                                 |
-| P3  | **Browsers only read.** Every change goes through the API with a bearer token. No request authenticated by a cookie changes anything.                                                                                                                                                                                                                                                       |
-| P4  | **A version never changes, and a publish is all or nothing.**                                                                                                                                                                                                                                                                                                                               |
-| P5  | **One operation layer.** REST, MCP and the CLI are adapters over the same operations, input schemas and error codes.                                                                                                                                                                                                                                                                        |
-| P6  | **The platform before own code, and the simpler option** when the risk the other guards against needs an untrusted user.                                                                                                                                                                                                                                                                    |
-| P7  | **Deployment values stay out of the repository.** Hosts, account, database and bucket identifiers live in a gitignored file.                                                                                                                                                                                                                                                                |
+| ID  | Principle                                                                                                                                                                                                                                                                                                                                                           |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | **One owner.** Every legitimate caller is the owner or an agent the owner gave a token. Defenses target a page an agent wrote that is buggy or prompt-injected, a leaked API token, and outsiders reaching the hosts. Nothing is built against untrusted users (quotas, rate limits, tenants). A safe default is taken when it is cheap; it is never a requirement. |
+| P2  | **Each artifact is its own origin.** Artifact JavaScript reads its own files and storage and nothing else this host serves.                                                                                                                                                                                                                                         |
+| P3  | **Browsers only read.** Every change goes through the API with a bearer token; no request authenticated by a cookie changes anything.                                                                                                                                                                                                                               |
+| P4  | **A stored version never changes, and a publish is all or nothing.**                                                                                                                                                                                                                                                                                                |
+| P5  | **One operation layer.** REST, MCP and the CLI are adapters over the same operations and operation error codes.                                                                                                                                                                                                                                                     |
+| P6  | **The platform before own code, and the simpler option** when the risk the other guards against needs an untrusted user.                                                                                                                                                                                                                                            |
+| P7  | **Deployment values stay out of the repository.**                                                                                                                                                                                                                                                                                                                   |
 
-A side effect the design accepts states what is not lost and why; one that cannot is not accepted
-([Accepted side effects](#accepted-side-effects)).
+A restriction stays only with a reason tied to the purpose or to an implementation bound. A side effect a decision
+accepts is stated where the decision is, with what is not lost.
 
 ## Overview
 
-One Worker serves every host. D1 holds metadata, R2 holds file bytes.
+One Worker serves every host on Workers Paid. D1 holds metadata, R2 holds file bytes.
 
-| Host                                     | Example                      | Serves                                | Authenticated by                    |
-| ---------------------------------------- | ---------------------------- | ------------------------------------- | ----------------------------------- |
-| `APP_HOST`                               | `artifacts.example.com`      | the gallery, read-only                | Access; the Worker verifies the JWT |
-| `API_HOST`                               | `artifacts-api.example.com`  | REST under `/v1/`, MCP at `/mcp`      | bearer API token                    |
-| `<id>` + `CONTENT_HOST_SUFFIX`           | `<id>-p.example-content.net` | one artifact's files                  | Access; the Worker verifies the JWT |
-| `<id>` + `PUBLIC_HOST_SUFFIX` (optional) | `<id>-s.example-content.net` | one artifact's files, if it is public | none                                |
+| Host                           | Example                     | Serves                                | Authenticated by                    |
+| ------------------------------ | --------------------------- | ------------------------------------- | ----------------------------------- |
+| `APP_HOST`                     | `artifacts.example.com`     | the gallery, read-only                | Access; the Worker verifies the JWT |
+| `API_HOST`                     | `artifacts-api.example.com` | REST under `/v1/`, MCP at `/mcp`      | bearer API token                    |
+| `<id>` + `CONTENT_HOST_SUFFIX` | `<id>-art.example.com`      | one artifact's files                  | Access; the Worker verifies the JWT |
+| `<id>` + `PUBLIC_HOST_SUFFIX`  | `<id>-pub.example.com`      | one artifact's files, if it is public | none                                |
 
 ## 1. Hosts and origins
 
-**Hosts are deployment values.** `APP_HOST`, `API_HOST`, `CONTENT_HOST_SUFFIX` and the optional `PUBLIC_HOST_SUFFIX`.
-An artifact's host is its ID followed by a suffix. IDs have a fixed length of 26 characters (section 2), so the Worker
-classifies a host by exact comparison: it is `APP_HOST`, `API_HOST`, or its first 26 characters are a valid ID and the
-rest equals one of the suffixes. Any other host answers 404 without touching storage (HOST-1).
-
-A suffix has one of two forms, and both keep the artifact host a first-level subdomain:
-
-- `.domain`: `<id>.example-content.net`;
-- `-label.domain`: `<id>-p.example-content.net`, or `<id>-art.example.com` on a domain that also hosts other services.
-
-The configuration check (HOST-2) refuses a public suffix that ends with the content suffix (the content Access
-wildcard would then cover public hosts), an app or API host that ends with either suffix, and a label part longer than
-37 characters (26 + 37 = 63, the DNS label limit).
+Hosts are deployment values. An artifact's host is its ID followed by a suffix; IDs have a fixed length of 26
+characters, so the Worker classifies a host by exact comparison: `APP_HOST`, `API_HOST`, or a valid ID followed by
+exactly one of the suffixes. Anything else answers 404 without touching storage (HOST-1). A suffix is `-label.domain`
+or `.domain`; either keeps the artifact host a first-level subdomain. The configuration check refuses values that would
+weaken a boundary (HOST-2).
 
 ### Layouts
 
-| Setting               | Recommended: content on its own registrable domain               | One domain the owner already uses                          |
-| --------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------- |
-| `APP_HOST`            | `artifacts.example.com` (Workers Custom Domain)                  | `artifacts.example.com` (Workers Custom Domain)            |
-| `API_HOST`            | `artifacts-api.example.com` (Workers Custom Domain)              | `artifacts-api.example.com` (Workers Custom Domain)        |
-| `CONTENT_HOST_SUFFIX` | `-p.example-content.net`                                         | `-art.example.com`                                         |
-| `PUBLIC_HOST_SUFFIX`  | `-s.example-content.net`                                         | `-pub.example.com`                                         |
-| Workers Routes        | `*.example-content.net/*`                                        | `*-art.example.com/*`, `*-pub.example.com/*`               |
-| DNS                   | proxied wildcard record `*.example-content.net`                  | proxied wildcard record `*.example.com`                    |
-| Access applications   | app: `artifacts.example.com`; content: `*-p.example-content.net` | app: `artifacts.example.com`; content: `*-art.example.com` |
+Both layouts are supported deployments; they differ in what shares a registrable domain with artifact pages.
 
-The `-p` label on the dedicated domain lets public hosts be added later without changing any private origin; an owner
-who never wants public links can use `.example-content.net`. Changing a suffix later moves every artifact to a new
-origin (its storage stays behind), so the suffixes are chosen once.
+| Setting                | One domain the owner already uses             | Content on its own registrable domain               |
+| ---------------------- | --------------------------------------------- | --------------------------------------------------- |
+| `APP_HOST`, `API_HOST` | Workers Custom Domains on `example.com`       | Workers Custom Domains on `example.com`             |
+| `CONTENT_HOST_SUFFIX`  | `-art.example.com`                            | `-p.example-content.net`                            |
+| `PUBLIC_HOST_SUFFIX`   | `-pub.example.com`                            | `-s.example-content.net`                            |
+| Workers Routes         | `*-art.example.com/*`, `*-pub.example.com/*`  | `*.example-content.net/*`                           |
+| DNS                    | proxied wildcard record `*.example.com`       | proxied wildcard record `*.example-content.net`     |
+| Access applications    | app: `APP_HOST`; content: `*-art.example.com` | app: `APP_HOST`; content: `*-p.example-content.net` |
+| Same site as pages     | the owner's other services on `example.com`   | other artifacts only                                |
 
-Reasons:
+- **Certificates:** Universal SSL covers first-level subdomains only
+  ([limitations](https://developers.cloudflare.com/ssl/edge-certificates/universal-ssl/limitations/)), so the
+  artifact's label carries the suffix instead of a deeper name.
+- **Routes:** Custom Domains take no wildcards
+  ([Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)); a Route takes a
+  leading wildcard with a partial label and needs a proxied DNS record
+  ([Routes](https://developers.cloudflare.com/workers/configuration/routing/routes/)). A label suffix matches only
+  names that end in it, so on a shared domain it captures none of the owner's other hosts as long as none uses that
+  ending; no negation routes are needed.
+- **DNS on a shared domain:** DNS wildcards cover whole labels, so the zone gets a proxied `*` record. Every name with
+  its own record resolves as before; only names without one reach Cloudflare and get an error instead of NXDOMAIN.
+- **Access:** a self-hosted application takes a partial-label wildcard and one AUD tag
+  ([application paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/)); two
+  applications keep the app and content audiences apart and work across zones.
 
-- **Certificates.** Universal SSL covers the apex and first-level subdomains only; `<id>.art.example.com` would need
-  Advanced Certificate Manager or a certificate per host
-  ([Universal SSL limitations](https://developers.cloudflare.com/ssl/edge-certificates/universal-ssl/limitations/)).
-  Both suffix forms stay first-level.
-- **Routes, not Custom Domains, for content.** Custom Domains do not take wildcards
-  ([Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)); one per artifact
-  would put a Cloudflare API credential in the Worker and wait for a certificate on every create. A Route takes a
-  leading wildcard, including a partial label (`*-art.example.com/*`), and needs a proxied DNS record
-  ([Routes](https://developers.cloudflare.com/workers/configuration/routing/routes/)).
-- **Not capturing other services.** On a shared domain, `*.example.com/*` would capture every proxied host of the
-  owner's other services that has no more specific route. Negation routes (a route without a Worker per other host)
-  would have to follow every service the owner adds. A label suffix matches only names that end in it, so it captures
-  nothing as long as no other host uses that ending.
-- **Access.** A self-hosted Access application accepts a wildcard with a partial label and several hostnames, with one
-  AUD tag per application ([application paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/)).
-  Two applications, app and content, keep the audiences apart and allow the hosts to sit in different zones.
+### Cookies and what artifact JavaScript can reach
 
-### Cookies and same-site requests
+Artifact JavaScript can set a cookie for its host's parent domain, which every host under it then receives, and its
+requests to hosts of the same registrable domain are same-site. In the shared-domain layout that reaches the owner's
+other services; the threat model's accepted risk states the conditions under which this holds. This deployment's own
+protections hold in both layouts: the gallery and the API read no cookie (ACC-1, TOK-1), nothing changes state on a
+cookie (ISO-3), and nothing private can be read or embedded across origins (ISO-2).
 
-Artifact JavaScript can set a cookie for the parent domain of its host, and browsers send it to every host under that
-domain; requests between hosts of one registrable domain are same-site, so `SameSite` does not separate them.
-
-- **Content on its own registrable domain (recommended).** The parent domain holds only artifact hosts. A page can at
-  worst disturb another artifact host's Access cookie, which costs a sign-in redirect until the cookie is cleared. The
-  app and API hosts are another site.
-- **One shared domain.** Everything this host protects still holds: the gallery and the API never read a cookie
-  (ACC-1, TOK-1), nothing changes state on a cookie (ISO-3), and no response allows a cross-origin read (ISO-2). What is
-  given up concerns the owner's other services on that domain: a page can toss cookies into them, its requests to them
-  are same-site, and a page published with a leaked token sits on the owner's main domain (its reputation, Safe
-  Browsing). A page can also break Access sign-in on the app host until cookies are cleared. The threat model lists
-  these as an accepted risk with the condition under which it holds.
-
-### What artifact JavaScript can reach
-
-| Target                                   | Can                                                        | Cannot                                         |
-| ---------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------- |
-| Its own files, all versions              | read (same origin)                                         | change them                                    |
-| Its own storage, cookies, service worker | everything; versions share them                            | reach another artifact's                       |
-| Other artifact hosts, the gallery        | send GET requests (the owner's Access cookie may go along) | read a response (no CORS, ISO-2); change state |
-| The API                                  | send requests without a token                              | authenticate (tokens never reach a browser)    |
-| Its host's `CF_Authorization` cookie     | —                                                          | read it (HttpOnly, ACC-3)                      |
-| The internet                             | anything a web page can do                                 | —                                              |
-
-The gallery stays read-only for this reason: with no cookie-authenticated write anywhere, a page has nothing to forge.
+| Target                                   | Can                                                    | Cannot                                         |
+| ---------------------------------------- | ------------------------------------------------------ | ---------------------------------------------- |
+| Its own files, all versions              | read                                                   | change them                                    |
+| Its own storage, cookies, service worker | everything; all versions share them                    | reach another artifact's                       |
+| Other artifact hosts, the gallery        | send requests (the owner's Access cookie may go along) | read or embed a response (ISO-2); change state |
+| The API                                  | send requests without a token                          | authenticate                                   |
+| Its host's `CF_Authorization` cookie     | —                                                      | read it (ACC-3)                                |
 
 ### Local development
 
-Hosts such as `app.localhost:8787`, `api.localhost:8787` and the suffix `-p.localhost:8787` come from `.dev.vars`
-(gitignored; an example file is committed). Access verification is skipped only when every configured host is a
-`localhost` name; the configuration check refuses a mix of `localhost` and other hosts, and the deployment script
-refuses `localhost` hosts and ports (ACC-2). There is no switch that turns Access off and could be copied into a
-deployment. Chrome and Firefox resolve `*.localhost` to the loopback address.
+Hosts such as `app.localhost:8787` and the suffix `-art.localhost:8787` come from `.dev.vars`. Access verification is
+skipped only when every configured host is a `localhost` name, and the deployment script refuses `localhost` hosts
+(ACC-2); no switch exists that could be copied into a deployment.
 
 ## 2. Artifact identity
 
-- **ID:** 26 characters from `a-z2-7` (the RFC 4648 base32 alphabet, lowercase), each from 5 bits of a byte from
-  `crypto.getRandomValues`: 130 bits. It is a valid DNS label (no dot or hyphen) and long enough that a public link
-  cannot be guessed. An ID is never reused: deleting an artifact keeps its row as a tombstone, and the primary key
-  refuses an ID that ever existed (ISO-1). A reused ID would inherit the old origin's storage, cookies and service
-  worker in the owner's browser.
-- **Rejected:** UUIDs (36 characters for 122 bits), ULIDs (the time prefix lowers the unguessable part), short IDs (a
-  public link must not be guessable).
-- **Title:** required when creating, 1 to 200 code points, no control characters. **Description:** 0 to 2000 code
-  points, no control characters except line feed. Both belong to a version; the artifact shows its latest version's. An
-  update that omits them keeps the base version's.
+- **ID:** 26 characters from `a-z2-7` (RFC 4648 base32, lowercase), each from 5 bits of a byte of
+  `crypto.getRandomValues`: 130 bits, a valid DNS label, and not guessable from a public link. Deleting keeps a
+  tombstone row, so an ID is never reused and no new artifact inherits an old origin's state (ISO-1).
+- **Title:** one line (no control characters), at most 1 KiB of UTF-8: lists show it on one line.
+- **Description:** any text, tabs and line breaks included, at most 16 KiB of UTF-8: a listing carries it for up to 100
+  artifacts.
+- Both belong to a version; the artifact shows its latest version's. An update that omits them keeps the base's.
 
 ## 3. Data model and storage
 
-**D1 for metadata, R2 for bytes.**
-
 | Table           | Columns                                                                                                    | Keys                                                       |
 | --------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `artifacts`     | `id`, `created_at`, `updated_at`, `latest_version`, `public`, `deleted_at`                                 | primary `id`                                               |
+| `artifacts`     | `id`, `created_at`, `updated_at`, `latest_version`, `public`, `archive`, `deleted_at`                      | primary `id`                                               |
 | `versions`      | `artifact_id`, `number`, `created_at`, `published_by`, `title`, `description`, `file_count`, `total_bytes` | primary (`artifact_id`, `number`); foreign `artifact_id`   |
 | `version_files` | `artifact_id`, `number`, `path`, `sha256`, `size`, `content_type`                                          | primary (`artifact_id`, `number`, `path`); foreign version |
 
-A file's bytes are the R2 object `a/<id>/<sha256 hex>`. Equal bytes are stored once across the versions of one
-artifact; no object is shared between artifacts, so deleting an artifact deletes its prefix without checking
-references (VER-4).
+`updated_at` is the time of the latest version, set as `MAX(now, updated_at)` so it never decreases. A file's bytes
+are the R2 object `a/<id>/<sha256 hex>`: equal bytes are stored once per artifact, and no object is shared between
+artifacts, so deleting an artifact deletes its prefix without reference checks (VER-4).
 
-| Concern       | D1 + R2                                                                                                                                        | One SQLite Durable Object (+ R2)                       |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| Atomic commit | `batch()` is one transaction; a failing statement rolls back the sequence ([D1](https://developers.cloudflare.com/d1/worker-api/d1-database/)) | `transactionSync`                                      |
-| Concurrency   | primary keys and conditioned statements detect a conflict                                                                                      | the object serializes requests                         |
-| Code          | the Worker uses the binding directly                                                                                                           | an RPC class and migrations inside the object          |
-| Recovery      | Time Travel, 30 days on Workers Paid ([Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/))                              | point-in-time recovery                                 |
-| Fit           | request and response only                                                                                                                      | its strengths (WebSockets, hibernation, alarms) unused |
+D1 rather than a SQLite Durable Object: `batch()` is one transaction that a failing statement rolls back
+([D1 API](https://developers.cloudflare.com/d1/worker-api/d1-database/)), foreign keys are enforced by default
+([foreign keys](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)), and the keys detect what the object's
+serialization would prevent. Nothing here needs a long-lived object.
 
-D1 is chosen: the one thing the object would add, serialization, is replaced by the keys, and nothing here needs a
-long-lived object. Foreign keys are enforced by default
-([foreign keys](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)).
+### Publish
 
-### Publish sequence
-
-1. Authenticate, then validate the whole input (bounds, paths, the merged file list, the entry file) before any write.
+1. Authenticate, then validate the whole input, including the merged file list and `index.html`, before any write.
 2. On an update, read the base version's file list.
-3. For each provided file, compute the SHA-256 of its bytes. If the base version already has that hash, skip the
-   upload; otherwise `put` it at `a/<id>/<sha256>`, passing the hash as R2's integrity check. Uploads run a few at a
-   time, each with a timeout (RES-2).
-4. Commit in one D1 batch: the artifact row (inserted on create; on update, `latest_version` advanced from
-   `base_version` only while the artifact is live), the version row, and every `version_files` row, provided and kept.
-   Each statement after the first is conditioned on the artifact row having been advanced, and the primary and foreign
-   keys back the conditions. A conflict shows as no advanced row or a key violation, and the whole batch rolls back.
+3. Hash each provided file (SHA-256) and deduplicate by hash. For each hash the base does not reference, `head` its
+   key; a missing object is `put`, at most six at a time. An existing object is already correct, being
+   content-addressed. R2 accepts one write per second per key and answers others with 429
+   ([R2 limits](https://developers.cloudflare.com/r2/platform/limits/)), so a rate-limited `put` is retried twice after
+   a second and then fails the publish. Each R2 call has a timeout (RES-2). No locks.
+4. Commit in one D1 batch: the artifact row (inserted on create; on update, advanced from `base_version` while the
+   artifact is live), the version row and every `version_files` row, provided and kept, each statement after the first
+   conditioned on the advanced row and backed by the keys. A conflict leaves no advanced row or violates a key, and the
+   batch rolls back. The commit has no timeout of its own, because a commit that timed out could still apply; D1 bounds
+   a batch at 30 s ([D1 limits](https://developers.cloudflare.com/d1/platform/limits/)).
 5. Answer with the artifact and the new version.
 
-| Event                                          | What it leaves                                                                                                                                                                                                                                                              |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Validation fails                               | nothing                                                                                                                                                                                                                                                                     |
-| An upload fails or times out; the commit fails | no version; uploaded objects under the artifact's prefix that nothing references. On create the Worker deletes them, best effort: the ID is new, so no other request uses them. On update it deletes nothing, because a concurrent publish may have committed the same hash |
-| Two updates from the same base                 | one version; the other request answers `version_conflict` with `latest_version`                                                                                                                                                                                             |
-| Delete while an update is in flight            | the delete commits the tombstone and removes the rows, then deletes the prefix; the update's commit finds no live artifact and answers `not_found`; objects it uploaded after the prefix was deleted stay                                                                   |
-| The delete's prefix deletion stops part-way    | no rows; the remaining objects stay                                                                                                                                                                                                                                         |
+| Event                                                   | Result                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Validation fails                                        | nothing written                                                                                                                                                                                                                                                                                                                                                                            |
+| An upload fails or times out; the batch rolls back      | no version; uploaded objects stay under the prefix, referenced by nothing. Nothing deletes them: a concurrent publish may have committed the same hash                                                                                                                                                                                                                                     |
+| Two updates from the same base                          | one version; the other answers `version_conflict` with `latest_version`                                                                                                                                                                                                                                                                                                                    |
+| A delete while an update is in flight                   | the update's commit finds no live artifact and answers `not_found`                                                                                                                                                                                                                                                                                                                         |
+| The agent loses the response (disconnect, cancellation) | the commit may or may not have applied. A lost **update** is reconciled by `base_version`: a retry answers `version_conflict` if the first applied, and `get_artifact` shows whose version is latest. A lost **create** retried blindly makes a second artifact; the MCP instructions and the CLI tell the agent to list first. A duplicate loses nothing and is deleted like any artifact |
 
-Unreferenced objects are never served: serving goes through `version_files`. They are an accepted side effect.
+Unreferenced objects are never served, since serving reads `version_files`; they cost storage until the artifact is
+deleted.
 
-## 4. Versioning and updates
+## 4. Versions
 
-- Every publish creates version `n + 1`; creating an artifact creates version 1. A committed version never changes
-  (VER-1). The latest version is the highest number.
-- **Update input:** `base_version` (required), `files` (each replaces or adds a path), `remove` (paths), and optionally
-  `title` and `description`. Every base file that is neither provided nor removed is kept. A path both provided and
-  removed, or a removed path the base does not have, is refused: both are agent mistakes worth reporting.
-- **Departure from a `null` per path:** removals are a `remove` list. A multipart REST request cannot carry `null` for
-  a file part, and one shape then serves both adapters; the semantics are the same.
-- **Optimistic concurrency:** an update whose `base_version` is not the latest answers 409 `version_conflict` with
-  `latest_version`, and commits nothing (VER-3). The agent reads the latest and retries on top of it.
-- **Addressing:** the latest version at `/`, version `n` at `/_v/<n>/`. All versions share the artifact's origin, so
-  the page's own state survives updates. Pages must link between their files with relative URLs (`style.css`,
-  `img/a.png`); a root-relative URL (`/style.css`) loads the latest version's file from a pinned page. The MCP
-  instructions state this rule.
-- **Rejected: a host per version.** It would split storage per version (state lost on every update), add an Access
-  redirect for every new host, and lengthen labels; what it buys is that root-relative URLs work in old versions.
-- **Entry file:** `index.html` at the root, required in every version. A request for `dir/` serves `dir/index.html`.
-- **Pruning** is not in the first release. Objects are shared between versions of an artifact, so removing one safely
-  needs reference checks that race with publishes; deleting the whole artifact removes everything.
+- Every publish creates version `n + 1`; creating creates version 1. The **version history** is the history of stored
+  bytes and metadata, which never change (VER-1).
+- **Update input:** `base_version` (required), `files` (each replaces or adds a path), `remove` (paths), optional
+  `title` and `description`; every other base file is kept. A path both provided and removed, or a removed path the
+  base lacks, is refused. Removals are a list rather than `null` per path because a multipart part cannot be `null`.
+- An update whose `base_version` is not the latest answers 409 `version_conflict` with `latest_version` and commits
+  nothing (VER-3).
+- **Addressing:** the latest version at `/`, version `n` at `/_v/<n>/`. All versions share the artifact's origin, so a
+  page's own state survives updates; that state (storage, service worker) also spans versions and can change what an
+  old version shows in a browser that has it. A host per version would split that state on every update.
+- **Authoring rule**, in the same words in the MCP instructions, the CLI help and the REST reference (section 8): _Link
+  between an artifact's files with relative URLs (`style.css`, `img/logo.png`). A root-relative or absolute link to
+  the artifact's own host loads the latest version's file when an older version is viewed._
+- **Entry file:** `index.html` at the root, in every version (the Claude Artifacts convention). A version without it is
+  refused with the message "every version needs index.html at its root" in every adapter.
+- **Pruning** is not in the first release: objects are shared between versions, so removing one races with publishes.
 
-## 5. Files and serving
+## 5. Archive
+
+An artifact is **archived** when its `archive` setting is `archived`, or when the setting is unset (`null`) and its
+latest version is older than `ARCHIVE_AFTER_DAYS` (a deployment value, for example 30). The setting `kept` keeps it out
+of the archive regardless of age.
+
+- Set through `PATCH /v1/artifacts/{id}` with `{ "archive": "archived" | "kept" | null }`, the MCP tool `set_archive`,
+  or `artifacts archive <id> on|off|auto`.
+- An artifact exposes `archived` (bool) and `archive` (the setting); `archived` with `archive: null` means age decided.
+- Listings take `archived=exclude` (the default), `only` or `include`; the gallery's default list excludes archived
+  artifacts and `/archived` shows them.
+- Archiving moves nothing in storage, creates no version, and leaves every URL, the public flag and the history as
+  they are.
+
+## 6. Files and serving
 
 ### Paths
 
-| Rule          | Value                                                                                                |
-| ------------- | ---------------------------------------------------------------------------------------------------- |
-| Form          | relative, segments separated by `/`; no leading or trailing `/`, no empty segment                    |
-| Segments      | not `.` or `..`, not starting with `.`; the first segment is not `_v` (reserved for pinned versions) |
-| Characters    | Unicode scalar values except C0 and C1 controls, `\`, `?`, `#` and `%`                               |
-| Normalization | stored in NFC; input is normalized, then checked for duplicates                                      |
-| Case          | case-sensitive                                                                                       |
-| Length        | path at most 512 UTF-8 bytes; segment at most 255 UTF-8 bytes                                        |
-| Count         | at most 1000 files per version                                                                       |
+| Rule          | Value and reason                                                                                                                                                  |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Form          | relative, `/`-separated, no leading or trailing `/`, no empty segment: Cloudflare merges adjacent slashes in requests, and a trailing `/` names a directory index |
+| Segments      | not `.` or `..`, which URL parsing and Cloudflare's normalization remove before a request arrives; the first segment is not `_v`, which pinned versions use       |
+| Characters    | any Unicode scalar value except NUL, which SQLite's string functions treat as an end; `%`, `#` and `?` are allowed and linked percent-encoded                     |
+| Normalization | stored and looked up in NFC: macOS file names can arrive in NFD while pages name files in NFC                                                                     |
+| Case          | case-sensitive                                                                                                                                                    |
+| Length        | at most 1 KiB of UTF-8: the whole file list is loaded on every update and returned by `get`, so 2000 paths stay near 2 MiB                                        |
 
-`?` and `#` would make a file unreachable by a relative link; `%` would need a second decoding step to name. Segments
-starting with `.` keep files such as `.env` or `.git/` out by accident and keep `/.well-known/` free.
-
-A request path is resolved by splitting the raw path on `/`, percent-decoding each segment strictly (malformed escapes,
-invalid UTF-8 or a decoded character the rules forbid answer 404, so `%2F` never becomes a separator), normalizing to
-NFC, and adding `index.html` after a trailing `/` (SRV-2). A path that names a directory with an `index.html` but no
-file of its own answers 308 to the same path with a trailing `/`, so that relative links resolve inside it. `/_v/<n>`
-redirects to `/_v/<n>/` the same way; `<n>` is a canonical decimal (no leading zero) of an existing version.
+A request is resolved from the pathname the Worker receives, after URL parsing and Cloudflare's normalization have
+removed dot segments and merged slashes
+([URL normalization](https://developers.cloudflare.com/rules/normalization/how-it-works/)): split on `/`, decode each
+segment once with strict percent-decoding (a malformed escape or invalid UTF-8 answers 404; an encoded `/` answers
+404), normalize to NFC, add `index.html` after a trailing `/`, and look the path up in the selected version only
+(SRV-2). A directory with an `index.html` and no file of its own name answers 308 to the path with `/`, and so does
+`/_v/<n>`; `<n>` is a canonical decimal of an existing version.
 
 ### Content types
 
-A file's type is the one given with it, if any: it must parse as `type/subtype` with optional parameters, at most 255
-bytes. Otherwise it is looked up from the extension; text types (`text/*`, JSON, JavaScript, SVG, XML) get
-`; charset=utf-8`, and an unknown extension is `application/octet-stream`. A wrong type breaks the page, nothing else:
-every response has `nosniff`, and the page is alone on its origin.
+The type given with a file, if any (`type/subtype` with parameters, at most 255 bytes); otherwise looked up from the
+extension, with `; charset=utf-8` on text types and `application/octet-stream` for unknown extensions.
 
 ### Limits
 
-These bounds catch agent mistakes and keep requests within the platform's limits; they are not quotas (P1).
+| Bound                                | Value                | Reason                                                                                                                                                                                                                                        |
+| ------------------------------------ | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| REST publish request body            | 32 MiB               | `formData()` holds the body in memory; an isolate has 128 MB and may serve several requests at once                                                                                                                                           |
+| MCP request body                     | 4 MiB                | the SDK's default; large binaries go through REST                                                                                                                                                                                             |
+| Files per version and per request    | 2000                 | each new file costs up to four R2 calls (`head`, `put`, two retries) against 10,000 subrequests per invocation ([limits](https://developers.cloudflare.com/workers/platform/limits/)); equal bounds let any version be created in one request |
+| Path, title, description             | 1 KiB, 1 KiB, 16 KiB | above                                                                                                                                                                                                                                         |
+| File content returned by `read_file` | 1 MiB                | tool results go into the model's context                                                                                                                                                                                                      |
+| Page size of a listing               | 1 to 100, default 50 | response size                                                                                                                                                                                                                                 |
 
-| Bound                                | Value                      | Reason                                                                                      |
-| ------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------- |
-| File size                            | 25 MiB                     | images, fonts and scripts fit; larger media is not an HTML artifact's asset in this release |
-| Files per version                    | 1000                       | `version_files` rows written in one commit; one gallery page lists them                     |
-| REST publish request body            | 32 MiB                     | the multipart body is held in memory while it is read (128 MB per isolate)                  |
-| MCP request body                     | 4 MiB                      | the SDK's default; base64 makes binary content 4/3 as large                                 |
-| File content returned by `read_file` | 1 MiB                      | tool results go into the model's context                                                    |
-| Title / description                  | 200 / 2000 code points     | section 2                                                                                   |
-| Page size of a listing               | 1 to 100 items, default 50 |                                                                                             |
-
-The request body is counted as it is read, so a body without `Content-Length` stops at the bound (RES-1). There is no
-per-artifact or total quota and no limit on the number of versions. Hashing a full REST request exceeds the Free plan's
-10 ms of CPU, so the Worker runs on Workers Paid ([limits](https://developers.cloudflare.com/workers/platform/limits/)).
+A file's size is bounded by the request it travels in. The body is counted as it is read (RES-1). There is no quota and
+no limit on versions.
 
 ### How bytes travel
 
-- **MCP:** JSON tool arguments. Each file is `{ path, content, encoding, content_type? }`, with `encoding` `"utf8"`
-  (the default; the string must be well-formed Unicode) or `"base64"` (RFC 4648 with padding, no whitespace).
-- **REST:** `multipart/form-data`. A `meta` part holds the JSON input without file contents; `meta.files[n]` gives the
-  path and optional type of the n-th part named `file`, whose bytes are taken as they are. Part file names and part
-  types are ignored, so no path or type depends on how a client encodes a part header.
-- Both adapters produce the same operation input; the operation does not know which one called it (P5).
+- **MCP:** each file is `{ path, content, encoding, content_type? }`, `encoding` `"utf8"` (default; well-formed
+  Unicode) or `"base64"` (RFC 4648 with padding, no whitespace).
+- **REST:** `multipart/form-data`: a `meta` part with the JSON input; `meta.files[n]` gives the path and optional type
+  of the n-th part named `file`. Part names, file names and part types are ignored, so no path depends on how a client
+  encodes a part header.
 
 ### Serving
 
-| Header or behavior     | Latest version (`/…`)                                                              | Pinned version (`/_v/<n>/…`)                                      |
-| ---------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `Content-Type`         | the stored type                                                                    | the stored type                                                   |
-| `ETag`                 | `"<sha256>"` of the file                                                           | `"<sha256>"` of the file                                          |
-| `Cache-Control`        | `private, no-cache` (public host: `no-cache`)                                      | `private, max-age=31536000, immutable` (public host: `public, …`) |
-| Conditional request    | `If-None-Match` answers 304                                                        | `If-None-Match` answers 304                                       |
-| Every content response | `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, no CORS headers |                                                                   |
+- `Content-Type` as stored, `ETag: "<sha256>"`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` (a
+  public host is its share link; a page can set its own policy), no CORS headers (SRV-1, ISO-2).
+- `Cache-Control: private, no-cache` on private hosts and `no-cache` on public hosts, for the latest and pinned versions
+  alike. Access, the public flag and existence are checked before `If-None-Match` answers 304 (SRV-3), so revoking
+  access, making an artifact private or deleting it takes effect on the next request. Immutability belongs to storage,
+  not to the cache.
+- `Cross-Origin-Resource-Policy: same-origin` on every response of a private content host and of the app host,
+  including 304, 308 and 404, so another origin cannot embed private content as a script, image, stylesheet or media
+  with the owner's cookie (ISO-2). Public hosts omit it: their content needs no credential, and other sites may embed
+  it.
+- No `Content-Security-Policy` on artifacts: a page is the agent's code and may load from CDNs.
+- `GET` and `HEAD` only (ISO-3); an unknown file answers a plain 404. `Range` is not supported in the first release,
+  so audio and video cannot seek.
 
-- `no-referrer` keeps a public artifact's host, which is its share link, out of the `Referer` of links and assets; a
-  page can still set its own policy.
-- No `Content-Security-Policy` and no `frame-ancestors` on artifacts: a page is the agent's code, may load from CDNs,
-  and has no action on this host to protect from framing.
-- `GET` and `HEAD` only; other methods answer 405 (ISO-3). An unknown file answers a plain 404. `Range` requests are
-  not supported in the first release, so seeking in audio or video does not work.
+## 7. Auth
 
-## 6. Auth
-
-### API tokens
-
-- A token is `art_` followed by 32 base32 characters (160 bits), generated by a repository script that prints the
-  token once and the entry to add to the secret.
-- The Worker secret `API_TOKENS` is a JSON object from a token name (`[a-z0-9-]{1,32}`, one per agent) to the
-  lowercase hex SHA-256 of the token. A plain hash is enough because the token is random; the secret never holds a
-  token. About 40 entries fit in the 5 KB a variable may hold
-  ([limits](https://developers.cloudflare.com/workers/platform/limits/)).
-- A request's token is hashed and compared with every entry using `crypto.subtle.timingSafeEqual`
-  ([Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)); a match yields the token name,
-  which each version records as `published_by` (TOK-1, TOK-3).
-- Revoking a token is removing its entry and putting the secret again.
-- **Rejected:** tokens in D1 minted through an admin API (a second authority to protect, for one person), and OAuth for
-  MCP (every client in scope takes a static header).
-
-### Access
-
-- Two self-hosted Access applications: the app (`APP_HOST`) and content (`*` + `CONTENT_HOST_SUFFIX`). Each has a
-  policy that admits only the owner, and the `CF_Authorization` cookie set to HttpOnly explicitly, because the
-  documentation states its default inconsistently
+- **API tokens:** `art_` + 32 base32 characters (160 bits), generated by a repository script that prints the token
+  once and its entry. The secret `API_TOKENS` maps a token name (`[a-z0-9-]{1,32}`, one per agent) to the hex SHA-256
+  of the token; a plain hash suffices for a random token, and about 40 entries fit in a 5 KB variable. The Worker
+  compares the hash with every entry using `crypto.subtle.timingSafeEqual`
+  ([Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)); the name becomes the version's
+  `published_by` (TOK-1, TOK-3). Revoking is removing the entry and putting the secret again. OAuth is not used: every
+  client in scope takes a static header.
+- **Access:** two self-hosted applications, app and content, each admitting only the owner, with the
+  `CF_Authorization` cookie set to HttpOnly explicitly because the documented default is inconsistent
   ([authorization cookie](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/)).
-  The cookie is per host; other hosts of the application get one through a redirect without a new sign-in, and a
-  wildcard host cannot get one in advance.
-- The Worker verifies the `Cf-Access-Jwt-Assertion` header on the app and private content hosts, as kopje does: jose,
-  the key set from the team domain's certificate endpoint reused for at most 7 days, RS256, issuer, the audience of that
-  host class, `exp` required, 60 s clock tolerance, a 5 s timeout on fetching keys, and only reason codes on failure
-  (ACC-1). A misconfigured route or Access application then fails closed instead of serving.
-- The Worker does not compare the email: the Access policy is the one place that names the owner, and the audience
-  proves the request passed it.
+  A wildcard host gets its cookie through a redirect on first visit, without a new sign-in. The Worker verifies
+  `Cf-Access-Jwt-Assertion` as kopje does (ACC-1): an invalid JWT answers 403, a key set it cannot fetch answers 503
+  `unavailable`. The Access policy is the one place that names the owner, so the Worker compares no email.
+- **Public links:** every artifact has a `public` flag, off when created and set through the API
+  (`PATCH { "public": bool }`, MCP `set_public`, `artifacts public <id> on|off`). Making an artifact public exposes
+  its latest version and every pinned version on its public host, which serves them with section 6's rules and no
+  Access; a private, deleted or unknown artifact answers the same 404 there (PUB-1).
 
-### Public share links
-
-- An artifact has a `public` flag, set through the API (`PATCH /v1/artifacts/{id}`, MCP `set_public`). It is refused
-  with `public_disabled` when `PUBLIC_HOST_SUFFIX` is not configured.
-- The public host serves a public artifact's latest and pinned versions with the rules of section 5 and no Access.
-  An unknown, private or deleted artifact answers the same 404 (PUB-1). The public host never serves the gallery or the
-  API.
-- A share link follows updates; a pinned URL on the public host shares one version.
-
-## 7. REST API and MCP
+## 8. REST API and MCP
 
 ### Operations
 
-| Operation              | REST                                                           | MCP tool                      | Result                                            |
-| ---------------------- | -------------------------------------------------------------- | ----------------------------- | ------------------------------------------------- |
-| Create                 | `POST /v1/artifacts` (multipart)                               | `create_artifact`             | 201 `{ artifact, version }`                       |
-| Update                 | `POST /v1/artifacts/{id}/versions` (multipart)                 | `update_artifact`             | 201 `{ artifact, version }`                       |
-| List                   | `GET /v1/artifacts?limit=&cursor=`                             | `list_artifacts`              | `{ artifacts, next_cursor }`                      |
-| Get                    | `GET /v1/artifacts/{id}`                                       | `get_artifact`                | `{ artifact, version }`, latest with files        |
-| Get a version          | `GET /v1/artifacts/{id}/versions/{n}`                          | `get_artifact` with `version` | `{ artifact, version }` with files                |
-| List versions          | `GET /v1/artifacts/{id}/versions?limit=&cursor=`               | `list_versions`               | `{ versions, next_cursor }`, without files        |
-| Read a file            | `GET /v1/artifacts/{id}/versions/{n}/files/{path}` (raw bytes) | `read_file`                   | `{ path, content_type, size, encoding, content }` |
-| Make public or private | `PATCH /v1/artifacts/{id}` with `{ "public": bool }`           | `set_public`                  | `{ artifact }`                                    |
-| Delete                 | `DELETE /v1/artifacts/{id}`                                    | `delete_artifact`             | 204, or `{ deleted: id }`                         |
+| Operation       | REST                                                           | MCP tool                    | Result                                            |
+| --------------- | -------------------------------------------------------------- | --------------------------- | ------------------------------------------------- |
+| Create          | `POST /v1/artifacts` (multipart)                               | `create_artifact`           | 201 `{ artifact, version }`                       |
+| Update          | `POST /v1/artifacts/{id}/versions` (multipart)                 | `update_artifact`           | 201 `{ artifact, version }`                       |
+| List            | `GET /v1/artifacts?archived=&limit=&cursor=`                   | `list_artifacts`            | `{ artifacts, next_cursor }`                      |
+| Get             | `GET /v1/artifacts/{id}`, `…/versions/{n}`                     | `get_artifact` (`version?`) | `{ artifact, version }`, the version with files   |
+| List versions   | `GET /v1/artifacts/{id}/versions?limit=&cursor=`               | `list_versions`             | `{ versions, next_cursor }`, without files        |
+| Read a file     | `GET /v1/artifacts/{id}/versions/{n}/files/{path}` (raw bytes) | `read_file`                 | `{ path, content_type, size, encoding, content }` |
+| Public, archive | `PATCH /v1/artifacts/{id}` with `public` and/or `archive`      | `set_public`, `set_archive` | `{ artifact }`                                    |
+| Delete          | `DELETE /v1/artifacts/{id}`                                    | `delete_artifact`           | 204, or `{ deleted: id }`                         |
 
-Inputs:
-
-- **Create:** `title`, `description?`, `files` (at least `index.html`).
-- **Update:** `id`, `base_version`, `title?`, `description?`, `files?`, `remove?`.
-- **Read a file over REST:** `{path}` is resolved like a request path on a content host (section 5).
-- **Read a file over MCP:** `id`, `path`, `version?`. Content is `utf8` when the type is textual and the bytes are
-  valid UTF-8, `base64` otherwise; a file over 1 MiB is refused with the REST URL in the message.
-
-Shapes (timestamps are RFC 3339 in UTC):
+- Create takes `title`, `description?`, `files`; update takes `id`, `base_version`, `title?`, `description?`,
+  `files?`, `remove?`. Pages published through REST follow the authoring rule of section 4, and a lost create response
+  is followed by a listing before another create. A REST `{path}` is resolved like a request path on a content host. `read_file` returns `utf8`
+  for textual, valid UTF-8 content and `base64` otherwise, and refuses a file over 1 MiB, naming the REST URL.
+- **Delete** is logical at once: one batch writes the tombstone and removes the rows, so every URL answers 404. The
+  prefix's objects are then deleted, best effort. A repeated `DELETE` of a tombstoned ID retries that cleanup and
+  answers 204, like the first; an ID that never existed answers 404 (VER-4).
+- **Pagination:** artifacts in `(updated_at DESC, id DESC)` order, versions in `number DESC`. The cursor is opaque and
+  names the last item's key; a malformed cursor is `invalid_request`; the last page has `next_cursor: null`. Traversal
+  is live, not a snapshot: an artifact created, updated, archived or deleted during it can be missed, and since
+  `updated_at` never decreases, none appears twice. New versions appear before the cursor and are not repeated.
 
 ```json
 {
@@ -356,10 +303,12 @@ Shapes (timestamps are RFC 3339 in UTC):
     "title": "Quarterly chart",
     "description": "",
     "public": false,
+    "archived": false,
+    "archive": null,
     "latest_version": 3,
     "created_at": "2026-11-16T09:00:00Z",
     "updated_at": "2026-11-16T10:00:00Z",
-    "url": "https://k2x7…-p.example-content.net/",
+    "url": "https://k2x7…-art.example.com/",
     "public_url": null,
     "gallery_url": "https://artifacts.example.com/a/k2x7…"
   },
@@ -371,7 +320,7 @@ Shapes (timestamps are RFC 3339 in UTC):
     "description": "",
     "file_count": 3,
     "total_bytes": 48213,
-    "url": "https://k2x7…-p.example-content.net/_v/3/",
+    "url": "https://k2x7…-art.example.com/_v/3/",
     "files": [{ "path": "index.html", "size": 1834, "sha256": "…", "content_type": "text/html; charset=utf-8" }]
   }
 }
@@ -379,203 +328,169 @@ Shapes (timestamps are RFC 3339 in UTC):
 
 ### Errors
 
-REST answers `{ "error": { "code", "message", … } }` with the status below; MCP answers a tool result with
-`isError: true` and the same object, so the model reads it. Codes come from a closed set, mapped once (P5).
+**Operation errors** come from the shared operation layer, from a closed set mapped once (P5). REST answers
+`{ "error": { "code", "message", … } }` with the status below; MCP answers a tool result with `isError: true` and the
+same object.
 
-| Code                     | HTTP | When                                                                                  |
-| ------------------------ | ---- | ------------------------------------------------------------------------------------- |
-| `invalid_request`        | 400  | input fails validation; `issues` lists `{ field, reason }`, reasons from a closed set |
-| `public_disabled`        | 400  | `set_public` without a public host                                                    |
-| `unauthorized`           | 401  | missing or unknown token, with `WWW-Authenticate: Bearer`                             |
-| `not_found`              | 404  | no live artifact, version or file                                                     |
-| `method_not_allowed`     | 405  |                                                                                       |
-| `version_conflict`       | 409  | `base_version` is not the latest; carries `latest_version`                            |
-| `payload_too_large`      | 413  | the request body exceeds its bound                                                    |
-| `unsupported_media_type` | 415  | the body is not the type the route takes                                              |
-| `unavailable`            | 503  | invalid configuration, or a storage or key fetch timed out                            |
-| `internal`               | 500  | anything else; the message carries no detail                                          |
+| Code               | HTTP | When                                                                                  |
+| ------------------ | ---- | ------------------------------------------------------------------------------------- |
+| `invalid_request`  | 400  | input fails validation; `issues` lists `{ field, reason }`, reasons from a closed set |
+| `not_found`        | 404  | no live artifact, version or file                                                     |
+| `version_conflict` | 409  | `base_version` is not the latest; carries `latest_version`                            |
+| `unavailable`      | 503  | invalid configuration, an unreachable key set, or a timed-out read or upload          |
+| `internal`         | 500  | anything else; the message carries no detail                                          |
+
+**Transport and protocol errors** come before or around an operation: 401 `unauthorized` with
+`WWW-Authenticate: Bearer`, 403 for a foreign `Origin` on `/mcp` (HOST-3), 405, 413 for an oversized body and 415 for
+the wrong body type, in the same JSON shape on REST and as plain HTTP answers on `/mcp`. On MCP, the SDK's own JSON-RPC
+errors and its rejections of arguments that fail a tool's schema also belong here: they arrive as the SDK forms them,
+so REST's `invalid_request` for the same input has no exact MCP twin.
 
 ### MCP server
 
-- **Library:** `@modelcontextprotocol/server` 2.4.0, `createMcpHandler` with its default `legacy: 'stateless'`. One
-  factory serves the 2026-07-28 revision and, statelessly, the 2025-era revisions the SDK lists (2024-10-07 to
-  2025-11-25), which Claude Code, Codex CLI and Gemini CLI speak; `GET` and `DELETE` answer 405, as a stateless server
-  does. The Worker checks the host and the bearer token before the handler, which does neither, and passes the token
-  name (never the token) as `authInfo.clientId`. The request body bound stays at the SDK's 4 MiB.
-- **Rejected:** Cloudflare's `agents` `McpAgent`. It keeps a Durable Object per session and depends on SDK v1 as well
-  as v2; nothing here needs sessions or messages from the server.
-- Tool annotations: the reads are `readOnlyHint`; `delete_artifact` is `destructiveHint` and `idempotentHint`;
-  `set_public` is `idempotentHint`. Clients confirm tool calls that are not allowlisted, and the owner keeps
-  `delete_artifact` and `set_public` off those allowlists.
-- Every tool has an input and an output schema (section 11), so clients see `structuredContent` and its JSON Schema.
+- `@modelcontextprotocol/server` 2.4.0, `createMcpHandler` with its default stateless serving: one factory answers the
+  2026-07-28 revision and the 2025-era revisions the SDK lists (2024-10-07 to 2025-11-25), which Claude Code, Codex CLI
+  and Gemini CLI speak; `GET` and `DELETE` answer 405. The SDK checks neither hosts nor tokens, so the Worker checks
+  the host, the token and the `Origin` first, then builds the handler for the request with a factory whose closure
+  holds the token name; the token never reaches the SDK (TOK-2). `McpAgent` from `agents` is not used: nothing needs
+  sessions.
+- Every tool has input and output schemas. Annotations: reads are `readOnlyHint`; `delete_artifact` is
+  `destructiveHint` and `idempotentHint`; `set_public` and `set_archive` are `idempotentHint`. Whether a client asks
+  before a call is the owner's client configuration, not a control of this design.
 
 Server `instructions`:
 
 ```text
-This server publishes HTML pages ("artifacts") that the owner opens in a browser. Each artifact has its own origin and
-its entry page is index.html.
+This server publishes HTML pages ("artifacts") that the owner opens in a browser. Each artifact has its own origin;
+every version needs index.html at its root.
 
-- create_artifact: a title and files, including index.html. Returns the artifact, version 1 and its URLs.
+- create_artifact: a title and files. Returns the artifact, version 1 and its URLs. If a create call returns no
+  result, call list_artifacts before trying again: the artifact may exist.
 - update_artifact: the artifact id and base_version, the latest version you know. Files you send replace or add a
-  path, paths in remove are deleted, every other file is kept. If someone published since, you get version_conflict
-  with latest_version: call get_artifact and redo the change on top of it.
+  path, paths in remove are deleted, every other file is kept. On version_conflict, call get_artifact and redo the
+  change on top of latest_version.
 - Every publish makes a new version that never changes. The latest is at the artifact URL; version n stays at
   <url>/_v/n/.
-- Link between your files with relative URLs (style.css, img/logo.png), never /style.css or a full URL to the artifact,
-  so that old versions load their own files.
-- Text files use encoding "utf8"; binary files use "base64". The content type follows the file extension unless you
-  give content_type.
-- Paths are relative and /-separated, with no empty, "." or ".." segments, no segment starting with ".", and not
-  starting with "_v/". At most 1000 files per version, 25 MiB per file, about 4 MiB per call. For larger files, use the
-  REST API or the CLI.
-- Artifacts are visible only to the owner until set_public makes one readable by anyone with its public URL. Never put
+- Link between an artifact's files with relative URLs (style.css, img/logo.png). A root-relative or absolute link to
+  the artifact's own host loads the latest version's file when an older version is viewed.
+- Text files use encoding "utf8", binary files "base64". The content type follows the extension unless you give
+  content_type. Paths are /-separated without empty, "." or ".." segments and do not start with "_v/".
+- At most 2000 files per version and about 4 MiB per call; for larger files, use the REST API or the CLI.
+- Artifacts are visible only to the owner until set_public; a public artifact shows all its versions. Never put
   secrets in an artifact.
 ```
 
-## 8. CLI
+## 9. CLI
 
-- **Commands:** `artifacts publish <dir> [--id <id>] [--title <t>] [--description <d>]`, `artifacts list`,
-  `artifacts get <id> [--version <n>]`, `artifacts public <id> on|off`, `artifacts delete <id>`; `--json` prints the
-  API's JSON. Configuration: `ARTIFACTS_API_URL` (the API host's origin) and `ARTIFACTS_TOKEN`.
-- **`publish` without `--id`** creates an artifact from the directory; `--title` is required. **With `--id`** it reads
-  the latest version, compares each local file's SHA-256 with the version's list, sends only new and changed files,
-  removes paths the directory no longer has, and sends the version it read as `base_version`. A conflict means
-  someone published after the read; the CLI reports it and does not retry.
-- **Directory mapping:** every regular file below the directory, by its relative POSIX path in NFC. Entries whose name
-  starts with `.` are skipped, matching the path rules. A symbolic link is an error, so a link cannot pull a file from
-  outside the directory into an artifact. The CLI checks the root `index.html`, the file count and the file size before
-  sending, and refuses a publish whose new bytes exceed the REST request bound instead of splitting it.
-- **Distribution:** TypeScript without runtime dependencies (`node:util` `parseArgs`, `fetch`, `FormData`,
-  `fs.openAsBlob`), run by Node 24 from a checkout of this repository and put on `PATH` by a symbolic link to its entry
-  file. Node strips types from files outside `node_modules`, so no build step exists.
-- **Rejected:** an npm package (type stripping does not apply under `node_modules`, so it would need a build and a
-  publication for one user) and a single-file bundle (a build with nothing to bundle while there are no dependencies;
-  it becomes the choice if the CLI gains one).
+- **Commands:** `publish <dir> [--id <id>] [--title <t>] [--description <d>]`, `list [--archived only|include]`,
+  `get <id> [--version <n>]`, `public <id> on|off`, `archive <id> on|off|auto`, `delete <id>`; `--json` prints the
+  API's JSON. `list` follows every page. Configuration: `ARTIFACTS_API_URL`, `ARTIFACTS_TOKEN`. The help text carries
+  the authoring rule.
+- **`publish` without `--id`** creates (`--title` required); after a lost response it lists before creating again.
+  **With `--id`** it reads the latest version, hashes local files with `node:crypto` `createHash` as streams, sends new
+  and changed files, removes paths the directory lacks, and sends the version it read as `base_version`; a conflict is
+  reported, not retried.
+- **Directory mapping:** every regular file below the directory, by relative POSIX path in NFC. Names starting with `.`
+  are skipped, so `.env` and `.git/` are never published by accident. A symbolic link is followed when its target
+  resolves inside the directory and refused when it leaves it; a directory reached twice is visited once. The root
+  `index.html`, the file count and the request bound are checked before sending; a publish over the bound is refused,
+  not split into versions.
+- **Distribution:** TypeScript without runtime dependencies, run by Node 24 from a checkout and put on `PATH` by a
+  symbolic link; Node strips types outside `node_modules`, so there is no build and no npm package.
 
-## 9. Gallery
+## 10. Gallery
 
-Server-rendered HTML on `APP_HOST`, without script, forms or frames; the owner designs the screens later, so this
-fixes content and behavior only.
+Server-rendered on `APP_HOST`, without script, forms or frames; the owner designs the screens later.
 
-| Page      | Shows                                                                                                                                                                                                                                                                  |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`       | Live artifacts, most recently updated first, 50 per page with a link to the next: title, the start of the description, update time, latest version, whether it is public, links to the artifact and its page                                                           |
-| `/a/<id>` | Title, description, the artifact URL and the public URL if public, creation and update times; the versions, newest first, with number, time, `published_by`, title, file count, size and a link to the pinned URL; the latest version's files with path, size and type |
+| Page        | Shows                                                                                                                                                                                                |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`         | Artifacts that are not archived, in the API's order, 50 per page with a link to the next: title, start of the description, update time, latest version, public, links                                |
+| `/archived` | The same for archived artifacts, with why each is archived (setting or age)                                                                                                                          |
+| `/a/<id>`   | Title, description, URLs, public and archive state; the version history, newest first and 50 per page, with time, `published_by`, title, file count, size and pinned URL; the latest version's files |
 
-Anything else, and a deleted artifact, answers 404. The gallery links to artifacts and does not frame them: how Access
-behaves in a frame is not documented, and a content host is another site in the recommended layout. Every artifact
-text is escaped, and the response's CSP forbids scripts and framing (ISO-5). Nothing on it changes state (ISO-3).
+A deleted artifact and any other path answer 404. Artifact text is escaped and the CSP forbids scripts and framing
+(ISO-5). The gallery links to artifacts rather than framing them: Access's behavior in frames is not documented.
 
-## 10. Operations
+## 11. Operations
 
-- **Configuration split, as zenith.** `wrangler.jsonc` (public) holds the name, entry, compatibility date,
-  `workers_dev: false`, `preview_urls: false`, the D1 binding `DB` with its migrations, the R2 binding `FILES`, and
-  observability with invocation logs off. The gitignored `wrangler.deploy.jsonc` (an example file is committed) holds
-  the account, the routes and custom domains, the database and bucket identifiers, and the variables `APP_HOST`,
-  `API_HOST`, `CONTENT_HOST_SUFFIX`, `PUBLIC_HOST_SUFFIX`, `ACCESS_TEAM_DOMAIN`, `ACCESS_APP_AUD` and
-  `ACCESS_CONTENT_AUD`. `API_TOKENS` is a secret. A deployment script checks the deployment file with the Worker's own
-  configuration parser, refuses `localhost` hosts, merges the two files and runs `wrangler deploy` (DATA-2, ACC-2).
-- **Cloudflare setup by the owner:** the proxied wildcard DNS record, the two Access applications (owner-only policy,
-  HttpOnly cookie), the D1 database, and an R2 bucket with no public access.
-- **Logging:** only `logEvent(event, fields)` writes to the console, with an event name and fields from closed sets:
-  reason codes, error classes, token names, artifact IDs, version numbers and counts. It never records a token, an
-  `Authorization` header, an Access JWT or cookie, file bytes, titles, descriptions or paths (DATA-1). Every change
-  (create, version, visibility, delete) logs its token name, so the 7 days of Workers Logs on Paid show what a leaked
-  token did. Invocation logs are off: they record the request
-  ([Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)).
-- **Backups:** not in the first release. D1 Time Travel restores metadata for 30 days, which covers a bug that damages
-  rows; restoring past a delete brings back rows whose objects are gone. R2 bytes have no second copy. Artifacts are
-  agent output that can be produced again, and the risk a backup would cover, deletion with a leaked token, is answered
-  by revoking the token. This is revisited when an artifact is the only copy of something the owner needs.
+- **Configuration split:** `packages/worker/wrangler.jsonc` (public) holds bindings (`DB`, `FILES`), migrations and
+  observability with invocation logs off. The gitignored `wrangler.deploy.jsonc` holds the account, routes, custom
+  domains, database and bucket identifiers, and the variables `APP_HOST`, `API_HOST`, `CONTENT_HOST_SUFFIX`,
+  `PUBLIC_HOST_SUFFIX`, `ARCHIVE_AFTER_DAYS`, `ACCESS_TEAM_DOMAIN`, `ACCESS_APP_AUD` and `ACCESS_CONTENT_AUD`;
+  `API_TOKENS` is a secret. A deployment script checks the file with the Worker's own parser, merges, and runs
+  `wrangler deploy` (DATA-2).
+- **Cloudflare setup by the owner:** the proxied wildcard DNS record, the two Access applications, the D1 database and a
+  private R2 bucket, on Workers Paid.
+- **Logging:** `logEvent` only, with closed fields; every change logs its token name, so the 7 days of Workers Logs
+  show what a leaked token did (DATA-1).
+- **No backup of bytes.** Artifacts are agent output that can be produced again; deletion with a leaked token is
+  answered by revoking the token. D1 Time Travel restores metadata for 30 days
+  ([Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)), which covers damaged rows only. Old
+  artifacts are archived (section 5), not moved.
 
-## 11. Libraries
+## Not in the first release
 
-Recorded in [decisions.md](decisions.md): plain `fetch` routing, zod 4 schemas shared by REST and MCP, jose for
-Access, `mime/lite`, own ID generation, and the MCP SDK as above.
-
-## Accepted side effects
-
-| Side effect                                                                | What is not lost, and why                                                                                                                           |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pages must use relative URLs between their files                           | The latest version works either way; only pinned views of a page with root-relative URLs load the latest file. The MCP instructions state the rule. |
-| An artifact's service worker and storage span all its versions             | Server bytes are immutable; the page's own code is the only thing that can alter what its origin shows, and clearing site data resets it.           |
-| Unreferenced R2 objects after failed, raced or interrupted operations      | No version references them and serving reads only `version_files`, so nothing visible changes. They cost storage until their prefix is deleted.     |
-| First visit to each artifact host redirects through Access                 | No new sign-in while the Access session lasts; the cookie is per host by Access's design.                                                           |
-| Shared-domain layout: a proxied wildcard DNS record for the owner's domain | Every host with its own record keeps resolving as before; only names without a record now reach Cloudflare and get an error instead of NXDOMAIN.    |
-| Large binaries cannot go through MCP                                       | REST and the CLI take them; MCP stays usable for pages a model writes.                                                                              |
-| No `Range` support                                                         | Pages, images, fonts and scripts load whole; only seeking in audio and video is missing.                                                            |
-| No version pruning, no backup of bytes                                     | Every version stays viewable; deleting an artifact removes it whole. What a backup would protect is regenerable agent output (section 10).          |
-
-## Deferred
-
-| Item                          | Reason                                                                         |
-| ----------------------------- | ------------------------------------------------------------------------------ |
-| Version pruning               | section 4                                                                      |
-| Backups of R2 bytes           | section 10                                                                     |
-| `Range` requests              | the first release serves HTML assets; media seeking is not in its scope        |
-| Splitting a large CLI publish | intermediate versions would show partial states; the bound is reported instead |
-| Gallery previews and search   | not requested; previews would frame artifacts (section 9)                      |
+Version pruning (section 4), `Range` (section 6), splitting a large CLI publish (section 9), gallery previews and
+search (section 10), backups of bytes (section 11).
 
 ## Purpose layer: acceptance criteria
 
-Each criterion comes from the agreed scope: **Interfaces** (MCP and REST from one implementation, a thin CLI),
-**Auth** (Access for browsers, bearer tokens for agents, optional public links), **Domain** (a host per artifact), and
-**Features** (publish, read, list, delete; version history; multiple files; gallery). Each is checked on the deployed
-Worker with real clients and a browser.
+Sources are the agreed scope: **Interfaces** (MCP and REST from one implementation, a thin CLI), **Auth** (Access for
+browsers, bearer tokens for agents, public links), **Domain** (a host per artifact), **Features** (publish, read, list,
+delete; version history; multiple files; gallery; archive). Each is checked on the deployed Worker with real clients
+and a browser; copies a browser already downloaded are out of scope.
 
-| ID    | Requirement (EARS)                                                                                                                                                         | Source                             | Scenario                                                                                                                                                              | Pass, and failure                                                                                                        | Checked on                                               |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| AC-1  | When an agent calls `create_artifact` over MCP with an `index.html`, the system shall return a URL that shows that page.                                                   | Interfaces; Features (publish)     | Claude Code, Codex CLI and Gemini CLI, each configured with `/mcp` and its own token, publish a page                                                                  | The result holds a URL that renders the page after Access sign-in. Fails: no connection, a tool error, no page           | each client against the deployed Worker; a browser       |
-| AC-2  | When the CLI publishes a directory, the system shall serve every file in it at the artifact URL with relative links working.                                               | Interfaces (CLI); Features (files) | A directory with `index.html`, a stylesheet, a script and a PNG                                                                                                       | Styled page, script runs, image shows, each with its type. Fails: a 404 or a wrong type in the network panel             | the CLI against the deployed Worker; a browser           |
-| AC-3  | When an agent updates an artifact, the system shall serve the new version at the artifact URL and keep every earlier version at its pinned URL.                            | Features (version history)         | Two updates through MCP                                                                                                                                               | `/` shows version 3; `/_v/1/` and `/_v/2/` show theirs. Fails: an old version changed or missing                         | a real MCP client; a browser                             |
-| AC-4  | When an agent lists, reads or deletes artifacts, the system shall answer with their current state, and after a delete the artifact's URLs and gallery entry shall be gone. | Features (list, read, delete)      | List, `get_artifact`, `read_file`, `delete_artifact`, then open the old URLs                                                                                          | Results match what was published; after delete every URL answers 404. Fails: stale or surviving content                  | a real MCP client and the CLI; a browser                 |
-| AC-5  | When the owner opens the gallery, the system shall list the artifacts with their versions and links and offer nothing that changes state.                                  | Features (gallery)                 | Browse `/` and an artifact's page                                                                                                                                     | Every artifact and version is listed with working links; no forms or scripts. Fails: missing entries                     | a browser on the deployed app host                       |
-| AC-6  | While a browser is not signed in to Access as the owner, the system shall serve neither the gallery nor a private artifact.                                                | Auth (Access)                      | A private window; then sign in with an identity other than the owner's                                                                                                | Access sign-in, then denial. Fails: any artifact byte or gallery entry                                                   | a browser on the deployed hosts                          |
-| AC-7  | If a request to the REST API or `/mcp` carries no valid token, then the system shall answer 401 and change nothing.                                                        | Auth (bearer tokens)               | `curl` without a token, with a wrong one and with a revoked one, to each route                                                                                        | 401 everywhere; the gallery is unchanged. Fails: any other status or a change                                            | `curl` against the deployed API host                     |
-| AC-8  | While an artifact page runs in the owner's browser, the system shall not let its script read another artifact, the gallery, the API or its Access cookie.                  | Domain (origin isolation)          | A probe artifact whose script fetches another artifact, the gallery and the API, reads `document.cookie` and another artifact's `localStorage`, and shows the results | Every read fails. Fails: any content, cookie or storage value read                                                       | a browser on the deployed content hosts                  |
-| AC-9  | When the owner makes an artifact public, the system shall serve it at its public URL without sign-in, and when made private again, the public URL shall answer 404.        | Auth (public links)                | `artifacts public <id> on`, open the public URL in a private window, then `off`                                                                                       | Page renders without sign-in; then 404. Fails: sign-in demanded, or content after `off`                                  | the CLI and a private window against the deployed Worker |
-| AC-10 | If two agents update one artifact from the same version, then the system shall commit one update and answer the other with a conflict.                                     | Features (version history)         | Two CLI publishes started together with the same base                                                                                                                 | One new version; the other gets `version_conflict`; neither's files are mixed. Fails: two versions or a silent overwrite | two CLI processes against the deployed Worker            |
-| AC-11 | When a client connects to `/mcp`, the system shall give the publishing contract in its instructions.                                                                       | Interfaces (MCP)                   | An agent given only the server publishes a multi-file page, then updates it                                                                                           | Its pinned and latest URLs both render with their own files. Fails: root-relative links or a misused update              | a real MCP client; a browser                             |
+| ID    | Requirement (EARS)                                                                                                                                                            | Source                        | Scenario; pass and failure                                                                                                                                                                 | Checked on                   |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- |
+| AC-1  | When an agent calls `create_artifact` over MCP with a title and an `index.html`, the system shall return a URL that shows that page.                                          | Interfaces; Features          | Claude Code, Codex CLI and Gemini CLI, each with `/mcp` and its own token, publish a page. Pass: the URL renders after Access sign-in. Fail: no connection, a tool error, no page          | each client; a browser       |
+| AC-2  | When the CLI publishes a directory, the system shall serve every file it sends, and the CLI shall skip names starting with `.` and refuse links that leave the directory.     | Interfaces; Features (files)  | `index.html`, a stylesheet, a script, a PNG, a `.env`, a link inside and one outside. Pass: the page renders with its assets and types; `.env` absent; the outside link refused            | the CLI; a browser           |
+| AC-3  | When an agent updates an artifact whose pages follow the authoring rule, the system shall serve the new version at its URL and every earlier version at its pinned URL.       | Features (version history)    | Two updates through MCP. Pass: `/` shows version 3, `/_v/1/` and `/_v/2/` theirs, each with its own files. Fail: a version changed or missing                                              | a real MCP client; a browser |
+| AC-4  | When an agent lists, reads or deletes artifacts over MCP, the system shall answer with their stored state, and after a delete every URL shall answer 404.                     | Features (list, read, delete) | List, `get_artifact`, `read_file`, `delete_artifact`, then reload the old URLs. Fail: stale content or a URL that still serves                                                             | a real MCP client; a browser |
+| AC-5  | When the owner browses the gallery, the system shall list every artifact and version across pages, and offer nothing that changes state.                                      | Features (gallery)            | More than 50 artifacts and an artifact with more than 50 versions. Pass: every one reachable through the page links; no forms or scripts                                                   | a browser                    |
+| AC-6  | While a browser is not signed in to Access as the owner, the system shall serve neither the gallery nor a private artifact.                                                   | Auth (Access)                 | A private window; another identity. Pass: sign-in, then denial. Fail: any artifact byte or gallery entry                                                                                   | a browser                    |
+| AC-7  | If a request to the REST API or `/mcp` carries no valid token, then the system shall answer 401 and change nothing.                                                           | Auth (tokens)                 | `curl` without a token, with a wrong and with a revoked one, on each route                                                                                                                 | `curl`                       |
+| AC-8  | While an artifact page runs in the owner's browser, the system shall not let its script read or embed another artifact, the gallery, the API or its Access cookie.            | Domain                        | A probe artifact A fetches artifact B, the gallery and the API, loads B's script with `<script src>`, reads `document.cookie` and B's storage. Pass: all fail while B loads its own script | a browser                    |
+| AC-9  | When the owner makes an artifact public, the system shall serve all its versions at its public URL without sign-in, and when made private, the next request shall answer 404. | Auth (public links)           | `public on`, open the latest and a pinned URL in a private window, `public off`, reload                                                                                                    | the CLI; a private window    |
+| AC-10 | If two agents update one artifact from the same version, then the system shall commit one update and answer the other with a conflict.                                        | Features (version history)    | Two CLI publishes held at a barrier after both read the same latest version, then released. Pass: one new version, one `version_conflict`, no mixed files                                  | two CLI processes            |
+| AC-11 | When a client initializes `/mcp`, the system shall return the instructions of section 8.                                                                                      | Interfaces (MCP)              | Read the returned instructions. Smoke check: an agent given only the server publishes a multi-file page and updates it, and both URLs render with their own files                          | a real MCP client            |
+| AC-12 | When a script uses the REST API to create, update, read and delete an artifact, the system shall give the results the MCP tools give.                                         | Interfaces (REST)             | `curl` with multipart create and update, `GET` of a file's bytes, `DELETE` twice (204 both times)                                                                                          | `curl`; a browser            |
+| AC-13 | When the owner archives an artifact, the system shall move it from the gallery's default list to the archived view and keep every URL serving.                                | Features (archive)            | `archive <id> on`, then `auto`; browse `/`, `/archived` and the artifact URLs. Fail: a URL changes or the artifact is in the wrong list                                                    | the CLI; a browser           |
 
 ## Plan layer
 
-Claims derived from the purpose layer, each checked by a test that runs without the deployed Worker (unit tests, or
-the Worker in the local runtime with D1 and R2). Threat-model IDs name the invariant the claim belongs to.
+Claims derived from the purpose layer, each checked without the deployed Worker (unit tests, or the Worker in the
+local runtime with D1 and R2). A row naming a threat-model ID claims that invariant; the invariant's text is there.
 
-| ID    | Claim (EARS)                                                                                                                                                                                                              | Source        | Test                                                                                                        |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------- |
-| PL-1  | If a request's host is not the app host, the API host, or an ID followed by a configured suffix, then the Worker shall answer 404 without reading storage.                                                                | HOST-1        | routing: hosts with an extra label, uppercase, a 25- or 27-character prefix, a port, a hyphen               |
-| PL-2  | If the configuration has overlapping suffixes, an app or API host under a suffix, a mix of `localhost` and other hosts, or a malformed value, then the Worker shall answer 503 and the deployment script shall refuse it. | HOST-2, ACC-2 | configuration and deployment-script tests, one per refusal                                                  |
-| PL-3  | If a request to the app host or a private content host has no valid Access JWT, then the Worker shall answer 403 and read no artifact data.                                                                               | ACC-1         | Worker test with a local key set: missing, bad signature, other issuer, the other class's audience, expired |
-| PL-4  | The Worker shall take the Access JWT only from `Cf-Access-Jwt-Assertion`.                                                                                                                                                 | ACC-1, ISO-4  | a valid JWT sent only as a cookie is refused; source analysis for cookie reads                              |
-| PL-5  | While the configured hosts are not all `localhost` names, the Worker shall verify Access on every app and private content request.                                                                                        | ACC-2         | Worker test with production-shaped hosts and no JWT                                                         |
-| PL-6  | If a request to the API host has no bearer token whose SHA-256 is in `API_TOKENS`, then the Worker shall answer 401 and change nothing.                                                                                   | TOK-1         | Worker test on every REST route and `/mcp`: no header, other scheme, unknown and removed tokens             |
-| PL-7  | The Worker shall compare token hashes with `crypto.subtle.timingSafeEqual` against every entry.                                                                                                                           | TOK-1         | source analysis of the token check                                                                          |
-| PL-8  | When a version is committed, the system shall record the name of the token that published it.                                                                                                                             | TOK-3         | publish with two tokens; versions carry their names                                                         |
-| PL-9  | The Worker shall not put a token, an `Authorization` header, an Access JWT, file bytes, a title, a description or a path in a log line.                                                                                   | TOK-2, DATA-1 | log redaction with markers through every route and failure path; source analysis for `console`              |
-| PL-10 | When a content host is requested, the Worker shall serve only files of the artifact its host names.                                                                                                                       | ISO-1         | another artifact's path on this host answers 404                                                            |
-| PL-11 | If an ID was ever used, then creating an artifact shall not reuse it.                                                                                                                                                     | ISO-1         | delete, then create with the ID generator stubbed to return the old ID                                      |
-| PL-12 | The Worker shall send no `Access-Control-Allow-*` header on any host.                                                                                                                                                     | ISO-2         | every route, including `OPTIONS` and error answers                                                          |
-| PL-13 | If a request to the app host or a content host uses a method other than GET or HEAD, then the Worker shall answer 405.                                                                                                    | ISO-3         | each method on each host class                                                                              |
-| PL-14 | The Worker shall set no cookie.                                                                                                                                                                                           | ISO-4         | no `Set-Cookie` on any route; source analysis                                                               |
-| PL-15 | When the gallery renders artifact text, the Worker shall escape it and send a CSP that forbids scripts and framing.                                                                                                       | ISO-5         | titles and descriptions holding markup and attribute breakouts                                              |
-| PL-16 | When a file is served, the Worker shall send its stored type, `nosniff` and `Referrer-Policy: no-referrer`.                                                                                                               | SRV-1         | Worker test per host class                                                                                  |
-| PL-17 | When the latest version is served, the Worker shall send `no-cache` with the file's ETag and answer a matching `If-None-Match` with 304; a pinned version shall be `immutable`.                                           | section 5     | Worker test                                                                                                 |
-| PL-18 | If a request path has a malformed escape, invalid UTF-8, an encoded `/` or a dot segment, then the Worker shall answer 404.                                                                                               | SRV-2         | `%2e%2e`, `%2F`, `%C0%AF`, `%`, NFD input for an NFC path (served)                                          |
-| PL-19 | When a path names a directory with an `index.html`, the Worker shall serve it at `dir/` and redirect `dir` with 308.                                                                                                      | section 5     | Worker test, including `/_v/<n>`                                                                            |
-| PL-20 | If `/_v/<n>/` names a version that does not exist or `<n>` is not canonical, then the Worker shall answer 404.                                                                                                            | section 4     | `0`, `01`, `+1`, one past the latest                                                                        |
-| PL-21 | When the public host is asked for an artifact that is private, deleted or unknown, the Worker shall answer the same 404.                                                                                                  | PUB-1         | compare the three responses byte for byte                                                                   |
-| PL-22 | When an artifact is made private, the public host shall answer 404 for it from the next request.                                                                                                                          | PUB-1         | Worker test                                                                                                 |
-| PL-23 | If no public suffix is configured, then making an artifact public shall fail with `public_disabled`.                                                                                                                      | PUB-2         | REST and MCP                                                                                                |
-| PL-24 | If a publish fails before its commit, then no new version shall be visible.                                                                                                                                               | VER-2         | inject a failure at each upload, a timeout, and a failing batch; listings and serving unchanged             |
-| PL-25 | If `base_version` is not the latest, then an update shall answer 409 with `latest_version` and commit nothing.                                                                                                            | VER-3         | stale base; two concurrent updates from one base commit exactly one                                         |
-| PL-26 | If an artifact is deleted while an update is in flight, then the update shall commit no version.                                                                                                                          | VER-3, VER-4  | delete between upload and commit                                                                            |
-| PL-27 | When a file is stored, its key shall be `a/<id>/` and the SHA-256 of its bytes.                                                                                                                                           | VER-1, VER-4  | R2 contents after publishes that share and change files                                                     |
-| PL-28 | When an artifact is deleted, the system shall remove its rows and every object under its prefix.                                                                                                                          | VER-4         | R2 and D1 contents after delete                                                                             |
-| PL-29 | When an update omits a file, the new version shall keep the base's entry; a removed path shall be gone; a provided path shall be replaced; a result without `index.html` shall be refused.                                | section 4     | table of update cases                                                                                       |
-| PL-30 | If an input exceeds a bound of section 5, then the system shall refuse it before any write.                                                                                                                               | RES-1         | at and one past each bound in its unit, with astral and multibyte characters                                |
-| PL-31 | If a request body exceeds its bound while being read, then the Worker shall stop reading and answer 413.                                                                                                                  | RES-1         | chunked body without `Content-Length`                                                                       |
-| PL-32 | If a key fetch or a storage call exceeds its timeout, then the request shall answer 503 and leave no version.                                                                                                             | RES-2         | stubbed slow key endpoint and slow R2                                                                       |
-| PL-33 | When an operation runs through REST and through MCP with the same input, the system shall give the same result or error code.                                                                                             | P5, section 7 | one table of cases run through both adapters                                                                |
-| PL-34 | When a client speaking 2025-03-26, 2025-06-18 or 2025-11-25 lists and calls tools without a session, `/mcp` shall serve it, and `GET` shall answer 405.                                                                   | section 7     | the SDK's client against the Worker in the local runtime, per revision                                      |
-| PL-35 | The repository shall hold no deployment values: `wrangler.jsonc` sets no variable and no route.                                                                                                                           | DATA-2        | configuration test                                                                                          |
+| ID    | Claim (EARS)                                                                                                                                                                     | Source           | Test                                                                                                                                                                                                                 |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PL-1  | The Worker shall classify hosts as HOST-1 states.                                                                                                                                | HOST-1           | hosts with an extra label, uppercase, 25- and 27-character prefixes, a port, a hyphen                                                                                                                                |
+| PL-2  | If a configuration value weakens a boundary, then the Worker and the deployment script shall refuse it.                                                                          | HOST-2, ACC-2    | one case per refusal, for both                                                                                                                                                                                       |
+| PL-3  | When an app or private content request arrives, the Worker shall apply ACC-1.                                                                                                    | ACC-1, ISO-4     | missing JWT, bad signature, other issuer, other class's audience, missing `exp`, expiry at the tolerance edges, `alg` other than RS256, unknown `kid` refreshing once, key endpoint down (503), JWT only as a cookie |
+| PL-4  | While the configured hosts are not all `localhost` names, the Worker shall verify Access.                                                                                        | ACC-2            | production-shaped hosts without a JWT                                                                                                                                                                                |
+| PL-5  | When an API request arrives, the Worker shall apply TOK-1 on every REST route and `/mcp`.                                                                                        | TOK-1            | no header, another scheme, unknown and removed tokens; nothing changed                                                                                                                                               |
+| PL-6  | If `/mcp` receives an `Origin` other than the API host's origin, then the Worker shall answer 403.                                                                               | HOST-3           | foreign, `null` and matching origins; no `Origin`                                                                                                                                                                    |
+| PL-7  | When a version is committed or an artifact changed, the system shall record or log the token name.                                                                               | TOK-3            | publishes with two tokens; change logs                                                                                                                                                                               |
+| PL-8  | The Worker shall keep DATA-1 on every route and failure path.                                                                                                                    | DATA-1, TOK-2    | log redaction with markers; source check of the `console` sink                                                                                                                                                       |
+| PL-9  | When a content host is requested, the Worker shall serve only its artifact's files.                                                                                              | ISO-1            | two artifacts with the same path and different bytes; a deleted ID offered again by a stubbed generator                                                                                                              |
+| PL-10 | The Worker shall send no `Access-Control-Allow-*` header, and `Cross-Origin-Resource-Policy: same-origin` on every private content and app response.                             | ISO-2            | every route and status (200, 304, 308, 404); public host responses without it                                                                                                                                        |
+| PL-11 | If a request to the app host or a content host uses a method other than GET or HEAD, then the Worker shall answer 405; it shall set no cookie.                                   | ISO-3, ISO-4     | each method on each host class                                                                                                                                                                                       |
+| PL-12 | When the gallery renders artifact text, the Worker shall apply ISO-5.                                                                                                            | ISO-5            | markup and attribute breakouts in titles, descriptions and paths                                                                                                                                                     |
+| PL-13 | When a file is served, the Worker shall send the headers of section 6.                                                                                                           | SRV-1, section 6 | per host class, latest and pinned                                                                                                                                                                                    |
+| PL-14 | If an artifact became private, was deleted or the request lacks access, then a matching `If-None-Match` shall not yield 304.                                                     | SRV-3            | the three cases, latest and pinned                                                                                                                                                                                   |
+| PL-15 | When a segment is decoded, the decoder shall accept exactly one strict percent-decoding and refuse an encoded `/`.                                                               | SRV-2            | over strings: malformed escapes, invalid UTF-8, `%2F`, `%25`, `%23`, `%3F`, NFD to NFC                                                                                                                               |
+| PL-16 | When a `Request` reaches a content host, the Worker shall select the version and file of SRV-2 and section 6.                                                                    | SRV-2            | real `Request` objects: latest and pinned paths, names with `%`, `#` and `?`, a directory (308), `/_v/<n>` (308), `_v/0`, `_v/01` and one past the latest (404); never a fallback to the latest                      |
+| PL-17 | When the public host serves an artifact, the Worker shall apply PUB-1.                                                                                                           | PUB-1, PUB-2     | identical 404s; pinned versions while public; 404 on the request after `public off`                                                                                                                                  |
+| PL-18 | If a publish fails before its commit or its batch rolls back, then no version shall be visible.                                                                                  | VER-2            | a failure at each upload, an upload timeout, a failing batch                                                                                                                                                         |
+| PL-19 | If `base_version` is not the latest or the artifact was deleted meanwhile, then an update shall commit nothing.                                                                  | VER-3            | stale base; two concurrent updates from one base; a delete between upload and commit                                                                                                                                 |
+| PL-20 | When files are stored, their keys and earlier versions shall satisfy VER-1 and VER-4.                                                                                            | VER-1, VER-4     | R2 and D1 contents after publishes that share and change files                                                                                                                                                       |
+| PL-21 | When a publish provides the same bytes twice or bytes already stored, the system shall write each object at most once, retrying R2's 429 at most twice.                          | section 3        | two paths with equal bytes; an existing object; a stubbed 429 once and three times                                                                                                                                   |
+| PL-22 | When an artifact is deleted, every URL shall answer 404 at once; when the cleanup succeeds, its prefix shall be empty; a repeated delete shall retry the cleanup and answer 204. | VER-4            | URLs after delete; the prefix after cleanup; an injected cleanup failure, then a second `DELETE`                                                                                                                     |
+| PL-23 | When an update omits, removes or provides paths, the new version shall hold section 4's merge, and a version without `index.html` shall be refused with its message.             | section 4        | table of update cases, through REST and MCP                                                                                                                                                                          |
+| PL-24 | If an input exceeds a bound of section 6, then the system shall refuse it before any write.                                                                                      | RES-1            | at and one past each bound in its unit; a chunked body without `Content-Length`                                                                                                                                      |
+| PL-25 | If the key fetch, an R2 call or a D1 read exceeds its timeout, then the request shall answer 503, and a publish shall not have committed.                                        | RES-2            | stubbed slow key endpoint, R2 and D1 reads; the commit has no timeout                                                                                                                                                |
+| PL-26 | When an input passes both adapters' schemas, REST and MCP shall return the same result or operation error code.                                                                  | P5, section 8    | one table of cases through both adapters; schema rejections checked separately per adapter                                                                                                                           |
+| PL-27 | When a client speaking 2025-03-26, 2025-06-18, 2025-11-25 or 2026-07-28 lists and calls tools, `/mcp` shall serve it, and `GET` shall answer 405.                                | section 8        | the SDK's client against the local Worker, per revision                                                                                                                                                              |
+| PL-28 | When a listing is paged, the system shall follow section 8's order and cursor contract.                                                                                          | section 8        | order ties on `updated_at`; `next_cursor: null` at the end; a malformed cursor; an artifact updated mid-traversal is not repeated                                                                                    |
+| PL-29 | When an artifact's archive setting or age changes, the system shall report and filter it as section 5 states, and change no version or URL.                                      | section 5        | `archived`, `kept` and unset with an injected clock either side of `ARCHIVE_AFTER_DAYS`; each `archived=` filter; URLs and versions unchanged                                                                        |
+| PL-30 | When the CLI maps a directory, it shall follow section 9.                                                                                                                        | section 9        | dot names, a link inside and one outside, a link loop, NFD names, an unchanged file not sent, `base_version` equal to the version read                                                                               |
+| PL-31 | The repository's `wrangler.jsonc` shall set no variable, route or account identifier.                                                                                            | DATA-2           | source check of the file and the deployment example                                                                                                                                                                  |
