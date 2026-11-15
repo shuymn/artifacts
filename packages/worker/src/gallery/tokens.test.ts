@@ -76,6 +76,17 @@ describe("gallery.css and tokens.json", () => {
     expect(got).toEqual(want);
   });
 
+  it("declares custom properties only in the token block", () => {
+    const declared = [...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]);
+    expect(declared).toEqual([...rootProperties().keys()]);
+  });
+
+  it("sets fonts only through the typography rules", () => {
+    const tagged = [...css.matchAll(/\/\* type\.[\w-]+ \*\/\n[^{]+\{\s*font: [^;]+;/g)].length;
+    expect([...css.matchAll(/(?<![\w-])font\s*:/g)]).toHaveLength(tagged);
+    expect(css.match(/(?<![\w-])(font-(family|size|weight|style)|line-height)\s*:/g)).toBeNull();
+  });
+
   it("uses no typography token that is not in tokens.json", () => {
     const named = [...css.matchAll(/\/\* (type\.[\w-]+) \*\//g)].map((m) => m[1]);
     expect(named.filter((n) => n === undefined || !all.has(n))).toEqual([]);

@@ -399,6 +399,7 @@ a:focus-visible,
 
 /* data-table and table-cell */
 .data-table {
+  position: relative;
   overflow: auto;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
@@ -451,8 +452,14 @@ a:focus-visible,
     display: block;
   }
 
+  /* The header row stays in the accessibility tree, so each cell keeps its column header. */
   .data-table thead {
-    display: none;
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .data-table tbody > tr > * {
@@ -463,13 +470,16 @@ a:focus-visible,
     border-block-start: var(--border-width) solid var(--color-border);
   }
 
-  .data-table td {
+  .data-table td,
+  .data-table .cell--grow {
+    inline-size: auto;
     white-space: normal;
     overflow-wrap: anywhere;
   }
 
+  /* The label is visual only; screen readers announce the column header instead. */
   .data-table td::before {
-    content: attr(data-label) ": ";
+    content: attr(data-label) ": " / "";
     color: var(--color-text-muted);
   }
 }
