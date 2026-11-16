@@ -185,17 +185,22 @@ describe("ISO-2: cross-origin headers", () => {
     }
   });
 
-  it("sends CORP on app-host 403, 404 and 405", async () => {
+  it("sends CORP on app-host 200, 304, 403, 404 and 405", async () => {
     const world = new World();
+    const id = await threeVersions(world);
     const app = (path: string, init: RequestInit = {}) => world.fetch(`https://${APP_HOST}${path}`, init);
-    const jwt = await world.jwt({ aud: "app-audience" });
+    const jwt = { "Cf-Access-Jwt-Assertion": await world.jwt({ aud: "app-audience" }) };
+    const etag = (await app("/assets/gallery.css", { headers: jwt })).headers.get("ETag") ?? "";
     const responses = [
+      await app("/", { headers: jwt }),
+      await app("/archived", { headers: jwt }),
+      await app(`/a/${id}`, { headers: jwt }),
+      await app("/assets/gallery.css", { headers: { ...jwt, "If-None-Match": etag } }),
       await app("/"),
-      await app("/", { headers: { "Cf-Access-Jwt-Assertion": jwt } }),
-      await app("/a/x", { headers: { "Cf-Access-Jwt-Assertion": jwt } }),
+      await app("/a/x", { headers: jwt }),
       await app("/", { method: "DELETE" }),
     ];
-    expect(responses.map((r) => r.status)).toEqual([403, 404, 404, 405]);
+    expect(responses.map((r) => r.status)).toEqual([200, 200, 200, 304, 403, 404, 405]);
     for (const response of responses) {
       expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
       noCors(response);

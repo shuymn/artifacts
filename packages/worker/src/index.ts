@@ -5,6 +5,7 @@
  */
 import { AccessVerifier, type AccessSettings } from "./access.ts";
 import { parseConfig, type Config } from "./config.ts";
+import { serveGallery, withGalleryPolicy } from "./gallery/route.ts";
 import { classifyHost } from "./hosts.ts";
 import { newArtifactId, type ArtifactId } from "./id.ts";
 import { errorName, logEvent, type HostKind } from "./log.ts";
@@ -80,8 +81,8 @@ async function browser(
     const refusal = await refuseWithoutAccess(request, config, deps, host);
     if (refusal !== undefined) return refusal;
   }
-  // The gallery (design.md section 10) is not served yet: every app host path answers 404.
-  if (id === undefined) return plainResponse(kind, 404);
+  // The gallery (design.md section 10).
+  if (id === undefined) return serveGallery(request, url, operationDeps(env, config, deps));
   return serveArtifact(request, url, operationDeps(env, config, deps), id, kind);
 }
 
@@ -110,7 +111,7 @@ export function createWorker(deps: WorkerDeps): Worker {
           case "api":
             return await api(request, url, env, config, deps);
           case "app":
-            return await browser(request, url, env, config, deps, "app", undefined);
+            return withGalleryPolicy(await browser(request, url, env, config, deps, "app", undefined));
           case "content":
             return await browser(request, url, env, config, deps, "content", route.id);
           case "public":
@@ -125,7 +126,8 @@ export function createWorker(deps: WorkerDeps): Worker {
           ...(route.kind === "unmatched" ? {} : { host: route.kind }),
         });
         if (route.kind === "api") return jsonResponse(500, { error: { code: "internal", message: "internal error" } });
-        return plainResponse(route.kind === "public" ? "public" : "private", 500);
+        const failure = plainResponse(route.kind === "public" ? "public" : "private", 500);
+        return route.kind === "app" ? withGalleryPolicy(failure) : failure;
       }
     },
   };

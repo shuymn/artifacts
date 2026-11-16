@@ -59,7 +59,7 @@ export async function entityTag(file: FileJson): Promise<string> {
 }
 
 /** RFC 9110 section 13.1.2: weak comparison against any listed tag, or `*`. */
-function matchesETag(header: string | null, etag: string): boolean {
+export function matchesETag(header: string | null, etag: string): boolean {
   if (header === null) return false;
   if (header.trim() === "*") return true;
   return header.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag);
