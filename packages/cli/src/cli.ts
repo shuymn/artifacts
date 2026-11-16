@@ -6,7 +6,16 @@
 import { parseArgs } from "node:util";
 
 import rootPackage from "../../../package.json" with { type: "json" };
-import { Api, ApiError, TIMEOUTS, type ArtifactJson, type ArtifactVersion, type Fetch, type Timeouts } from "./api.ts";
+import {
+  Api,
+  ApiError,
+  TIMEOUTS,
+  type ArtifactJson,
+  type ArtifactVersion,
+  type Fetch,
+  type GrantJson,
+  type Timeouts,
+} from "./api.ts";
 import { readConfig, readOrigin, SET_TOKEN_OR_SIGN_IN, storesLogin, type Config, type Environment } from "./config.ts";
 import { CliError, EXIT, UsageError, type ExitStatus } from "./errors.ts";
 import { LOCK_OPTIONS, type LockBarriers } from "./lock.ts";
@@ -75,6 +84,14 @@ const LOGIN_COMMANDS = `
                                       ARTIFACTS_API_URL's origin; commands use it while ARTIFACTS_TOKEN is unset.
   logout                              Revoke the stored login's grant, then remove the login.`;
 
+/** The commands over the OAuth grants, which work with either credential on every platform. */
+const GRANT_COMMANDS = `
+  grants                              Every OAuth grant, newest first: its ID and publisher name, the client, the
+                                      redirect host, the resource, when it was made and when it expires ("-" for a
+                                      field the grant lacks).
+  revoke <grant>                      Revoke the grant with that ID and its tokens. Put an ID that starts with "-"
+                                      after "--": artifacts revoke -- <grant>.`;
+
 const CREDENTIAL_LINES = {
   login: `  ARTIFACTS_TOKEN     An API token. It is sent as a bearer token and never printed. While it is set, commands
                       use it and do not read the stored login.
@@ -109,7 +126,7 @@ Commands:
   delete <id>                         Delete the artifact: every URL answers 404.
   token <name>                        Generate an API token. Prints the token once, then its API_TOKENS entry.${
     logins ? LOGIN_COMMANDS : ""
-  }
+  }${GRANT_COMMANDS}
   help                                Print this text.
   --version                           Print the CLI's version.
 
@@ -161,6 +178,8 @@ type Context = {
   readonly api: () => Api;
   /** What `login` and `logout` work with; refused where no login is stored. */
   readonly signIn: (command: string) => LoginContext;
+  /** The grant of the stored login `api` sent with; undefined when it sent `ARTIFACTS_TOKEN` or nothing yet. */
+  readonly storedGrant: () => string | undefined;
   readonly print: (text: string) => void;
   readonly json: (value: unknown) => void;
 };
@@ -184,6 +203,16 @@ function versionNumber(value: string | undefined): number | undefined {
   const n = /^[1-9][0-9]{0,15}$/.test(value) ? Number(value) : Number.NaN;
   if (!Number.isSafeInteger(n)) throw new UsageError("--version takes a version number: 1, 2, …");
   return n;
+}
+
+/** A grant ID as the server's library generates it (design.md section 7). */
+const GRANT_ID = /^[A-Za-z0-9_-]{16}$/;
+
+function grantId(value: string | undefined): string {
+  if (value === undefined || !GRANT_ID.test(value)) {
+    throw new UsageError("a grant ID is 16 characters of A-Z, a-z, 0-9, - and _; artifacts grants lists them");
+  }
+  return value;
 }
 
 function choice<T extends string>(value: string | undefined, choices: readonly T[], what: string): T {
@@ -220,6 +249,29 @@ function versionLines({ version }: ArtifactVersion): string {
 function listLine(artifact: ArtifactJson): string {
   const flags = [artifact.public ? "public" : "private", ...(artifact.archived ? ["archived"] : [])].join(",");
   return `${artifact.id}  v${artifact.latest_version}  ${artifact.updated_at}  ${flags}  ${artifact.title}\n`;
+}
+
+/**
+ * A grant's field on one line: "-" for null, and control characters and line separators escaped, since a client names
+ * itself when it registers and nothing else checks that name.
+ */
+function grantField(value: string | null): string {
+  if (value === null) return "-";
+  return value.replaceAll(/[\p{Cc}\p{Zl}\p{Zp}]/gu, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+function grantLines(grant: GrantJson): string {
+  const client =
+    grant.client_name === null
+      ? grantField(grant.client_id)
+      : `${grantField(grant.client_name)} (${grantField(grant.client_id)})`;
+  const lines = [
+    `${grantField(grant.id)}  publisher: ${grantField(grant.publisher)}`,
+    `  client: ${client}`,
+    `  redirect host: ${grantField(grant.redirect_host)}  resource: ${grantField(grant.resource)}`,
+    `  created: ${grantField(grant.created_at)}  expires: ${grantField(grant.expires_at)}`,
+  ];
+  return `${lines.join("\n")}\n`;
 }
 
 function issueLines(error: ApiError): string {
@@ -357,6 +409,46 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       );
     },
   },
+  grants: {
+    usage: "grants",
+    args: 0,
+    options: ["json"],
+    async run({ values, api, print, json }) {
+      const result = await api().grants();
+      if (values.json === true) return json(result);
+      print(result.grants.map(grantLines).join(""));
+    },
+  },
+  revoke: {
+    usage: "revoke <grant>",
+    args: 1,
+    options: [],
+    async run({ io, args, api, storedGrant, print }) {
+      const id = grantId(args[0]);
+      try {
+        await api().revokeGrant(id);
+      } catch (error) {
+        if (!(error instanceof ApiError)) throw error;
+        if (error.status === 404) {
+          throw new CliError(
+            `${error.code}: no grant ${id} is listed; artifacts grants lists the grants, and one made moments ago ` +
+              "may not be listed yet",
+          );
+        }
+        if (error.status === 503) {
+          throw new CliError(`${error.code}: the revocation may not have completed; run artifacts revoke ${id} again`);
+        }
+        throw error;
+      }
+      print(`revoked ${id}\n`);
+      // The stored login stays (design.md section 9): the next command's refresh is refused and names login.
+      if (storedGrant() === id) {
+        io.stderr(
+          "artifacts: that was the stored login's grant, which has ended; sign in again with artifacts login\n",
+        );
+      }
+    },
+  },
   login: {
     usage: "login",
     args: 0,
@@ -456,6 +548,7 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitStatus> 
     return new StoredLogin(stored);
   };
   let api: Api | undefined;
+  let credential: Credential | undefined;
   const context: Context = {
     io,
     args,
@@ -463,9 +556,11 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitStatus> 
     api: () => {
       if (api !== undefined) return api;
       const config = readConfig(io.env, platform);
-      api = new Api(config.apiOrigin, credentialFor(config), io.fetch, io.timeouts ?? TIMEOUTS);
+      credential = credentialFor(config);
+      api = new Api(config.apiOrigin, credential, io.fetch, io.timeouts ?? TIMEOUTS);
       return api;
     },
+    storedGrant: () => (credential instanceof StoredLogin ? credential.grant() : undefined),
     signIn: (commandName) => {
       if (!storesLogin(platform)) {
         throw new CliError(

@@ -44,6 +44,11 @@ export class LostResponse extends CliError {
   override readonly name: string = "LostResponse";
 }
 
+/** A revocation answered with a success other than 204: whether it happened is not confirmed. */
+export class UnconfirmedRevocation extends CliError {
+  override readonly name: string = "UnconfirmedRevocation";
+}
+
 export type FileJson = {
   readonly path: string;
   readonly size: number;
@@ -81,6 +86,18 @@ export type VersionJson = {
 /** The answer of a publish or a get: the artifact and one version with its files. */
 export type ArtifactVersion = { readonly artifact: ArtifactJson; readonly version: VersionJson };
 export type ArtifactPage = { readonly artifacts: readonly ArtifactJson[]; readonly next_cursor: string | null };
+
+/** One OAuth grant of `GET /v1/grants` (design.md section 8, "Grants"). */
+export type GrantJson = {
+  readonly id: string;
+  readonly publisher: string | null;
+  readonly client_id: string;
+  readonly client_name: string | null;
+  readonly redirect_host: string | null;
+  readonly resource: string | null;
+  readonly created_at: string;
+  readonly expires_at: string | null;
+};
 
 type Kind = "string" | "number" | "boolean" | "nullable_string";
 
@@ -122,8 +139,23 @@ const VERSION_FIELDS = {
   url: "string",
 } as const;
 
+const GRANT_FIELDS = {
+  id: "string",
+  publisher: "nullable_string",
+  client_id: "string",
+  client_name: "nullable_string",
+  redirect_host: "nullable_string",
+  resource: "nullable_string",
+  created_at: "string",
+  expires_at: "nullable_string",
+} as const;
+
 function isArtifact(value: unknown): value is ArtifactJson {
   return hasFields(value, ARTIFACT_FIELDS);
+}
+
+function isGrant(value: unknown): value is GrantJson {
+  return hasFields(value, GRANT_FIELDS);
 }
 
 function isVersion(value: unknown): value is VersionJson {
@@ -306,13 +338,22 @@ export class Api {
     await this.#call("DELETE", `/v1/artifacts/${segment(id)}`, this.#timeouts.requestMs, answer);
   }
 
+  /** `GET /v1/grants`: every grant in one answer, newest first. */
+  async grants(): Promise<{ grants: GrantJson[] }> {
+    return this.#call("GET", "/v1/grants", this.#timeouts.requestMs, async (response) => {
+      const value = await answer(response);
+      if (!isRecord(value) || !Array.isArray(value.grants) || !value.grants.every(isGrant)) throw unexpected();
+      return { grants: value.grants };
+    });
+  }
+
   /** `DELETE /v1/grants/{id}`, under `timeoutMs`. Only a 204 confirms the revocation; any other success fails. */
-  async revokeGrant(id: string, timeoutMs: number): Promise<void> {
+  async revokeGrant(id: string, timeoutMs: number = this.#timeouts.requestMs): Promise<void> {
     await this.#call("DELETE", `/v1/grants/${segment(id)}`, timeoutMs, async (response) => {
       if (!response.ok || response.status === 204) return answer(response);
       await response.body?.cancel().catch(() => undefined);
-      throw new CliError(
-        `the API answered ${response.status} instead of 204, so the revocation is not confirmed; the login is kept`,
+      throw new UnconfirmedRevocation(
+        `the API answered ${response.status} instead of 204, so the revocation is not confirmed`,
       );
     });
   }

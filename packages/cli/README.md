@@ -43,6 +43,8 @@ export ARTIFACTS_API_URL=https://artifacts-api.example.com
 artifacts login                                    # signs in through the browser; or set ARTIFACTS_TOKEN
 artifacts help
 artifacts publish ./site --title "Quarterly chart"
+artifacts grants                                   # every OAuth grant: publisher, client, redirect host, …
+artifacts revoke -- <grant>                        # revokes a grant by its ID and its tokens
 artifacts logout                                   # revokes the login's grant and removes the login
 ```
 
@@ -51,6 +53,12 @@ artifacts logout                                   # revokes the login's grant a
 refresh it as needed. While `ARTIFACTS_TOKEN` (an API token from `artifacts token <name>`) is set, commands use it and
 do not read the stored login. On Windows, which cannot keep the file private, `login` and `logout` refuse and every
 command needs `ARTIFACTS_TOKEN`.
+
+`artifacts grants` lists the OAuth grants, newest first: each one's ID, publisher name, client, redirect host,
+resource, creation and expiry, with `-` for a field the grant lacks. `artifacts revoke <grant>` revokes one by its ID;
+an ID can start with `-`, so give it after `--`. Both work with `ARTIFACTS_TOKEN` or the stored login, on every
+platform. Revoking the stored login's grant ends that login: it stays in the file, commands with it fail and name
+`artifacts login`, and `artifacts logout` removes it.
 
 `artifacts token <name>` needs no configuration: it prints a new token and the entry to add to the Worker's
 `API_TOKENS` secret. The binary reads its configuration from the environment only, never from a `.env` or

@@ -8,10 +8,10 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-import { Api, ApiError } from "./api.ts";
+import { Api, ApiError, UnconfirmedRevocation } from "./api.ts";
 import { CliError } from "./errors.ts";
 import { authorization, discover, exchange, knowsClient, OAuthRefusal, register, type Server } from "./oauth.ts";
-import { LoginRefused, StoredLogin, type SessionContext } from "./session.ts";
+import { grantOf, LoginRefused, StoredLogin, type SessionContext } from "./session.ts";
 import type { Tokens } from "./store.ts";
 
 export type LoginContext = SessionContext & {
@@ -143,12 +143,6 @@ export async function login(context: LoginContext, tokenSet: boolean): Promise<v
   }
 }
 
-/** The ID of the grant a token of the library's form, `<user>:<grant ID>:<secret>`, names. */
-function grantOf(token: string): string | undefined {
-  const parts = token.split(":");
-  return parts.length === 3 && parts[1] !== "" ? parts[1] : undefined;
-}
-
 /** Removes the stored login of `grant` for `origin`, keeping the client ID; another login stored meanwhile stays. */
 async function forget(context: LoginContext, grant: string): Promise<void> {
   await context.store.withLock(async ({ logins, write }) => {
@@ -174,6 +168,7 @@ export async function logout(context: LoginContext): Promise<void> {
   try {
     await api.revokeGrant(grant, context.requestMs);
   } catch (error) {
+    if (error instanceof UnconfirmedRevocation) throw new CliError(`${error.message}; the login is kept`);
     if (error instanceof ApiError && error.status === 404) {
       throw new CliError(
         "the server does not list this login's grant yet; the login is kept, so run artifacts logout again",
