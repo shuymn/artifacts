@@ -153,7 +153,7 @@ describe("SRV-1: response headers", () => {
         ...classHeaders,
         "content-type": type,
         "content-length": String(file?.size),
-        etag: `"${file?.sha256}"`,
+        etag: expect.stringMatching(/^"[0-9a-f]{32}"$/),
       });
       noCors(response);
     }
@@ -251,6 +251,31 @@ describe("SRV-3: If-None-Match after the checks", () => {
     // Deleted: 404 on the content host.
     expect((await world.api("DELETE", `/v1/artifacts/${id}`)).status).toBe(204);
     expect((await world.content(id, path, { headers: conditional })).status).toBe(404);
+  });
+
+  it("gives the same bytes published with another type another tag, so the old tag gets no 304", async () => {
+    const world = new World();
+    const created = await world.created({
+      title: "t",
+      files: { "index.html": "<p>x</p>", "data.bin": { body: "same bytes", type: "application/x-old" } },
+    });
+    const id = created.artifact.id;
+    const old = (await world.content(id, "/data.bin")).headers.get("ETag") ?? "";
+    const updated = await world.updated(id, {
+      base_version: 1,
+      files: { "data.bin": { body: "same bytes", type: "application/x-new" } },
+    });
+    const sha = (version: typeof created.version) => version.files.find((f) => f.path === "data.bin")?.sha256;
+    expect(sha(updated.version)).toBe(sha(created.version));
+
+    const latest = await world.content(id, "/data.bin", { headers: { "If-None-Match": old } });
+    expect(latest.status).toBe(200);
+    expect(latest.headers.get("Content-Type")).toBe("application/x-new");
+    expect(latest.headers.get("ETag")).not.toBe(old);
+    const api = await world.api("GET", `/v1/artifacts/${id}/versions/2/files/data.bin`);
+    expect(api.headers.get("ETag")).toBe(latest.headers.get("ETag"));
+    // Version 1 still holds the old type, so its tag still matches.
+    expect((await world.content(id, "/_v/1/data.bin", { headers: { "If-None-Match": old } })).status).toBe(304);
   });
 });
 

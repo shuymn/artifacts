@@ -28,6 +28,7 @@ import {
   restUpdateMetaSchema,
   validate,
 } from "./schemas.ts";
+import { entityTag } from "./serve.ts";
 import type { TokenName } from "./tokens.ts";
 
 export const TRANSPORT_ERRORS = [
@@ -252,7 +253,7 @@ async function file(
   const headers = {
     "Content-Type": found.content_type,
     "Content-Length": String(found.size),
-    ETag: `"${found.sha256}"`,
+    ETag: await entityTag(found),
     ...API_HEADERS,
   };
   if (request.method === "HEAD") return new Response(null, { headers });

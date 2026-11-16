@@ -4,7 +4,7 @@
  * private content host and of the app host carries `Cross-Origin-Resource-Policy: same-origin` (ISO-2).
  */
 import type { ArtifactId } from "./id.ts";
-import { lookupFile, openFile, type OperationDeps } from "./operations.ts";
+import { lookupFile, openFile, type FileJson, type OperationDeps } from "./operations.ts";
 import { resolveRequestPath } from "./paths.ts";
 
 /** `private`: the app host and private content hosts, behind Access. `public`: public hosts. */
@@ -44,6 +44,20 @@ export function methodNotAllowed(kind: BrowserClass): Response {
   return plainResponse(kind, 405, { Allow: "GET, HEAD" });
 }
 
+/**
+ * The entity tag of a stored file (design.md section 6): 128 bits of the SHA-256 over its bytes' hash and its content
+ * type. A representation is the bytes with their type, so the same bytes published under another type get another tag
+ * and a cached copy with the old type is not revalidated.
+ */
+export async function entityTag(file: FileJson): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${file.sha256}\n${file.content_type}`),
+  );
+  const hex = [...new Uint8Array(digest, 0, 16)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `"${hex}"`;
+}
+
 /** RFC 9110 section 13.1.2: weak comparison against any listed tag, or `*`. */
 function matchesETag(header: string | null, etag: string): boolean {
   if (header === null) return false;
@@ -76,7 +90,7 @@ export async function serveArtifact(
     });
   }
   const file = lookup.value.file;
-  const etag = `"${file.sha256}"`;
+  const etag = await entityTag(file);
   if (matchesETag(request.headers.get("If-None-Match"), etag)) {
     return new Response(null, { status: 304, headers: { ETag: etag, ...browserHeaders(kind) } });
   }
