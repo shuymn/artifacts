@@ -1,16 +1,23 @@
 # Gallery design system
 
-The gallery's screens are designed in Penpot from a token set and components, and the code uses the same tokens and
-components by name. Three files carry the design into the code, and the implementation follows them exactly:
+The gallery's screens are designed in Pencil from tokens and components, and the code uses the same tokens and
+components by name. The design file is [`gallery.pen`](gallery.pen): the boards Typography and Components above one
+screen per page (`index`, `archived`, `artifact`), at the width `size.page` gives. Three files carry the design into
+the code, and the implementation follows them exactly:
 
-- [`tokens.json`](tokens.json): the Penpot token set `artifacts`.
+- [`tokens.json`](tokens.json): the token set, the one source of the tokens' names and values.
 - [`gallery.css`](../../packages/worker/src/gallery/gallery.css): the stylesheet the Worker serves. Every token is a
   custom property, every component a class.
 - [`reference/`](reference/): one static page per screen (`index.html`, `archived.html`, `artifact.html`) with the
-  markup the Worker's templates must produce. They load `gallery.css` and render like the Penpot screens.
+  markup the Worker's templates must produce. They load `gallery.css` and render like the Pencil screens.
 
-A design change goes to all of them: the Penpot file first, then `tokens.json`, `gallery.css` and the reference pages,
+A design change goes to all of them: the Pencil file first, then `tokens.json`, `gallery.css` and the reference pages,
 then the templates. Content and behavior of each page are in [design.md](../design.md), section 10.
+
+`gallery.pen` is JSON, and the committed file has no `fileToken`. Pencil adds that member back each time it saves the
+file; it is not part of the design, and the secret scan reports it. The pre-commit hook removes it from staged `.pen`
+files with [`strip-pen-file-token.mjs`](../../scripts/strip-pen-file-token.mjs) before the scan, and Pencil opens the
+file without it.
 
 ## Ground rules
 
@@ -42,7 +49,7 @@ then the templates. Content and behavior of each page are in [design.md](../desi
 ## Icon
 
 The gallery has one icon: the `a` of the monospace wordmark in `color.accent`, on a tile of `color.bg` with
-`radius.sm`. It is drawn by hand, not in Penpot; its source is
+`radius.sm`. It is drawn by hand, not in Pencil; its source is
 [`icon.svg`](../../packages/worker/src/gallery/icon.svg), on a 32-unit grid with every edge on an even coordinate so
 it stays sharp at 16 px.
 
@@ -57,9 +64,14 @@ it stays sharp at 16 px.
 
 ## Tokens
 
-`tokens.json` has the Design Tokens format's shape as Penpot exports it: `$type` and `$value` per token, dimensions as
-strings with `px`, typography without letter spacing. It is not checked against the DTCG schema; the code checks its
-custom properties against it.
+`tokens.json` has the Design Tokens format's shape: `$type` and `$value` per token, dimensions as strings with `px`,
+typography without letter spacing. It is not checked against the DTCG schema.
+
+`tokens.json` stays a file of its own, the one source of the tokens, and `gallery.pen` and `gallery.css` mirror it:
+[`tokens.test.ts`](../../packages/worker/src/gallery/tokens.test.ts) checks both against it, so a change to one of
+the three fails the tests until the others follow. `gallery.pen` is not the source because Pencil's variables
+hold only colors, numbers, strings and booleans: the typography tokens exist in it only as texts, and the file is
+Pencil's document, whose node ids and layout change with every edit, rather than a token set.
 
 | Token                                       | In `gallery.css`                                                                                                                                                                                              |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -70,17 +82,31 @@ custom properties against it.
 | `font.family.sans` / `font.family.mono`     | the family, then `system-ui, sans-serif` / `ui-monospace, monospace`                                                                                                                                          |
 | `font.weight.*`                             | the number                                                                                                                                                                                                    |
 | `type.x` (typography)                       | one rule, headed by the comment `/* type.x */`, whose `font` shorthand is `var(--font-weight-…) var(--font-size-…) / <line height> var(--font-family-…)`; the selectors listed are every element that uses it |
-| `size.page`                                 | none: it is the width of the Penpot screens, not of the page                                                                                                                                                  |
+| `size.page`                                 | none: it is the width of the Pencil screens, not of the page                                                                                                                                                  |
 
-Values Penpot shows that are not tokens (a text's measured width, a board's height, the width of a table column) are
-not part of the design.
+| Token                                                                         | In `gallery.pen`                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| every token except `type.*`                                                   | the variable of the same name (`space.0-5`), which the components and screens bind                                                                                                                                                                      |
+| `color.*`                                                                     | a color variable with the hex value; a reference (`{color.accent}`) becomes `$color.accent`                                                                                                                                                             |
+| `space.*`, `radius.*`, `border.width`, `focus.width`, `font.size.*`, `size.*` | a number variable, in pixels                                                                                                                                                                                                                            |
+| `font.family.*`                                                               | a string variable                                                                                                                                                                                                                                       |
+| `font.weight.*`                                                               | a string variable (`"400"`), the only type Pencil binds to a font weight                                                                                                                                                                                |
+| `type.x` (typography)                                                         | the reusable text `type.x` on the Typography board, with the family, size and weight bound to their variables and the line height as a number. Pencil has no text styles: every text in the components and screens is an instance of one of these texts |
+
+Pencil binds no variable to a width, so the frames repeat `size.*` as numbers: `size.page` on the screens and the
+`site-header` component, `size.content` on `page` and the `pager` and `artifact-row` components, `size.prose` on the
+artifact description, `size.label` on the term of `info-row`.
+
+Values Pencil shows that are not tokens (a text's measured width or height, a frame's height, the width of a table
+column) are not part of the design.
 
 ## Components
 
-Each Penpot component is one class in `gallery.css`; a variant is a modifier class or an attribute. The reference pages
-show each in place.
+Each component in `gallery.pen` is one class in `gallery.css`; a variant is a modifier class or an attribute. Pencil has
+no variants, so each variant is a component of its own, named `component/variant` (`nav-tab/state=current`). The
+reference pages show each in place.
 
-| Penpot component  | Variant                                         | Markup                                                                                                          |
+| Component         | Variant                                         | Markup                                                                                                          |
 | ----------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `site-header`     |                                                 | `header.site-header` > `a.brand` + `nav.site-nav`                                                               |
 | `nav-tab`         | `state=default`                                 | `a.nav-tab` > text + `span.nav-tab__count`                                                                      |
@@ -103,9 +129,11 @@ Lists and tables carry their roles explicitly (`role=list`; `table`, `rowgroup`,
 Safari drops list semantics without list markers, and browsers may drop table semantics when the narrow layout
 changes a table's `display`.
 
-Penpot draws a container's stroke inside its box, and CSS draws a border outside the padding, so content inside a
+Pencil draws the design's strokes inside the frame (`strokeAlignment: inner`) and lays out the children by the padding
+alone, so a stroke covers the outer pixel of the padding. CSS draws a border outside the padding, so content inside a
 bordered container sits one pixel further in. The nav tab subtracts its border from its padding, because its size is
-part of the design; the other containers keep the one pixel.
+part of the design; the other containers keep the one pixel. Pencil paints a frame's stroke under its children unless
+the frame clips them, so the artifact list and the tables, whose rows reach their edges, clip as they do in CSS.
 
 ## Behavior the static design does not show
 
