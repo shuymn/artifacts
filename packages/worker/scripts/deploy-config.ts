@@ -194,6 +194,44 @@ const TARGET_NAMES: Record<Target, string> = {
 
 const ROUTE_KEYS: ReadonlySet<string> = new Set(["pattern", "custom_domain", "zone_name", "zone_id"]);
 
+/** A zone: a lowercase domain name of two labels or more. */
+const ZONE_NAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const ZONE_ID = /^[0-9a-f]{32}$/;
+
+/** The host a route serves: a Custom Domain's pattern, or the `<host>` of a `<host>/*` route. */
+function routeHost(pattern: string, customDomain: boolean): string | undefined {
+  return customDomain ? pattern : /^([^/]+)\/\*$/.exec(pattern)?.[1];
+}
+
+/**
+ * The problems with a route's zone. wrangler refuses a route with both a `zone_name` and a `zone_id`. It resolves the
+ * zone, and Cloudflare matches the route to it, only at `wrangler deploy`, after the migrations: the host must be in its
+ * `zone_name` here. A `zone_id` cannot be matched to the host without the account, so only its form is checked.
+ */
+function zoneProblems(entry: Json, at: string, host: string | undefined): string[] {
+  const problems: string[] = [];
+  const { zone_name: zoneName, zone_id: zoneId } = entry;
+  if (zoneName !== undefined && zoneId !== undefined) {
+    problems.push(`${at} sets both zone_name and zone_id; wrangler takes one of them`);
+  }
+  if (zoneId === "") problems.push(`${at}.zone_id is empty`);
+  else if (zoneId !== undefined && (typeof zoneId !== "string" || !ZONE_ID.test(zoneId))) {
+    problems.push(`${at}.zone_id is not a zone ID (32 lowercase hexadecimal characters)`);
+  }
+  if (zoneName === "") problems.push(`${at}.zone_name is empty`);
+  else if (zoneName !== undefined && (typeof zoneName !== "string" || !ZONE_NAME.test(zoneName))) {
+    problems.push(`${at}.zone_name is not a lowercase domain name, such as example.com`);
+  } else if (
+    typeof zoneName === "string" &&
+    host !== undefined &&
+    host !== zoneName &&
+    !host.endsWith(`.${zoneName}`)
+  ) {
+    problems.push(`${at} (${host}) is not in the zone ${zoneName}`);
+  }
+  return problems;
+}
+
 /**
  * The host classes a route serves, or the problem with it. A Custom Domain is the app or API host itself. A route is
  * `<host>/*`: the app or API host, `*` and a suffix, or `*.<domain>` on a domain that holds a suffix and neither the app
@@ -206,8 +244,7 @@ function routeTargets(pattern: string, customDomain: boolean, config: Config): r
     if (pattern === config.apiHost) return ["api"];
     return "is a Custom Domain other than APP_HOST and API_HOST";
   }
-  const match = /^([^/]+)\/\*$/.exec(pattern);
-  const host = match?.[1];
+  const host = routeHost(pattern, false);
   if (host === undefined) return "is not of the form <host>/*";
   if (host === config.appHost) return ["app"];
   if (host === config.apiHost) return ["api"];
@@ -232,6 +269,7 @@ function routeProblems(values: Json, config: Config | undefined): string[] {
   if (!Array.isArray(routes) || routes.length === 0) return ["routes is not a non-empty list"];
   const problems: string[] = [];
   const covered = new Set<Target>();
+  const patterns = new Map<string, number>();
   routes.forEach((route: unknown, index) => {
     const at = `routes[${index}]`;
     const entry: Json | undefined =
@@ -243,9 +281,6 @@ function routeProblems(values: Json, config: Config | undefined): string[] {
     for (const key of Object.keys(entry)) {
       if (!ROUTE_KEYS.has(key)) problems.push(`${at}.${key} is not a route setting`);
     }
-    for (const key of ["zone_name", "zone_id"]) {
-      if (key in entry && (typeof entry[key] !== "string" || entry[key] === "")) problems.push(`${at}.${key} is empty`);
-    }
     const pattern = entry["pattern"];
     const customDomain = entry["custom_domain"];
     if (customDomain !== undefined && typeof customDomain !== "boolean") {
@@ -256,6 +291,10 @@ function routeProblems(values: Json, config: Config | undefined): string[] {
       problems.push(`${at}.pattern is empty`);
       return;
     }
+    problems.push(...zoneProblems(entry, at, routeHost(pattern, customDomain === true)));
+    const first = patterns.get(pattern);
+    if (first !== undefined) problems.push(`${at} repeats routes[${first}] (${pattern})`);
+    else patterns.set(pattern, index);
     if (config === undefined) return;
     const targets = routeTargets(pattern, customDomain === true, config);
     if (typeof targets === "string") problems.push(`${at} (${pattern}) ${targets}`);

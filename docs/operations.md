@@ -114,6 +114,9 @@ application](https://developers.cloudflare.com/cloudflare-one/access-controls/ap
 - **Workers Builds:** the build variable `ARTIFACTS_DEPLOY_JSONC` holds the whole file, comments included.
 - **The owner's machine:** `packages/worker/wrangler.deploy.jsonc`, which git ignores.
 
+Give each route a `zone_name` rather than a `zone_id`: the deploy checks that the route's host is in the zone it names,
+while a `zone_id` is checked for its form only, and a wrong one fails at `wrangler deploy`, after the migrations.
+
 One variable holding the file, rather than a variable per value, keeps one format, one parser and one set of tests for
 both paths; the routes and bindings are lists, which separate variables would hold as JSON anyway. A build variable is
 limited to 5 KB and a Worker to 64 of them
@@ -123,8 +126,9 @@ the same.
 
 `pnpm run deploy` refuses to start, naming each problem, when the values are missing, set in both places, not JSONC, or
 leave a value empty, and when a variable fails the Worker's own configuration check (HOST-2), a host is a `localhost`
-name or has a port (ACC-2), a key belongs in `wrangler.jsonc`, `API_TOKENS` appears, or a route would serve hosts that
-are not the deployment's. The committed example is refused for its empty values.
+name or has a port (ACC-2), a key belongs in `wrangler.jsonc`, `API_TOKENS` appears, a route would serve hosts that are
+not the deployment's, or a route repeats another, is outside its `zone_name`, or sets both `zone_name` and `zone_id`.
+The committed example is refused for its empty values.
 
 ## 3. Deploying
 

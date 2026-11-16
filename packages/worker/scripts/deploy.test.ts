@@ -22,6 +22,7 @@ const BASE = readJsonc("wrangler.jsonc");
 const EXAMPLE = readJsonc("wrangler.deploy.example.jsonc");
 
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
+const ZONE_ID = "fedcba9876543210fedcba9876543210";
 const DATABASE_ID = "00000000-0000-4000-8000-000000000000";
 
 function setIn(target: unknown, path: readonly (string | number)[], value: unknown): unknown {
@@ -78,6 +79,58 @@ function dedicated(): Json {
     ],
   );
 }
+
+/** Routes that replace route `index` of the example and are refused for their zone, with the problem. */
+const ZONE_CASES = [
+  [
+    "a zone_name the host is not in",
+    2,
+    { pattern: "*-art.example.com/*", zone_name: "wrong.example.org" },
+    "routes[2] (*-art.example.com) is not in the zone wrong.example.org",
+  ],
+  [
+    "a zone_name that ends the host inside a label",
+    2,
+    { pattern: "*-art.example.com/*", zone_name: "art.example.com" },
+    "routes[2] (*-art.example.com) is not in the zone art.example.com",
+  ],
+  [
+    "a Custom Domain outside its zone_name",
+    0,
+    { pattern: "artifacts.example.com", custom_domain: true, zone_name: "example.org" },
+    "routes[0] (artifacts.example.com) is not in the zone example.org",
+  ],
+  [
+    "a zone_name with an uppercase letter",
+    2,
+    { pattern: "*-art.example.com/*", zone_name: "Example.com" },
+    "routes[2].zone_name is not a lowercase domain name, such as example.com",
+  ],
+  [
+    "a zone_name of one label",
+    2,
+    { pattern: "*-art.example.com/*", zone_name: "com" },
+    "routes[2].zone_name is not a lowercase domain name, such as example.com",
+  ],
+  [
+    "a blank zone_id",
+    2,
+    { pattern: "*-art.example.com/*", zone_id: " " },
+    "routes[2].zone_id is not a zone ID (32 lowercase hexadecimal characters)",
+  ],
+  [
+    "a zone_id in uppercase",
+    2,
+    { pattern: "*-art.example.com/*", zone_id: ZONE_ID.toUpperCase() },
+    "routes[2].zone_id is not a zone ID (32 lowercase hexadecimal characters)",
+  ],
+  [
+    "both a zone_name and a zone_id",
+    2,
+    { pattern: "*-art.example.com/*", zone_name: "example.com", zone_id: ZONE_ID },
+    "routes[2] sets both zone_name and zone_id; wrangler takes one of them",
+  ],
+] as const;
 
 function problems(values: unknown): readonly string[] {
   const check = checkDeployValues(BASE, values);
@@ -270,10 +323,11 @@ describe("checkDeployValues", () => {
     ["a route that is a number", 1, "routes[4] is not a pattern or an object"],
     [
       "an unknown route setting",
-      { pattern: "artifacts.example.com", custom_domain: true, script: "x" },
+      { pattern: "artifacts.example.com/*", script: "x" },
       "routes[4].script is not a route setting",
     ],
-    ["an empty zone_name", { pattern: "*-art.example.com/*", zone_name: "" }, "routes[4].zone_name is empty"],
+    ["an empty zone_name", { pattern: "artifacts.example.com/*", zone_name: "" }, "routes[4].zone_name is empty"],
+    ["a route twice", "*-pub.example.com/*", "routes[4] repeats routes[3] (*-pub.example.com/*)"],
     [
       "a custom_domain that is not a boolean",
       { pattern: "artifacts.example.com", custom_domain: "yes" },
@@ -300,6 +354,17 @@ describe("checkDeployValues", () => {
     const found = problems(set(filled(), ["routes"], routes));
     expect(found).toHaveLength(1);
     expect(found[0]).toContain(message);
+  });
+
+  it("accepts a zone_id, and a zone_name that is the host itself", () => {
+    let values = set(filled(), ["routes", 2], { pattern: "*-art.example.com/*", zone_id: ZONE_ID });
+    values = set(values, ["routes", 0, "zone_name"], "artifacts.example.com");
+    expect(problems(values)).toEqual([]);
+  });
+
+  // Cloudflare matches a route to its zone only at `wrangler deploy`, after the migrations have been applied.
+  it.each(ZONE_CASES)("refuses %s", (_name, index, route, message) => {
+    expect(problems(set(filled(), ["routes", index], route))).toEqual([message]);
   });
 
   it.each([
@@ -443,6 +508,13 @@ describe("deploy", () => {
     expect(lines[0]).toBe("deploy: refused; nothing was run");
     expect(lines.slice(1)).toEqual(problems(EXAMPLE).map((problem) => `  - wrangler.deploy.jsonc: ${problem}`));
     expect(files()).toEqual(["wrangler.deploy.jsonc", "wrangler.jsonc"]);
+  });
+
+  it.each(ZONE_CASES)("refuses %s before any wrangler command", async (_name, index, route, message) => {
+    writeValues(set(filled(), ["routes", index], route));
+    const { status, calls } = await run();
+    expect([status, calls]).toEqual([1, []]);
+    expect(lines).toEqual(["deploy: refused; nothing was run", `  - wrangler.deploy.jsonc: ${message}`]);
   });
 
   it("refuses arguments", async () => {
