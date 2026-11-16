@@ -105,10 +105,13 @@ function steps(merged: Json, config: string): Step[] {
       args: ["r2", "bucket", "info", name, "--config", config],
       onFailure: "Create the bucket first (docs/operations.md); nothing was changed.",
     })),
-    ...bindings(merged, "d1_databases", "database_id").map(({ binding }) => ({
+    // The hint names the database: wrangler.jsonc alone has no ID for the binding, and the merged configuration is gone.
+    ...bindings(merged, "d1_databases", "database_name").map(({ binding, name }) => ({
       title: `applying the D1 migrations of ${binding}`,
       args: ["d1", "migrations", "apply", binding, "--remote", "--config", config],
-      onFailure: `The Worker was not deployed; \`wrangler d1 migrations list ${binding} --remote\` shows what is applied.`,
+      onFailure:
+        `The Worker was not deployed; \`wrangler d1 execute ${name} --remote --command ` +
+        `"SELECT name, applied_at FROM d1_migrations"\` lists the migrations applied.`,
     })),
     {
       title: "deploying the Worker",

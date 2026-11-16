@@ -10,9 +10,10 @@ Values in angle brackets are placeholders, and the hosts below are the examples 
 and `-s.example-content.net` for content on its own registrable domain. `<team>` is the Zero Trust team name,
 `<DATABASE_NAME>` the D1 database, `<BUCKET_NAME>` the R2 bucket. None of them is written in this repository (P7).
 
-Commands run from `packages/worker` with the tools of `mise.toml`, so `pnpm exec wrangler` is the pinned Wrangler. A
-claim about Cloudflare or another product links the page that states it; **Unconfirmed** marks one the documentation
-does not state.
+Commands run from `packages/worker`, with the tools of `mise.toml`: there `pnpm exec wrangler` is the Wrangler of the
+lockfile and `wrangler.jsonc` names the Worker. A block that starts elsewhere says so. `artifacts` is the CLI, installed
+as in section 5. A claim about Cloudflare or another product links the page that states it; **Unconfirmed** marks one
+the documentation does not state.
 
 ## How a change reaches the deployment
 
@@ -65,9 +66,12 @@ risks say what the shared-domain layout exposes.
   already has a `CNAME` record cannot become one ([Custom
   Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)). The artifact hosts are
   routes: `*-art.example.com/*` and `*-pub.example.com/*`, or one `*.example-content.net/*`.
-- **D1.** `pnpm exec wrangler d1 create <DATABASE_NAME>` prints the database ID
-  ([get started](https://developers.cloudflare.com/d1/get-started/)). The deploy applies the migrations.
-- **R2.** `pnpm exec wrangler r2 bucket create <BUCKET_NAME>`: 3 to 63 characters of `a-z`, `0-9` and `-`
+- **D1.** `pnpm exec wrangler d1 create <DATABASE_NAME> --update-config=false` prints the database ID
+  ([get started](https://developers.cloudflare.com/d1/get-started/)). The deploy applies the migrations. Without
+  `--update-config=false`, Wrangler offers to add the new binding to `wrangler.jsonc`, yes by default, which would put
+  the identifiers in the repository (DATA-2); the same holds for the bucket.
+- **R2.** `pnpm exec wrangler r2 bucket create <BUCKET_NAME> --update-config=false`: 3 to 63 characters of `a-z`, `0-9`
+  and `-`
   ([create buckets](https://developers.cloudflare.com/r2/buckets/create-buckets/)). A bucket is private until public
   access is turned on ([public buckets](https://developers.cloudflare.com/r2/buckets/public-buckets/)); leave both the
   `r2.dev` URL and custom domains off. Create it before the first deploy: `wrangler deploy` creates a bucket that does
@@ -187,13 +191,15 @@ A release deploys when its PR is merged: the build appears under the Worker's **
 ### From the owner's machine
 
 The same script with the values in `wrangler.deploy.jsonc`, for the first deployment before Builds is connected or when
-Builds is unavailable. Deploy what `release` holds, so the next build does not replace something else:
+Builds is unavailable. Deploy what `release` holds, so the next build does not replace something else. From
+`packages/worker`:
 
 ```sh
-pnpm exec wrangler login
 git fetch origin && git switch --detach origin/release
-pnpm install --frozen-lockfile
-cd packages/worker && pnpm run deploy
+pnpm install --frozen-lockfile                      # the whole workspace, from the lockfile at the root
+pnpm exec wrangler login
+pnpm run deploy
+git switch -                                        # back to the branch you were on
 ```
 
 ### Rolling back
@@ -214,6 +220,7 @@ release replaces the rollback; to stay on old code, revert on `main` and release
 ## 4. API tokens
 
 Each agent gets its own token, named after it (design.md section 7); the name is recorded on every version it publishes.
+`artifacts token` needs no configuration:
 
 ```sh
 artifacts token codex
@@ -222,10 +229,10 @@ artifacts token codex
 ```
 
 `API_TOKENS` is one JSON object of every entry. Keep that object (it holds hashes, not tokens) outside the repository,
-and put it whole:
+here `~/artifacts/api-tokens.json`, and put it whole:
 
 ```sh
-pnpm exec wrangler secret put API_TOKENS < api-tokens.json
+pnpm exec wrangler secret put API_TOKENS < ~/artifacts/api-tokens.json
 ```
 
 `wrangler secret put` reads the value from standard input when piped, and creates and deploys a new version at once
@@ -269,9 +276,11 @@ curl -sS https://artifacts-api.example.com/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-**The CLI** ([packages/cli/README.md](../packages/cli/README.md)):
+**The CLI** ([packages/cli/README.md](../packages/cli/README.md)), from the repository root, with `~/.local/bin` on
+`PATH`:
 
 ```sh
+mkdir -p ~/.local/bin
 ln -s "$PWD/packages/cli/src/main.ts" ~/.local/bin/artifacts
 export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<token>
 ```
@@ -318,11 +327,11 @@ Check it with `gh infra plan` before applying.
 ## 7. Post-deployment checklist
 
 What the local tests cannot show, checked once after the first deployment and after a change to the setting involved.
-The commands use a check token and a probe artifact:
+The commands run in an empty scratch directory, with a check token and a probe artifact:
 
 ```sh
 API=https://artifacts-api.example.com
-TOKEN=<a token, for example named "check">
+TOKEN=<token>                                       # a token named "check" (section 4)
 mkdir -p probe && echo '<p>probe</p>' > probe/index.html
 ID=$(ARTIFACTS_TOKEN=$TOKEN artifacts publish ./probe --title probe --json | jq -r .artifact.id)
 ```
@@ -376,10 +385,10 @@ Logs below are the Worker's Workers Logs in the dashboard, kept 7 days on Worker
    if it happens.
 
 4. **Production waits** (R2 30 s, D1 reads 10 s, the key set 5 s). They cannot be provoked on the platform; check that
-   the deployed release holds them:
+   the deployed release holds them, in the checkout:
 
    ```sh
-   git fetch origin release && git show origin/release:packages/worker/src/timeout.ts | grep -E 'Ms: '
+   git fetch origin release && git show origin/release:packages/worker/src/timeout.ts | grep -E 'Ms: [0-9]'
    ```
 
    Pass: `accessKeysMs: 5_000`, `r2Ms: 30_000`, `d1ReadMs: 10_000`, and the commit of the latest build under
