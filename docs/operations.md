@@ -71,6 +71,29 @@ risks say what the shared-domain layout exposes.
   already has a `CNAME` record cannot become one ([Custom
   Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)). The artifact hosts are
   routes: `*-art.example.com/*` and `*-pub.example.com/*`, or one `*.example-content.net/*`.
+- **Configuration Rule.** Cloudflare serves the Worker's bytes unchanged only with the features that rewrite HTML or
+  inject scripts turned off on its hosts. Under **Rules → Configuration Rules**, create one rule
+  ([settings](https://developers.cloudflare.com/rules/configuration-rules/settings/)) for the app, API, content and
+  public hosts:
+
+  ```txt
+  (http.host in {"artifacts.example.com" "artifacts-api.example.com"})
+  or ends_with(http.host, "-art.example.com")
+  or ends_with(http.host, "-pub.example.com")
+  ```
+
+  Configuration Rules apply per zone, so the dedicated layout needs two rules with the same settings: one in
+  `example.com` matching the first line, and one in `example-content.net` matching
+  `ends_with(http.host, ".example-content.net")`. The rule turns
+  off **Email Obfuscation**, **Automatic HTTPS Rewrites**, **Rocket Loader** and **Fonts** (Cloudflare Fonts), and
+  turns on **Disable Real User Monitoring (RUM)** and **Disable Zaraz**. Each of them would change an artifact's bytes,
+  inject a script that the gallery's CSP blocks, or drop the `ETag` a revalidation needs.
+
+  **Known limit:** artifact HTML still loses its `ETag` on delivery. "Replace insecure JavaScript libraries" is on for
+  the whole zone and removes the `ETag` from HTML without a CSP `script-src` or `default-src`; Configuration Rules
+  cannot turn it off, and on a shared zone it serves other hosts too. Artifact HTML is therefore sent in full on every
+  revalidation. Other artifact files keep their `ETag`, and gallery pages carry a CSP, so neither is affected.
+
 - **D1.** `pnpm exec wrangler d1 create <DATABASE_NAME> --update-config=false` prints the database ID
   ([get started](https://developers.cloudflare.com/d1/get-started/)). The deploy applies the migrations. Without
   `--update-config=false`, Wrangler offers to add the new binding to `wrangler.jsonc`, yes by default, which would put
@@ -423,6 +446,22 @@ Logs below are the Worker's Workers Logs in the dashboard, kept 7 days on Worker
    a search for `art_` (the token prefix) and for `Bearer` finds nothing; filtering on `$cloudflare.$metadata.type =
    "cf-worker-event"`, which marks invocation logs, finds nothing, since `wrangler.jsonc` turns them off ([invocation
    logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/#invocation-logs)).
+
+9. **Revalidation and unchanged bytes.** In the signed-in browser's developer tools, with the cache enabled, reload `/`:
+   the document's request carries `If-None-Match` and gets `304` with an `etag`, `vary: Accept-Encoding` and the CSP of
+   check 7; edit `probe/index.html`, run `ARTIFACTS_TOKEN=$TOKEN artifacts publish ./probe --id "$ID"` and reload: `200`
+   with a new `etag`. Then the Configuration Rule:
+
+   ```sh
+   ARTIFACTS_TOKEN=$TOKEN artifacts public "$ID" on
+   curl -s "https://$ID-pub.example.com/" | cmp - probe/index.html
+   curl -sI "https://$ID-pub.example.com/" | grep -i -E '^(etag|vary)'
+   ARTIFACTS_TOKEN=$TOKEN artifacts public "$ID" off
+   ```
+
+   Pass: `cmp` prints nothing, so the body is the probe's page byte for byte, with no injected script or rewritten
+   link; `vary: Accept-Encoding` once; no `etag` is the known limit of section 1, an `etag` means the zone's setting
+   has changed.
 
 Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"`, and revoke the check token.
 

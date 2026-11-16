@@ -410,9 +410,22 @@ export function createServer(deps: OperationDeps, token: TokenName): McpServer {
 export type McpHandlerFactory = typeof createMcpHandler;
 
 /**
+ * Design.md section 8: an MCP response is the API's, so it is never stored and never sniffed: `Cache-Control:
+ * no-store`, keeping the SDK's `no-transform` on a stream so no proxy buffers or recompresses it, and `nosniff`. Only
+ * the headers change; the body stream passes through as the SDK writes it.
+ */
+function withApiHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  const directives = (headers.get("Cache-Control") ?? "").split(",").map((directive) => directive.trim().toLowerCase());
+  headers.set("Cache-Control", directives.includes("no-transform") ? "no-store, no-transform" : "no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+/**
  * Serves one `/mcp` request after the token check (design.md section 8): a foreign `Origin` answers 403 (HOST-3);
  * otherwise the request goes to the SDK without its `Authorization` header (TOK-2). The SDK answers `GET` and `DELETE`
- * with 405 and a body over 4 MiB, counted as it is read, with 413.
+ * with 405 and a body over 4 MiB, counted as it is read, with 413. Every answer has the API's headers, the SDK's too.
  */
 export async function handleMcp(
   request: Request,
@@ -437,5 +450,5 @@ export async function handleMcp(
     // The SDK reports errors it answered itself; the log carries their class only (DATA-1).
     onerror: (error) => logEvent("request.failed", { error: errorName(error), host: "api" }),
   });
-  return handler.fetch(new Request(request, { headers }));
+  return withApiHeaders(await handler.fetch(new Request(request, { headers })));
 }

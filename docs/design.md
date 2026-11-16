@@ -245,7 +245,8 @@ no limit on versions.
   share link; a page can set its own policy), no CORS headers (SRV-1, ISO-2).
 - `ETag` names the representation, the bytes with their type: 32 hex digits of the SHA-256 over the file's SHA-256 and
   its content type. The same bytes published again under another type get another tag, so a cached copy with the old
-  type is not revalidated. The REST file route sends the same tag.
+  type is not revalidated. The REST file route sends the same tag. Cloudflare removes the tag from artifact HTML on
+  delivery, so HTML is sent in full on every revalidation ([operations.md](operations.md), section 1, "Known limit").
 - `Cache-Control: private, no-cache` on private hosts and `no-cache` on public hosts, for the latest and pinned versions
   alike. Access, the public flag and existence are checked before `If-None-Match` answers 304 (SRV-3), so revoking
   access, making an artifact private or deleting it takes effect on the next request. Immutability belongs to storage,
@@ -263,6 +264,11 @@ no limit on versions.
   deployments' files would need storage that outlives a deployment. A `fonts.css` answered this way names the current
   fonts' paths, which are immutable. A path that names no current asset answers 404. `/favicon.ico` keeps its fixed URL,
   which browsers request on their own, and revalidates with the app host's `private, no-cache` and its `ETag`.
+- `Vary: Accept-Encoding` on every response with a body or a validator, 200 and 304 alike: artifact files, the fallback
+  icon, gallery pages and gallery assets. The Workers runtime and Cloudflare compress by the request's
+  `Accept-Encoding`, and the runtime adds no `Vary` itself (checked with `wrangler dev`), so without it a cache between
+  the browser and Cloudflare could hand one client an encoding it did not ask for. Refusals, redirects and errors carry
+  neither a body worth caching nor a validator, and go without it.
 - `Cross-Origin-Resource-Policy: same-origin` on every response of a private content host and of the app host,
   including 304, 308 and 404, so another origin cannot load private content as a script, image, stylesheet or media
   with the owner's cookie (ISO-2). Public hosts omit it: their content needs no credential, and other sites may embed
@@ -387,6 +393,11 @@ so REST's `invalid_request` for the same input has no exact MCP twin.
   the host, the token and the `Origin` first, removes the `Authorization` header, then builds the handler for the
   request with a factory whose closure holds the token name; the token never reaches the SDK (TOK-2). `McpAgent` from `agents` is not used: nothing needs
   sessions.
+- Every `/mcp` answer carries `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, as the REST API's do: the
+  SDK's answers, its errors (405, 406, 400) and the Worker's own refusals (401, 403). The SDK marks an event stream
+  `no-cache, no-transform`; the Worker keeps `no-transform` (`no-store, no-transform`) so no proxy buffers or
+  recompresses the stream. It replaces the headers only and passes the body stream through unread, so events reach the
+  client as the SDK writes them.
 - Every tool has input and output schemas. Annotations: reads are `readOnlyHint`; `create_artifact` only adds, so it
   is not `destructiveHint`; every other change is `destructiveHint`, since an update can remove files, `set_public` can
   revoke public access, `set_archive` replaces a setting and `delete_artifact` deletes; `set_public`, `set_archive` and
@@ -455,6 +466,13 @@ Server-rendered on `APP_HOST`, without script, forms or frames; the screens foll
 
 A deleted artifact and any other path answer 404. Artifact text is escaped and the CSP forbids scripts and framing
 (ISO-5). The gallery links to artifacts rather than framing them: Access's behavior in frames is not documented.
+
+A page is `private, no-cache` with an `ETag`: 32 hex digits of the SHA-256 of its rendered bytes, so a matching
+`If-None-Match` answers 304 with the 200's headers (CSP, CORP, `nosniff`, referrer policy, `Cache-Control`). The tag
+covers everything the page shows, the archive counts, links and relative times included, which no stored timestamp
+would: a page with the same data an hour later reads differently. The Worker renders the page before it compares, after
+Access (ACC-1) and a successful query, so a 304 skips no check (SRV-3) and saves only the transfer; a refusal, a 404 and
+a failed read carry no tag.
 
 Every page links its stylesheets, preloads the fonts it uses ([gallery/design.md](gallery/design.md), "Ground rules")
 and links the gallery's icon ([gallery/design.md](gallery/design.md), "Icon"): `icon.svg` at its fingerprinted path
