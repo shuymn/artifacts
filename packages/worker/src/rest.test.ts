@@ -351,14 +351,20 @@ describe("section 8: pagination", () => {
     expect(first.next_cursor).not.toBeNull();
   });
 
-  it("orders by updated_at first", async () => {
+  it("orders by updated_at first, and the cursor carries it", async () => {
     const world = new World();
-    const a = await world.created({ title: "a", files: { "index.html": "i" } });
-    world.clock.now += 10;
-    const b = await world.created({ title: "b", files: { "index.html": "i" } });
-    world.clock.now += 10;
-    await world.updated(a.artifact.id, { base_version: 1 });
-    expect(await traverse(world, "limit=1")).toEqual([a.artifact.id, b.artifact.id]);
+    // IDs ordered against update times: a cursor that compared IDs alone would skip the older artifacts.
+    const z = "z".repeat(26);
+    const m = "m".repeat(26);
+    const a = "a".repeat(26);
+    world.ids.push(z, m, a);
+    for (const title of ["z", "m", "a"]) {
+      await world.created({ title, files: { "index.html": "i" } });
+      world.clock.now += 10;
+    }
+    expect(await traverse(world, "limit=1")).toEqual([a, m, z]);
+    await world.updated(z, { base_version: 1 });
+    expect(await traverse(world, "limit=1")).toEqual([z, a, m]);
   });
 
   it.each(["x", "123", "1.ABCDEFGHIJKLMNOPQRSTUVWXYZ", `-1.${"a".repeat(26)}`, `01.${"a".repeat(26)}`])(
@@ -399,6 +405,8 @@ describe("section 8: pagination", () => {
     });
     expect(new Set(seen).size).toBe(seen.length);
     expect(seen.slice(0, 2)).toEqual(all.slice(0, 2));
+    // Only the artifact that moved before the cursor is missed.
+    expect(seen.toSorted()).toEqual(all.filter((id) => id !== all[4]).toSorted());
   });
 
   it("pages versions newest first", async () => {
