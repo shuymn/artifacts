@@ -154,12 +154,15 @@ and the threats are the three adversaries below, not untrusted users.
   Neither check reads D1 or R2, and the OAuth check reads two KV records, the token's and its grant's revocation
   record (OAUTH-5); a failure answers 401 `unauthorized`. The
   OAuth endpoints and metadata documents on the API host take no credential. An `API_TOKENS` that is missing or `{}`
-  refuses every API token, and a malformed one answers 503. _Enforced (main)_ for API tokens in `src/tokens.ts` and
-  `src/config.ts`, and for the open authorization server endpoints in `src/index.ts`; _Planned (OAuth)_ for access
-  tokens and the protected resource metadata. Pinned by behavior
-  (`src/routing.test.ts`: each REST route and `/mcp`: no header, another scheme, unknown and removed tokens, nothing
-  changed; every token refused while `API_TOKENS` is missing or `{}`, and 503 on every host for a malformed one
-  (PL-46); planned: PL-40) and review (the constant-time comparison). **Changed for OAuth:** "every request to the API host" became "every request to `/v1/`
+  refuses every API token, and a malformed one answers 503. _Enforced (main)_ in `src/tokens.ts`, `src/credentials.ts`,
+  `src/config.ts` and `src/index.ts`, the open endpoints and the protected resource metadata included. Pinned by
+  behavior (`src/routing.test.ts`: each REST route and `/mcp`: no header, another scheme, unknown and removed tokens,
+  nothing changed, the 401 naming the route's metadata; every token refused while `API_TOKENS` is missing or `{}`, and
+  503 on every host for a malformed one (PL-46); `src/credentials.test.ts`: a `/mcp` token on `/v1/` and the reverse;
+  expired, unknown and forged three-part credentials; a credential of the library's form that `API_TOKENS` lists
+  checked by the library only, and an API token never sent to the library or KV; no D1 or R2 call on a refusal; the
+  metadata documents (PL-40); `src/sign-in.test.ts`: the MCP SDK's client and a REST client signing in from the 401
+  (PL-34)) and review (the constant-time comparison). **Changed for OAuth:** "every request to the API host" became "every request to `/v1/`
   and `/mcp`", because discovery, registration and the token exchange must answer before a client holds a credential
   (design.md, AC-14). They reach KV only, and a client record or a code grants nothing without the owner's approval
   (OAUTH-1), so no artifact operation is open.
@@ -167,21 +170,24 @@ and the threats are the three adversaries below, not untrusted users.
   one.** `API_TOKENS` holds hashes; KV holds OAuth credentials as hashes (OAUTH-4); D1 holds publisher names; no
   response echoes the `Authorization` header; the token endpoint returns tokens only to the client presenting a code
   with its verifier or a refresh token; the per-request MCP factory captures the publisher name, and the request it
-  serves has no `Authorization` header. _Enforced (main)_ for API tokens in `src/tokens.ts`, `src/mcp.ts`; _Planned
-  (OAuth)_ for OAuth credentials. Pinned by log redaction and behavior (`src/log-redaction.test.ts`: REST and `/mcp`
+  serves has no `Authorization` header. _Enforced (main)_ in `src/tokens.ts`, `src/credentials.ts`, `src/mcp.ts`, with
+  the library's hashing in KV. Pinned by log redaction and behavior (`src/log-redaction.test.ts`: REST and `/mcp`
   responses hold no marker token; `src/mcp.test.ts`: for a 2025-era and a 2026-07-28 client, every request and factory
   context the SDK receives carries no `Authorization` header, token or `authInfo`, and versions record the token name;
-  planned: PL-42, PL-45). **Changed for OAuth:** OAuth needs a token endpoint that returns tokens and a record per
+  `src/credentials.test.ts`: no log line or response holds an OAuth token or its secret; `src/sign-in.test.ts`: KV
+  holds no credential in clear (PL-42); `src/oauth.test.ts`: the OAuth endpoints' logs (PL-45)). **Changed for OAuth:** OAuth needs a token endpoint that returns tokens and a record per
   token to check and revoke it. Hashing keeps what TOK-2 protected: reading KV, like reading the secret, yields no
   usable credential.
 - **TOK-3: every version and every change records its publisher.** A version stores `published_by`, the publisher name
   of its credential (an API token's name, or the name the owner gave a grant); create, publish, public, archive and
   delete changes log the publisher name and, for an OAuth credential, the grant's ID, since names may repeat across
-  grants. _Enforced (main)_ for API tokens in `src/operations.ts`, and for the name a grant receives in
-  `src/consent.ts`: the consent form takes only a name of the form `[a-z0-9-]{1,32}`, keeps it in the grant's props
-  and logs it with the grant's ID in `grant.created`; _Planned (OAuth)_ for versions and changes made with a grant.
-  Pinned by behavior and log redaction (`src/publish.test.ts`; `src/consent.test.ts`: a name of the wrong form creates
-  no grant and keeps the transaction, a corrected one succeeds (PL-39); planned: PL-7).
+  grants. _Enforced (main)_ in `src/operations.ts`, with the publisher name and grant ID of an access token from
+  `src/credentials.ts`, and for the name a grant receives in `src/consent.ts`: the consent form takes only a name of the
+  form `[a-z0-9-]{1,32}`, keeps it in the grant's props and logs it with the grant's ID in `grant.created`. Pinned by
+  behavior and log redaction (`src/publish.test.ts`; `src/credentials.test.ts`: two grants under one name publishing
+  over REST and MCP, each change logged with its grant's ID (PL-7); `src/sign-in.test.ts`: the name given on the
+  consent page as `published_by`; `src/consent.test.ts`: a name of the wrong form creates no grant and keeps the
+  transaction, a corrected one succeeds (PL-39)).
 
 ### Origin isolation (ISO)
 
@@ -310,8 +316,10 @@ and the threats are the three adversaries below, not untrusted users.
   listing's KV reads wait 10 s and answer 503: _Enforced (main)_ in `src/grants.ts`, and for the listing an approval
   reads to replace a client's grants in `src/consent.ts`, where the 503 is the error page; pinned by behavior
   (`src/grants.test.ts`: a listing page and a record read that never answer, and a revocation whose slow writes still
-  complete; `src/consent.test.ts`: a listing that fails or never answers). The KV reads of a credential check:
-  _Planned (OAuth)_ (PL-40).
+  complete; `src/consent.test.ts`: a listing that fails or never answers). The KV reads of a credential check, the
+  token's record and its grant's revocation record, wait 10 s each and answer 503 before any D1 or R2 call: _Enforced
+  (main)_ in `src/credentials.ts`, pinned by behavior (`src/credentials.test.ts`: each read failing and never
+  answering, on `/mcp` and `/v1/`) (PL-40).
 
 ### Data (DATA)
 
@@ -327,16 +335,18 @@ and the threats are the three adversaries below, not untrusted users.
   identifier, a password in its userinfo included, reaches the logs. Neither carries another party's secret or
   private content: the library fetches the document without a credential from a public address, where a private host
   answers with Access's sign-in. Invocation logs are off. _Enforced (main)_ in
-  `src/log.ts`, for the authorization server's paths in `src/oauth.ts`, for the grants routes in `src/grants.ts`, and
-  for the consent page in `src/consent.ts`; _Planned (OAuth)_ for OAuth credentials on `/mcp` and `/v1/`. Pinned by
-  log redaction (`src/log-redaction.test.ts`: every route and failure path, `/mcp` and its SDK refusals included;
+  `src/log.ts`, for the authorization server's paths in `src/oauth.ts`, for the grants routes in `src/grants.ts`, for
+  the consent page in `src/consent.ts`, and for OAuth credentials on `/mcp` and `/v1/` in `src/credentials.ts`. Pinned
+  by log redaction (`src/log-redaction.test.ts`: every route and failure path, `/mcp` and its SDK refusals included;
   `src/oauth.test.ts`: the metadata, registration and token endpoints, their refusals, a revocation and KV and fetch
   failures, every `console` method captured, with markers in codes, tokens, verifiers, client names, client-ID paths,
   queries and userinfo, a client document's fields and thrown errors, each appearing only where those two lines put
   it, and the `onError` hook logging `oauth.refused` only (PL-45); `src/grants.test.ts`: the listing, a revocation and
   their failures, with markers in a grant's metadata, a client's name and a KV error; `src/consent.test.ts`: every
   outcome of the authorization endpoint, with markers in a client's name and URI, a redirect path, `state`, a consent
-  handle and cookie, a code, a form value and a KV error's message, none appearing) and source check
+  handle and cookie, a code, a form value and a KV error's message, none appearing; `src/credentials.test.ts`: changes,
+  refusals and KV failures with OAuth tokens, no token, secret, client ID or name or KV error appearing, and a grant's
+  ID only beside its publisher name in a change or in the refusal of a revoked grant) and source check
   (`src/source.test.ts`: `console` only in the logging module; `wrangler.jsonc`). **Gap:** the gallery's routes are
   not among the redaction
   markers yet. **Changed for OAuth:** "only `logEvent`" covers the Worker's own sources, since the dependency's two
@@ -353,8 +363,7 @@ and the threats are the three adversaries below, not untrusted users.
 
 ### OAuth (OAUTH)
 
-Decided in [design.md](design.md#7-auth) section 7. Each states which part is _Enforced (main)_; the rest is
-_Planned (OAuth)_.
+Decided in [design.md](design.md#7-auth) section 7. Each states where it is _Enforced (main)_ and how it is pinned.
 
 - **OAUTH-1: only the owner creates a grant.** A grant is created only by `POST /oauth/authorize` on the app host,
   after ACC-1 with the app audience, with the handle of a consent transaction that the same browser opened (its
@@ -377,14 +386,18 @@ _Planned (OAuth)_.
   loopback port accepted; public and confidential clients, without a challenge, with `plain`, with a challenge the
   verifier does not match (PL-36); `state` and `iss` on every redirect; `form-action` (PL-38)).
 - **OAUTH-3: an access token works only on its resource.** Every grant and token names `<API origin>/mcp` or
-  `<API origin>/v1`; a token is refused on the other, and refreshing keeps the grant's resource. Pinned by behavior
-  (PL-40; PL-34 for a request without `resource`).
+  `<API origin>/v1`; a token is refused on the other, and refreshing keeps the grant's resource. _Enforced (main)_ in
+  `src/oauth.ts` (the two resources) and `src/credentials.ts` (the route's resource to `validateToken`, whose audience
+  check refuses the other). Pinned by behavior (`src/credentials.test.ts`: each resource's token on the other route,
+  and a refreshed token (PL-40); `src/sign-in.test.ts`: each sign-in's token on the other route, and a request without
+  `resource` bound to `/mcp` (PL-34)).
 - **OAUTH-4: KV holds no credential in clear.** Access and refresh tokens, codes, client secrets and consent handles
   are stored as hashes, a grant's props encrypted under keys its tokens wrap, a consent transaction encrypted under a
   key derived from its handle, and a PKCE challenge in place of its verifier. A grant's listing metadata (publisher
-  name, client name, redirect host) is not a credential and is stored in clear. Pinned by behavior (PL-42: while a
-  pending consent, an unexchanged code, issued tokens and a confidential client's registration are each live and
-  asserted to exist, no key or value holds its credential).
+  name, client name, redirect host) is not a credential and is stored in clear. _Enforced (main)_ by the library's
+  storage. Pinned by behavior (`src/sign-in.test.ts`, PL-42: while a pending consent, an unexchanged code, issued
+  tokens, refreshed tokens beside the previous refresh token and a confidential client's registration are each live and
+  asserted to exist, no key, value or key metadata holds its credential).
 - **OAUTH-5: revoking a grant ends it for good.** `DELETE /v1/grants/{id}`, RFC 7009 with the grant's refresh token,
   and a new approval for the same client and resource (for a CIMD client, from the same redirect URI) delete the grant
   and its tokens through the library's `revokeGrant`, the only code that deletes a grant. The library reaches KV
@@ -408,9 +421,11 @@ _Planned (OAuth)_.
   `src/consent.ts`, pinned by behavior (`src/consent.test.ts`: the client's grant for the resource replaced and its
   tokens refused, its other resource and other clients kept, a CIMD client's grant replaced only from the same
   redirect URI; a refresh's write-back after the replacement refused; injected failures of the listing, the record's
-  write and the deletion answering 503 without a code). _Planned (OAuth)_ for access tokens. Pinned by behavior
-  (PL-41: for each path, barriers between a refresh's and a code exchange's read and write of the grant; injected
-  failures of the record's write and of the deletion) and deployed check (AC-20, the delay measured).
+  write and the deletion answering 503 without a code); and for access tokens in `src/credentials.ts`, pinned by
+  behavior (`src/credentials.test.ts`: a record refusing a token whose own record is still there, and a token refused
+  after `DELETE`; the write-back tests above: the access token a refresh or code exchange returned after the
+  revocation refused on its resource, `/mcp` and `/v1/` for `DELETE` (PL-41)). Pinned on the deployment by deployed
+  check (AC-20, the delay measured).
 - **OAUTH-6: client documents are fetched only from public addresses and bounded, and a client on this deployment's
   hosts gets no consent page.** The compatibility flag `global_fetch_strictly_public` keeps the library's CIMD fetches
   on public addresses, the library bounds a document at 5 KB and 10 s, and the authorize endpoint refuses a client ID

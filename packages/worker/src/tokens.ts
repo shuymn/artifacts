@@ -1,8 +1,9 @@
 /**
  * API tokens (design.md section 7; TOK-1 to TOK-3). The optional secret `API_TOKENS` is a JSON object that maps each
  * token name to the hex SHA-256 of its token; without it, or with `{}`, every token is refused. A request presents
- * `Authorization: Bearer <token>`; its SHA-256 is compared with every entry in constant time, and the matching name
- * stands for the caller from then on. The token itself is never stored, returned or logged.
+ * `Authorization: Bearer <credential>`; a credential of the OAuth library's form goes to the library (credentials.ts),
+ * and any other is an API token, whose SHA-256 is compared with every entry in constant time. The matching name stands
+ * for the caller from then on. The token itself is never stored, returned or logged.
  */
 declare const tokenNameBrand: unique symbol;
 /**
@@ -47,26 +48,33 @@ export function parseApiTokens(text: string): readonly ApiToken[] | undefined {
   return tokens;
 }
 
-export const TOKEN_REFUSALS = ["missing", "scheme", "unknown"] as const;
+/**
+ * Why a credential was refused: no `Authorization` header, another scheme, an API token `API_TOKENS` does not list, an
+ * OAuth credential the library refuses, or one whose grant has a revocation record.
+ */
+export const TOKEN_REFUSALS = ["missing", "scheme", "unknown", "oauth", "revoked"] as const;
 export type TokenRefusal = (typeof TOKEN_REFUSALS)[number];
 
-export type TokenResult =
-  | { readonly ok: true; readonly name: TokenName }
-  | { readonly ok: false; readonly reason: TokenRefusal };
+export type BearerResult =
+  | { readonly ok: true; readonly credential: string }
+  | { readonly ok: false; readonly reason: "missing" | "scheme" };
 
-/** TOK-1: the token name of the request's bearer token, before any storage is read. */
-export async function authenticate(request: Request, tokens: readonly ApiToken[]): Promise<TokenResult> {
+/** TOK-1: the request's bearer credential, unchecked. */
+export function bearerCredential(request: Request): BearerResult {
   const header = request.headers.get("Authorization");
   if (header === null || header === "") return { ok: false, reason: "missing" };
-  const match = /^Bearer +([^\s]+) *$/i.exec(header);
-  const token = match?.[1];
-  if (token === undefined) return { ok: false, reason: "scheme" };
-  if (token.length > MAX_TOKEN_LENGTH) return { ok: false, reason: "unknown" };
+  const credential = /^Bearer +([^\s]+) *$/i.exec(header)?.[1];
+  return credential === undefined ? { ok: false, reason: "scheme" } : { ok: true, credential };
+}
+
+/** TOK-1: the name `API_TOKENS` gives `token`, without reading storage; undefined when it lists none. */
+export async function apiTokenName(token: string, tokens: readonly ApiToken[]): Promise<TokenName | undefined> {
+  if (token.length > MAX_TOKEN_LENGTH) return undefined;
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
   let name: TokenName | undefined;
   // Every entry is compared, so the time taken does not depend on which entry matches.
   for (const entry of tokens) {
     if (crypto.subtle.timingSafeEqual(digest, entry.hash) && name === undefined) name = entry.name;
   }
-  return name === undefined ? { ok: false, reason: "unknown" } : { ok: true, name };
+  return name;
 }

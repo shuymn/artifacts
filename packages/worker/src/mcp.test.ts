@@ -204,13 +204,13 @@ function testDeps(overrides: Partial<OperationDeps> = {}): OperationDeps {
 const CODEX = parseApiTokens(testEnv().API_TOKENS ?? "")?.find((entry) => entry.name === "codex")?.name;
 
 /**
- * A stand-in for the Worker that hands each request to handleMcp as the router does after the token check: as it
+ * A stand-in for the Worker that hands each request to handleMcp as the router does after the credential check: as it
  * arrived, Authorization included, with the token's name.
  */
 function atBoundary(deps: OperationDeps, factoryFor?: (request: Request) => McpHandlerFactory): Fetcher {
   if (CODEX === undefined) throw new Error("test configuration");
   const name = CODEX;
-  return { fetch: async (request) => handleMcp(request, deps, name, factoryFor?.(request)) };
+  return { fetch: async (request) => handleMcp(request, deps, { name }, factoryFor?.(request)) };
 }
 
 // PL-8, TOK-2: what crosses into the SDK.

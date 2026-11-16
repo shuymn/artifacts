@@ -175,19 +175,24 @@ const ROUTES: [string, string][] = [
   ["GET", `/v1/artifacts/${ID}/versions/1/files/index.html`],
   ["POST", "/mcp"],
   ["GET", "/mcp"],
-  ["GET", "/"],
 ];
+
+/** A 401's challenge where OAuth is on: the route's metadata, and `invalid_token` when a credential was sent. */
+const challengeFor = (path: string, sent: boolean) =>
+  `Bearer resource_metadata="${API}/.well-known/oauth-protected-resource/${path === "/mcp" ? "mcp" : "v1"}"${
+    sent ? ', error="invalid_token"' : ""
+  }`;
 
 // PL-5, TOK-1.
 describe("TOK-1: bearer tokens on the API host", () => {
-  it.each<[string, Record<string, string>]>([
-    ["no header", {}],
-    ["another scheme", { Authorization: `Basic ${btoa(`codex:${TOKENS.codex}`)}` }],
-    ["an empty bearer", { Authorization: "Bearer " }],
-    ["an unknown token", { Authorization: `Bearer art_${"z".repeat(32)}` }],
-    ["a removed token", { Authorization: `Bearer ${TOKENS.removed}` }],
-    ["a token with a trailing character", { Authorization: `Bearer ${TOKENS.codex}x` }],
-  ])("answers 401 to %s on every route and changes nothing", async (_name, headers) => {
+  it.each<[string, Record<string, string>, boolean]>([
+    ["no header", {}, false],
+    ["another scheme", { Authorization: `Basic ${btoa(`codex:${TOKENS.codex}`)}` }, false],
+    ["an empty bearer", { Authorization: "Bearer " }, false],
+    ["an unknown token", { Authorization: `Bearer art_${"z".repeat(32)}` }, true],
+    ["a removed token", { Authorization: `Bearer ${TOKENS.removed}` }, true],
+    ["a token with a trailing character", { Authorization: `Bearer ${TOKENS.codex}x` }, true],
+  ])("answers 401 to %s on every route and changes nothing", async (_name, headers, sent) => {
     const world = new World();
     const created = await world.created({ title: "t", files: { "index.html": "x" } });
     const before = await snapshot();
@@ -200,12 +205,23 @@ describe("TOK-1: bearer tokens on the API host", () => {
         ...(method === "GET" ? {} : { body: JSON.stringify({ public: true }) }),
       });
       expect({ method, route, status: response.status }).toEqual({ method, route, status: 401 });
-      expect(response.headers.get("WWW-Authenticate")).toBe("Bearer");
+      expect(response.headers.get("WWW-Authenticate")).toBe(challengeFor(path, sent));
       expect(await response.json()).toMatchObject({ error: { code: "unauthorized" } });
     }
     expect(db.batches).toBe(0);
     expect(bucket.calls).toEqual([]);
     expect(await snapshot()).toEqual(before);
+  });
+
+  it("answers 401 with a bare challenge, on every route outside /mcp and /v1/ too, where OAuth is off", async () => {
+    const world = new World({ vars: LOCAL_HOSTS });
+    for (const path of ["/v1/artifacts", "/mcp", "/"]) {
+      for (const headers of [{}, { Authorization: `Bearer ${TOKENS.removed}` }]) {
+        const response = await world.fetch(`http://api.localhost:8787${path}`, { method: "POST", headers });
+        expect({ path, status: response.status }).toEqual({ path, status: 401 });
+        expect(response.headers.get("WWW-Authenticate")).toBe("Bearer");
+      }
+    }
   });
 
   it("accepts the scheme in any case and either configured token", async () => {
@@ -223,6 +239,18 @@ describe("TOK-1: bearer tokens on the API host", () => {
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
     }
+  });
+
+  // Where OAuth is on, a 401 names a resource's metadata, and a path outside `/mcp` and `/v1/` belongs to none.
+  it("answers 404 without a credential to a path outside /mcp and /v1/ where OAuth is on", async () => {
+    const world = new World();
+    for (const path of ["/", "/mcp/", "/v1", "/v2/artifacts"]) {
+      const response = await world.api("GET", path, { token: null });
+      expect({ path, status: response.status }).toEqual({ path, status: 404 });
+      expect(response.headers.has("WWW-Authenticate")).toBe(false);
+    }
+    const inside = await world.api("GET", "/v1/other", { token: null });
+    expect(inside.status).toBe(401);
   });
 });
 
