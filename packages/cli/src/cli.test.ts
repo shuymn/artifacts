@@ -1,7 +1,7 @@
 // The command line, configuration, token generation and failure paths, against stubbed API answers. The Worker itself
 // answers in e2e.test.ts.
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, symlink } from "node:fs/promises";
 import { join, posix, win32 } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -59,6 +59,12 @@ const stalled: Fetch = (_input, init) =>
   new Promise((_, reject) => {
     init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
   });
+
+/** A version holding only index.html, and its bytes. */
+const oneFile: Fetch = async (input) =>
+  input.includes("/files/")
+    ? new Response("x")
+    : json(200, { artifact: artifact(ID), version: version([{ path: "index.html", body: "x" }]) });
 
 /** A listing whose every page names the same next cursor; past ten pages it stops answering, so a loop ends. */
 function looping(): Fetch {
@@ -288,6 +294,19 @@ describe("pull", () => {
     expect(stderr).toContain('"..\\\\escaped.txt"');
     expect(await readdir(parent)).toEqual(["out"]);
     expect((await readdir(join(parent, "out"))).toSorted()).toEqual(["..\\escaped.txt", "index.html"]);
+  });
+
+  it("refuses a destination that is a symbolic link, writing nothing into its target", async () => {
+    const parent = await tempDir();
+    const real = join(parent, "real");
+    await mkdir(real);
+    await symlink(real, join(parent, "link"));
+    for (const destination of [join(parent, "link"), `${join(parent, "link")}/`]) {
+      const { status, stderr } = await cli(["pull", ID, destination], { env: ENV, fetch: oneFile });
+      expect(status).toBe(1);
+      expect(stderr).toContain("is a symbolic link; pull into a new directory");
+    }
+    expect(await readdir(real)).toEqual([]);
   });
 
   it("refuses bytes that differ from the listing and removes the file", async () => {
