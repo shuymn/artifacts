@@ -7,7 +7,7 @@ import { parseConfig } from "./config.ts";
 import { decodeContent, encodeBase64, ENCODINGS } from "./encoding.ts";
 import { ERROR_STATUS, OPERATION_ERRORS } from "./errors.ts";
 import { newArtifactId } from "./id.ts";
-import { handleMcp, INSTRUCTIONS, READ_FILE_BYTES, type McpHandlerFactory } from "./mcp.ts";
+import { handleMcp, INSTRUCTIONS, type McpHandlerFactory } from "./mcp.ts";
 import type { OperationDeps } from "./operations.ts";
 import {
   API,
@@ -637,6 +637,8 @@ describe("RES-1: the MCP request body bound", () => {
 
 // RES-1: read_file returns at most 1 MiB and names the REST URL of a larger file.
 const ODD = "dir/a b\\c#?%é.txt";
+/** design.md section 6: read_file returns at most 1 MiB, written out so that a change of the constant fails. */
+const MIB = 1_048_576;
 
 async function published(world: World, files: Record<string, Uint8Array | string>): Promise<string> {
   const created = await world.created({ title: "t", files: { "index.html": "x", ...files } });
@@ -646,15 +648,15 @@ async function published(world: World, files: Record<string, Uint8Array | string
 describe("read_file", () => {
   it("returns a file of exactly 1 MiB", async () => {
     const world = new World();
-    const id = await published(world, { [ODD]: "a".repeat(READ_FILE_BYTES) });
+    const id = await published(world, { [ODD]: "a".repeat(MIB) });
     const outcome = await callTool(await mcpClient(world), "read_file", { id, version: 1, path: ODD });
-    expect(outcome).toMatchObject({ ok: true, value: { size: READ_FILE_BYTES, encoding: "utf8" } });
-    expect(stringAt(outcome.value, "content")).toHaveLength(READ_FILE_BYTES);
+    expect(outcome).toMatchObject({ ok: true, value: { size: MIB, encoding: "utf8" } });
+    expect(stringAt(outcome.value, "content")).toHaveLength(MIB);
   });
 
   it("refuses one byte more before reading R2, naming the REST URL that serves it", async () => {
     const world = new World();
-    const id = await published(world, { [ODD]: "a".repeat(READ_FILE_BYTES + 1) });
+    const id = await published(world, { [ODD]: "a".repeat(1_048_577) });
     const bucket = new BucketProbe();
     world.env = { ...world.env, FILES: bucket.binding };
     const outcome = await callTool(await mcpClient(world), "read_file", { id, version: 1, path: ODD });
@@ -673,7 +675,7 @@ describe("read_file", () => {
     expect(bucket.count("get")).toBe(0);
     const bytes = await world.fetch(restUrl, { headers: { Authorization: `Bearer ${TOKENS.codex}` } });
     expect(bytes.status).toBe(200);
-    expect((await bytes.arrayBuffer()).byteLength).toBe(READ_FILE_BYTES + 1);
+    expect((await bytes.arrayBuffer()).byteLength).toBe(1_048_577);
   });
 
   it.each<[string, string | Uint8Array, string | undefined, "utf8" | "base64"]>([
