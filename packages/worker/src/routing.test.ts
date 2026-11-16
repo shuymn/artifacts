@@ -210,9 +210,9 @@ describe("TOK-1: bearer tokens on the API host", () => {
     }
   });
 
-  it("answers 404 for /mcp and unknown routes after the token", async () => {
+  it("answers 404 for unknown routes after the token", async () => {
     const world = new World();
-    for (const path of ["/mcp", "/", "/v2/artifacts", "/v1/other"]) {
+    for (const path of ["/", "/mcp/", "/v2/artifacts", "/v1/other"]) {
       const response = await world.api("GET", path);
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: { code: "not_found" } });

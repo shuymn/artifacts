@@ -2,7 +2,18 @@ import { env } from "cloudflare:workers";
 import { SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BucketProbe, captureLogs, DatabaseProbe, never, TOKENS, World } from "./test-support.ts";
+import {
+  API,
+  BucketProbe,
+  callTool,
+  captureLogs,
+  DatabaseProbe,
+  mcpClient,
+  never,
+  stringAt,
+  TOKENS,
+  World,
+} from "./test-support.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -19,7 +30,11 @@ const MARKERS = {
   error: "ERROR-MESSAGE-MARKER",
   badToken: "art_markermarkermarkermarkermarker",
   config: "CONFIG-MARKER",
+  origin: "ORIGIN-MARKER",
+  body: "BODY-MARKER",
 };
+
+const file = (path: string, content: string) => ({ path, content });
 
 describe("DATA-1: log redaction", () => {
   it("logs no secret and no artifact content on any route or failure path", async () => {
@@ -124,6 +139,116 @@ describe("DATA-1: log redaction", () => {
     }
 
     // TOK-2: no response echoes a token.
+    for (const response of responses) {
+      const echoed = `${[...response.headers].join("\n")}\n${await response.text()}`;
+      for (const token of [TOKENS.codex, MARKERS.badToken]) expect(echoed).not.toContain(token);
+    }
+  });
+
+  it("logs no secret and no artifact content on the MCP route or its failure paths", async () => {
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 50 } });
+    const logs = captureLogs();
+    const responses: Response[] = [];
+    const fetch = world.fetch.bind(world);
+    world.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      responses.push(response.clone());
+      return response;
+    };
+    const client = await mcpClient(world);
+
+    // Changes and reads.
+    const created = await callTool(client, "create_artifact", {
+      title: MARKERS.title,
+      description: MARKERS.description,
+      files: [file("index.html", MARKERS.bytes), file(`${MARKERS.path}.txt`, MARKERS.bytes)],
+    });
+    const id = stringAt(created.value, "artifact", "id");
+    await callTool(client, "update_artifact", {
+      id,
+      base_version: 1,
+      title: `${MARKERS.title}2`,
+      files: [file(`${MARKERS.path}2`, MARKERS.bytes)],
+    });
+    await callTool(client, "get_artifact", { id });
+    await callTool(client, "list_artifacts", {});
+    await callTool(client, "list_versions", { id });
+    await callTool(client, "read_file", { id, version: 1, path: `${MARKERS.path}.txt` });
+    await callTool(client, "set_public", { id, public: true });
+    await callTool(client, "set_archive", { id, archive: "kept" });
+
+    // Refusals: schema, operation errors.
+    await callTool(client, "create_artifact", { title: `${MARKERS.title}\n`, files: [file("index.html", "x")] });
+    await callTool(client, "create_artifact", { title: "t", files: [file(`_v/${MARKERS.path}`, MARKERS.bytes)] });
+    await callTool(client, "create_artifact", { title: "t", files: [file(MARKERS.path, MARKERS.bytes)] });
+    await callTool(client, "get_artifact", { id: MARKERS.path });
+    await callTool(client, "read_file", { id, version: 1, path: MARKERS.path });
+
+    // Transport refusals: tokens, Origin, method, media type, size, malformed and unsupported requests.
+    const post = (headers: Record<string, string>, body: BodyInit) =>
+      world.fetch(`${API}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", ...headers },
+        body,
+      });
+    const auth = { Authorization: `Bearer ${TOKENS.codex}` };
+    const refusals = [
+      await post({ Authorization: `Bearer ${MARKERS.badToken}` }, "{}"),
+      await post({ ...auth, Origin: `https://${MARKERS.origin}.example.org` }, "{}"),
+      await world.fetch(`${API}/mcp`, { method: "GET", headers: auth }),
+      await post({ ...auth, "Content-Type": "text/plain" }, MARKERS.body),
+      await post(auth, `"${MARKERS.body}${"x".repeat(4 * 1024 * 1024)}"`),
+      await post(auth, `{"${MARKERS.body}`),
+    ];
+    expect(refusals.map((response) => response.status)).toEqual([401, 403, 405, 415, 413, 400]);
+    const unsupported = await post(
+      { ...auth, "MCP-Protocol-Version": "2099-01-01" },
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2099-01-01", marker: MARKERS.body } },
+      }),
+    );
+    expect(unsupported.status).toBe(400);
+
+    // Storage failures with marker messages.
+    const bucket = new BucketProbe();
+    const database = new DatabaseProbe();
+    world.env = { ...world.env, FILES: bucket.binding, DB: database.binding };
+    bucket.behave = (op) => (op === "put" ? Promise.reject(new Error(MARKERS.error)) : undefined);
+    await callTool(client, "create_artifact", {
+      title: MARKERS.title,
+      files: [file("index.html", `${MARKERS.bytes}-new`)],
+    });
+    bucket.behave = (op) => (op === "get" ? never() : undefined);
+    await callTool(client, "read_file", { id, version: 1, path: `${MARKERS.path}.txt` });
+    bucket.behave = () => undefined;
+    database.behave = () => Promise.reject(new Error(MARKERS.error));
+    await callTool(client, "list_artifacts", {});
+    database.behave = () => undefined;
+    bucket.behave = (op) => (op === "delete" ? Promise.reject(new Error(MARKERS.error)) : undefined);
+    await callTool(client, "delete_artifact", { id });
+
+    const text = logs.text();
+    for (const event of [
+      "artifact.created",
+      "artifact.updated",
+      "artifact.changed",
+      "artifact.deleted",
+      "token.refused",
+      "operation.failed",
+      "cleanup.failed",
+      "request.failed",
+    ]) {
+      expect(text).toContain(event);
+    }
+    for (const marker of [...Object.values(MARKERS), TOKENS.codex]) {
+      expect(text).not.toContain(marker);
+    }
+
+    // TOK-2: no response echoes a token.
+    expect(responses.length).toBeGreaterThan(20);
     for (const response of responses) {
       const echoed = `${[...response.headers].join("\n")}\n${await response.text()}`;
       for (const token of [TOKENS.codex, MARKERS.badToken]) expect(echoed).not.toContain(token);

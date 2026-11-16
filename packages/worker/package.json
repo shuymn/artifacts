@@ -8,6 +8,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "catalog:",
     "jose": "catalog:",
     "mime": "catalog:",
     "zod": "catalog:"
@@ -15,6 +16,8 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",
     "@cloudflare/workers-types": "catalog:",
+    "@modelcontextprotocol/client": "catalog:",
+    "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:"

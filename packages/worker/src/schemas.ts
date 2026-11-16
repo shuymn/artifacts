@@ -6,7 +6,7 @@
 import { z } from "zod";
 
 import { isContentType } from "./content-type.ts";
-import type { Issue, IssueReason } from "./errors.ts";
+import { ISSUE_MESSAGES, type Issue, type IssueReason } from "./errors.ts";
 import { parseFilePath, utf8Length } from "./paths.ts";
 
 /** Bounds of design.md section 6, each in its unit. */
@@ -29,7 +29,11 @@ export type ArchiveSetting = (typeof ARCHIVE_SETTINGS)[number];
 export const ARCHIVED_FILTERS = ["exclude", "only", "include"] as const;
 export type ArchivedFilter = (typeof ARCHIVED_FILTERS)[number];
 
-const reasonIssue = (reason: IssueReason) => ({ code: "custom" as const, params: { reason } });
+const reasonIssue = (reason: IssueReason) => ({
+  code: "custom" as const,
+  message: ISSUE_MESSAGES[reason],
+  params: { reason },
+});
 
 /** Unicode control characters and line or paragraph separators: a title is one line. */
 const LINE_BREAKING = /[\p{Cc}\p{Zl}\p{Zp}]/u;

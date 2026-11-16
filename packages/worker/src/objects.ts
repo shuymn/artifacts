@@ -121,9 +121,49 @@ export async function uploadObjects(
 }
 
 export async function getObject(store: ObjectStore, id: ArtifactId, sha256: string): Promise<R2ObjectBody> {
-  const object = await call(store, () => store.bucket.get(objectKey(id, sha256)));
+  let pending: Promise<R2ObjectBody | null> | undefined;
+  let object: R2ObjectBody | null;
+  try {
+    object = await call(store, () => {
+      pending = store.bucket.get(objectKey(id, sha256));
+      return pending;
+    });
+  } catch (error) {
+    // A get that answers after its timeout is not used: its body is cancelled, so no stream is left open.
+    void pending?.then(
+      (late) => late?.body.cancel().catch(() => {}),
+      () => {},
+    );
+    throw error;
+  }
   if (object === null) throw new StorageError("object_missing");
   return object;
+}
+
+/**
+ * The whole body of a fetched object, read under the R2 timeout; at most `size` bytes, its stored size. The stream is
+ * cancelled on every exit, so a body that stalls past the timeout is not left open.
+ */
+export async function readBody(store: ObjectStore, object: R2ObjectBody, size: number): Promise<Uint8Array> {
+  const reader = object.body.getReader();
+  const read = async () => {
+    const bytes = new Uint8Array(size);
+    let length = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (length + value.byteLength > size) throw new StorageError("error");
+      bytes.set(value, length);
+      length += value.byteLength;
+    }
+    if (length !== size) throw new StorageError("error");
+    return bytes;
+  };
+  try {
+    return await call(store, read);
+  } finally {
+    reader.cancel().catch(() => {});
+  }
 }
 
 /** VER-4: deletes every object under the artifact's prefix, a page at a time. */
