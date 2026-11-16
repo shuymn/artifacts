@@ -8,7 +8,7 @@ import { lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import { dirname, posix, resolve, win32, type PlatformPath } from "node:path";
 
 import type { Api, ArtifactVersion, FileJson } from "./api.ts";
-import { CliError } from "./errors.ts";
+import { CliError, codeOf } from "./errors.ts";
 
 const HOST_PATHS: PlatformPath = process.platform === "win32" ? win32 : posix;
 
@@ -65,12 +65,6 @@ async function prepare(directory: string): Promise<void> {
   if (info.isSymbolicLink()) throw new CliError(`${shown} is a symbolic link; pull into a new directory`);
   if (!info.isDirectory()) throw new CliError(`${shown} is not a directory`);
   if ((await readdir(path)).length > 0) throw new CliError(`${shown} is not empty; pull into a new directory`);
-}
-
-function codeOf(error: unknown): string | undefined {
-  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-    ? error.code
-    : undefined;
 }
 
 /** The chunks of a download; a read that fails or passes the request's timeout ends the pull. */

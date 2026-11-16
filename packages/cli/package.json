@@ -12,6 +12,9 @@
     "build": "bun scripts/build.ts",
     "smoke": "vitest run --project smoke"
   },
+  "dependencies": {
+    "oauth4webapi": "catalog:"
+  },
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:",
