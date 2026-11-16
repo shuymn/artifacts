@@ -192,20 +192,21 @@ of the archive regardless of age.
 
 | Rule          | Value and reason                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Form          | relative, `/`-separated, no leading or trailing `/`, no empty segment: Cloudflare merges adjacent slashes in requests, and a trailing `/` names a directory index                                                                                                                                                                                                                  |
+| Form          | relative, `/`-separated, no leading or trailing `/`, no empty segment: a zone with Cloudflare URL normalization merges adjacent slashes in requests, and a trailing `/` names a directory index                                                                                                                                                                                    |
 | Segments      | not `.` or `..`, which URL parsing and Cloudflare's normalization remove before a request arrives; the first segment is not `_v`, which pinned versions use, nor `cdn-cgi`, which Cloudflare manages on every proxied hostname and does not pass on ([`/cdn-cgi/`](https://developers.cloudflare.com/fundamentals/reference/cdn-cgi-endpoint/)); both are refused before any write |
 | Characters    | any Unicode scalar value except NUL, which SQLite's string functions treat as an end; `%`, `#`, `?` and `\` are allowed, and links percent-encode them (the authoring rule)                                                                                                                                                                                                        |
 | Normalization | stored and looked up in NFC: macOS file names can arrive in NFD while pages name files in NFC                                                                                                                                                                                                                                                                                      |
 | Case          | case-sensitive                                                                                                                                                                                                                                                                                                                                                                     |
 | Length        | at most 1 KiB of UTF-8: the whole file list is loaded on every update and returned by `get`, so 2000 paths stay near 2 MiB                                                                                                                                                                                                                                                         |
 
-A request is resolved from the pathname the Worker receives, after URL parsing and Cloudflare's normalization have
-removed dot segments and merged slashes
-([URL normalization](https://developers.cloudflare.com/rules/normalization/how-it-works/)): split on `/`, decode each
-segment once with strict percent-decoding (a malformed escape or invalid UTF-8 answers 404; an encoded `/` answers
-404), normalize to NFC, add `index.html` after a trailing `/`, and look the path up in the selected version only
-(SRV-2). A directory with an `index.html` and no file of its own name answers 308 to the path with `/`, and so does
-`/_v/<n>`; `<n>` is a canonical decimal of an existing version.
+A request is resolved from the pathname the Worker receives, after URL parsing and the zone's URL normalization have
+removed dot segments; the default normalization type, RFC 3986, keeps adjacent slashes, which the Cloudflare type merges
+([URL normalization](https://developers.cloudflare.com/rules/normalization/how-it-works/),
+[settings](https://developers.cloudflare.com/rules/normalization/settings/)), so an empty segment that arrives answers
+404: split on `/`, decode each segment once with strict percent-decoding (a malformed escape or invalid UTF-8 answers
+404; an encoded `/` answers 404), normalize to NFC, add `index.html` after a trailing `/`, and look the path up in the
+selected version only (SRV-2). A directory with an `index.html` and no file of its own name answers 308 to the path
+with `/`, and so does `/_v/<n>`; `<n>` is a canonical decimal of an existing version.
 
 ### Content types
 
@@ -436,12 +437,18 @@ A deleted artifact and any other path answer 404. Artifact text is escaped and t
 
 ## 11. Operations
 
+The steps are in [operations.md](operations.md).
+
 - **Configuration split:** `packages/worker/wrangler.jsonc` (public) holds bindings (`DB`, `FILES`), migrations and
-  observability with invocation logs off. The gitignored `wrangler.deploy.jsonc` holds the account, routes, custom
-  domains, database and bucket identifiers, and the variables `APP_HOST`, `API_HOST`, `CONTENT_HOST_SUFFIX`,
-  `PUBLIC_HOST_SUFFIX`, `ARCHIVE_AFTER_DAYS`, `ACCESS_TEAM_DOMAIN`, `ACCESS_APP_AUD` and `ACCESS_CONTENT_AUD`;
-  `API_TOKENS` is a secret. A deployment script checks the file with the Worker's own parser, merges, and runs
-  `wrangler deploy` (DATA-2).
+  observability with invocation logs off. The deployment values, in the form of `wrangler.deploy.example.jsonc`, hold
+  the account, routes, custom domains, database and bucket identifiers, and the variables `APP_HOST`, `API_HOST`,
+  `CONTENT_HOST_SUFFIX`, `PUBLIC_HOST_SUFFIX`, `ARCHIVE_AFTER_DAYS`, `ACCESS_TEAM_DOMAIN`, `ACCESS_APP_AUD` and
+  `ACCESS_CONTENT_AUD`; they live in the build variable `ARTIFACTS_DEPLOY_JSONC` on Workers Builds or in the gitignored
+  `wrangler.deploy.jsonc` on the owner's machine. `API_TOKENS` is a secret. The deployment script (`pnpm run deploy`)
+  checks the values with the Worker's own parser, merges them, checks that the bucket exists, applies the D1
+  migrations on every deploy and runs `wrangler deploy` (DATA-2).
+- **Releases:** `main` is never deployed. release-please keeps a release PR open; merging it tags a version, a
+  workflow fast-forwards the `release` branch to it, and Workers Builds deploys `release` only.
 - **Cloudflare setup by the owner:** the proxied wildcard DNS record, the two Access applications, the D1 database and a
   private R2 bucket, on Workers Paid.
 - **Logging:** `logEvent` only, with closed fields; every change logs its token name, so the 7 days of Workers Logs

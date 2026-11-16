@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import exampleText from "../wrangler.deploy.example.jsonc?raw";
 import wranglerText from "../wrangler.jsonc?raw";
 
 declare global {
@@ -66,5 +67,29 @@ describe("DATA-2: wrangler.jsonc", () => {
     expect(config).toHaveProperty("workers_dev", false);
     expect(config).toHaveProperty("preview_urls", false);
     expect(config).toHaveProperty("observability.logs.invocation_logs", false);
+  });
+});
+
+// PL-31, DATA-2: the committed example of the deployment values holds placeholders only, and no secret.
+describe("DATA-2: wrangler.deploy.example.jsonc", () => {
+  const example = parseJsonc(exampleText);
+
+  it("leaves every identifier and Access value empty and holds no token", () => {
+    expect(example).toHaveProperty("account_id", "");
+    expect(example).toHaveProperty("d1_databases", [{ binding: "DB", database_name: "", database_id: "" }]);
+    expect(example).toHaveProperty("r2_buckets", [{ binding: "FILES", bucket_name: "" }]);
+    for (const variable of ["ACCESS_TEAM_DOMAIN", "ACCESS_APP_AUD", "ACCESS_CONTENT_AUD"]) {
+      expect(example).toHaveProperty(["vars", variable], "");
+    }
+    expect(example).not.toHaveProperty("vars.API_TOKENS");
+  });
+
+  it("names only example hosts", () => {
+    const hosts = /[a-z0-9*-]+(?:\.[a-z0-9-]+)+\.(?:com|net|org|dev|io|app)\b/g;
+    const found = [...exampleText.matchAll(hosts)].map(([host]) => host);
+    expect(found.length).toBeGreaterThan(0);
+    expect(
+      found.filter((host) => !/(?:^|[.*-])example(?:-content)?\.(?:com|net)$|\.cloudflareaccess\.com$/.test(host)),
+    ).toEqual([]);
   });
 });

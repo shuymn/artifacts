@@ -13,11 +13,16 @@ dist/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
-# Deployment values kept out of the public wrangler.jsonc
+# Deployment values kept out of the public wrangler.jsonc, and the merged configuration the deploy script writes for
+# one run and removes
 wrangler.deploy.jsonc
+.wrangler-deploy-*.json
 
 # Test and coverage output
 coverage/
+
+# Local scratch files
+.tmp/
 
 # Logs
 npm-debug.log*

@@ -19,6 +19,11 @@ spec:
   labels:
     - name: dependencies
       color: ededed
+    # release-please finds its open and merged release PRs by these labels.
+    - name: "autorelease: pending"
+      color: ededed
+    - name: "autorelease: tagged"
+      color: ededed
   features:
     issues: true
     projects: false
@@ -91,6 +96,7 @@ spec:
         - actions/cache@*
         - actions/checkout@*
         - actions/create-github-app-token@*
+        - googleapis/release-please-action@*
         - jdx/mise-action@*
         - oven-sh/setup-bun@*
         - shuymn/github-actions/.github/workflows/gha.yml@*
