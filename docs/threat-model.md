@@ -182,7 +182,8 @@ adversaries below, not untrusted users.
 - **SRV-3: a 304 never skips a check.** Access (ACC-1), the public flag (PUB-1) and the artifact's existence are checked
   before `If-None-Match` is compared, for latest and pinned versions alike, and every content response revalidates
   (`no-cache`). _Enforced (main)_ in `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`: a matching
-  `If-None-Match` after the artifact was made private or deleted answers 404; without a valid JWT, 403).
+  `If-None-Match` after the artifact was made private or deleted answers 404; without a valid JWT, 403; the same for
+  the icon an artifact without `favicon.ico` is answered with).
 
 ### Public links (PUB)
 

@@ -46,6 +46,8 @@ export const STATE_ROW = { latest_version: "integer", deleted: "integer" } as co
 /** A listed artifact with its latest version's publisher, which the gallery shows. */
 export const LISTED_ROW = { ...ARTIFACT_ROW, published_by: "text" } as const satisfies Shape;
 export const COUNTS_ROW = { active: "integer", archived: "integer" } as const satisfies Shape;
+/** A live artifact a request may see (`selectVisibleArtifact`). */
+export const VISIBLE_ROW = { visible: "integer" } as const satisfies Shape;
 
 export type ArtifactRow = Row<typeof ARTIFACT_ROW>;
 export type VersionRow = Row<typeof VERSION_ROW>;
@@ -149,6 +151,18 @@ export function selectServedFiles(
        WHERE a.id = ?1 AND a.deleted_at IS NULL AND (?3 = 0 OR a.public = 1) AND f.path IN (?4, ?5)`,
     )
     .bind(id, number, publicOnly ? 1 : 0, paths[0], paths[1]);
+}
+
+/**
+ * One row when artifact `id` is live and, with `publicOnly`, public (PUB-1): whether a browser host may serve it at
+ * all, whatever the path. Read in the same batch as `selectServedFiles`, both see the same state.
+ */
+export function selectVisibleArtifact(db: D1Database, id: ArtifactId, publicOnly: boolean): D1PreparedStatement {
+  return db
+    .prepare(
+      `SELECT 1 AS visible FROM artifacts a WHERE a.id = ?1 AND a.deleted_at IS NULL AND (?2 = 0 OR a.public = 1)`,
+    )
+    .bind(id, publicOnly ? 1 : 0);
 }
 
 export type ArtifactCursor = { readonly updatedAt: number; readonly id: string };

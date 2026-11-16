@@ -255,8 +255,16 @@ no limit on versions.
   with the owner's cookie (ISO-2). Public hosts omit it: their content needs no credential, and other sites may embed
   it.
 - No `Content-Security-Policy` on artifacts: a page is the agent's code and may load from CDNs.
-- `GET` and `HEAD` only (ISO-3); an unknown file answers a plain 404. `Range` is not supported in the first release,
-  so audio and video cannot seek.
+- `GET` and `HEAD` only (ISO-3); an unknown file answers a plain 404, except the icon below. `Range` is not supported
+  in the first release, so audio and video cannot seek.
+- **Icon:** browsers request `/favicon.ico` on their own. When the latest version has no `favicon.ico` (and no
+  `favicon.ico/index.html`, which answers its 308), the host answers that path with the gallery's icon (section 10)
+  instead of 404. The fallback comes where the 404 would: after Access, the public flag and existence, read in the same
+  D1 batch as the files, so an unknown host, an unknown or deleted artifact and a private artifact on its public host
+  answer as for any other file. It carries the host class's headers; its `ETag` is the icon's (the SHA-256 of its
+  bytes), so it revalidates on every use like a stored file, and once a version publishes its own `favicon.ico`, the
+  next revalidation gets that file with its own tag. Pinned paths have no fallback: a browser asks only at the root,
+  also while it shows a pinned version, and `/_v/<n>/` serves exactly that version's files.
 
 ## 7. Auth
 
@@ -531,3 +539,4 @@ local runtime with D1 and R2). A row naming a threat-model ID claims that invari
 | PL-30 | When the CLI maps a directory, it shall follow section 9.                                                                                                                                                                            | section 9        | dot names, a directory, an alias link to it and pages referencing both paths, a link outside, a link to an ancestor (refused), NFD names, an unchanged file not sent, `base_version` equal to the version read; a file named with `\`, `#` and `?` sent by the CLI and served at its percent-encoded path; multi-page `list`, with and without `--json` |
 | PL-31 | The repository's `wrangler.jsonc` shall set no variable, route or account identifier.                                                                                                                                                | DATA-2           | source check of the file and the deployment example                                                                                                                                                                                                                                                                                                     |
 | PL-32 | If a path's first segment is `_v` or `cdn-cgi`, then a publish shall be refused before any write.                                                                                                                                    | section 6        | create and update through REST and MCP; D1 and R2 unchanged                                                                                                                                                                                                                                                                                             |
+| PL-33 | When a browser host is asked for `/favicon.ico` of a visible artifact whose latest version lacks it, the Worker shall answer with the gallery's icon, and otherwise as for any other file.                                           | section 6        | the icon and its headers per host class, its 304 and HEAD; the artifact's own file winning and a revalidation after it is published; a `favicon.ico` directory; a pinned path; an unknown host, an unknown or deleted artifact and a private one on its public host answering as before; no icon or 304 without Access, after `public off` or a delete  |

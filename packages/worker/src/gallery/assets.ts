@@ -23,6 +23,7 @@ const WOFF2 = "font/woff2";
 
 /**
  * The icon at `/favicon.ico`, which browsers request on their own: an ICO file, which every browser reads there.
+ * Artifact hosts answer the same path with it when the artifact has no file of its own (design.md section 6).
  */
 export const FAVICON: Asset = { contentType: "image/vnd.microsoft.icon", body: favicon };
 

@@ -37,7 +37,8 @@ it stays sharp at 16 px.
 - **Files.** Pages link `/assets/icon.svg` (`type="image/svg+xml"`) and `/favicon.ico` (`sizes="32x32"`, which keeps
   Chrome from choosing the ICO over the SVG). [`favicon.ico`](../../packages/worker/src/gallery/favicon.ico) is
   `icon.svg` rendered at 16 and 32 px and stored as PNG images; after a change to the SVG,
-  `uv run packages/worker/scripts/favicon.py` writes it again.
+  `uv run packages/worker/scripts/favicon.py` writes it again. Artifact hosts answer `/favicon.ico` with the same file
+  when the artifact has none ([design.md](../design.md), section 6).
 
 ## Tokens
 
