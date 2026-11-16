@@ -63,6 +63,21 @@ importers:
         specifier: 7.0.2007
         version: 7.0.2007
 
+  packages/cli:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0))
+      wrangler:
+        specifier: 'catalog:'
+        version: 4.161.0(@cloudflare/workers-types@5.20261112.1)(@types/node@24.19.2)
+
   packages/worker:
     dependencies:
       '@modelcontextprotocol/server':
