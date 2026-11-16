@@ -108,8 +108,9 @@ function htmlAnswer(status: number, text: string, cookies?: Headers): Response {
   });
 }
 
-function errorAnswer(kind: ConsentErrorKind, status: number): ConsentAnswer {
-  return { response: htmlAnswer(status, consentErrorPage(kind).text) };
+/** An error page; `cookies` clears the binding of a transaction that was used before the failure. */
+function errorAnswer(kind: ConsentErrorKind, status: number, cookies?: Headers): ConsentAnswer {
+  return { response: htmlAnswer(status, consentErrorPage(kind).text, cookies) };
 }
 
 /**
@@ -283,12 +284,16 @@ function single(form: URLSearchParams, name: string): string | undefined {
   return values.length === 1 ? values[0] : undefined;
 }
 
+/** The cookie headers of a transaction the form used, for an answer to a failure after it. */
+type Used = { cookies?: Headers };
+
 /** `POST`: the consent form. Deny ends the transaction; Allow ends it with a grant and a code. */
 async function decide(
   request: Request,
   helpers: OAuthHelpers,
   config: Config,
   deps: ConsentDeps,
+  used: Used,
 ): Promise<ConsentAnswer> {
   const mediaType = (request.headers.get("Content-Type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (mediaType !== "application/x-www-form-urlencoded") {
@@ -320,6 +325,8 @@ async function decide(
     return errorAnswer("publisher", 400);
   }
   const approved = await helpers.approveConsent(request, handle);
+  // The transaction is used: from here on, every answer clears its binding, a failure's error page included.
+  used.cookies = approved.headers;
   const description = await helpers.describeConsent(approved.request);
   const cimd = description.clientDomain !== undefined;
   await replaceGrants(helpers, approved.request, cimd, deps.kvReadMs);
@@ -364,25 +371,26 @@ export async function serveConsent(
   deps: ConsentDeps,
 ): Promise<ConsentAnswer> {
   const recording: RecordingKv = recordingKv(kv, deps.now);
+  const used: Used = {};
   try {
     const helpers = authorizationServer(config).getOAuthApi({ OAUTH_KV: recording.kv });
     return request.method === "POST"
-      ? await decide(request, helpers, config, deps)
+      ? await decide(request, helpers, config, deps, used)
       : await begin(request, url, helpers, config);
   } catch (error) {
     if (error instanceof AuthorizationError) {
       refused("transaction_invalid", oauthCode(error.code));
-      return errorAnswer("transaction", 400);
+      return errorAnswer("transaction", 400, used.cookies);
     }
     if (error instanceof CimdFetchError) {
       refused("client_unverifiable");
-      return errorAnswer("client_unverifiable", 400);
+      return errorAnswer("client_unverifiable", 400, used.cookies);
     }
-    if (error instanceof ReplacementFailed) return errorAnswer("unavailable", 503);
+    if (error instanceof ReplacementFailed) return errorAnswer("unavailable", 503, used.cookies);
     // DATA-1: the class of the error only, never its message.
     logEvent("request.failed", { error: errorName(error), host: "app" });
     return recording.failed() || error instanceof TimeoutError
-      ? errorAnswer("unavailable", 503)
-      : errorAnswer("internal", 500);
+      ? errorAnswer("unavailable", 503, used.cookies)
+      : errorAnswer("internal", 500, used.cookies);
   }
 }

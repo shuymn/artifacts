@@ -909,6 +909,11 @@ describe("OAUTH-5: grant replacement on approval", () => {
     const failed = await browser.post({ handle, decision: "approve", publisher: "agent" });
     expect(await errorPageOf(failed)).toEqual({ status: 503, heading: "Sign-in is unavailable" });
     expect(failed.headers.has("Location")).toBe(false);
+    // The transaction is used, so the error page clears its binding as the redirect would have.
+    expect(failed.headers.getSetCookie()).toEqual([
+      expect.stringMatching(/^__Host-oauth-consent-[0-9a-f]{16}=; Path=\/; Secure; HttpOnly; SameSite=Lax; Max-Age=0$/),
+    ]);
+    expect(browser.cookies.size).toBe(0);
     expect(await grantIds()).toEqual([old]);
     expect(logEvents(logs.lines)).toEqual([{ event: "grant.revoke_failed", grant: old, error: "Error" }]);
 
