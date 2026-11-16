@@ -1,0 +1,77 @@
+name: CLI binaries
+
+# Builds the CLI's binary on each release platform's own runner with packages/cli/scripts/build.ts, then runs the smoke
+# tests (packages/cli/scripts/smoke.test.ts) against the binary unpacked from its archive. ci.yml calls this for pull
+# requests that can change a binary; release.yml calls it with `upload` to hand the archives to its publish job.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to build
+        type: string
+        required: true
+      tag:
+        description: The release tag the root package's version must match; empty outside a release
+        type: string
+        default: ""
+      upload:
+        description: Upload each archive as a workflow artifact named after the archive
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build and smoke-test (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin-arm64
+          - runner: ubuntu-24.04
+            platform: linux-x64-gnu
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64-gnu
+          - runner: windows-2025
+            platform: windows-x64-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up mise
+        uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          install_args: node pnpm bun
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the binary
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_PLATFORM: ${{ matrix.platform }}
+        run: pnpm --filter @artifacts/cli run build
+
+      - name: Smoke-test the binary
+        run: pnpm --filter @artifacts/cli run smoke
+
+      - name: Upload the archive
+        if: inputs.upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: artifacts-${{ inputs.tag }}-${{ matrix.platform }}
+          path: packages/cli/dist/artifacts-${{ inputs.tag }}-${{ matrix.platform }}.*
+          if-no-files-found: error
+          retention-days: 7
+          # The archive is compressed already.
+          compression-level: 0

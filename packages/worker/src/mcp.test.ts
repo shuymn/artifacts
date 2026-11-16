@@ -813,3 +813,82 @@ describe("thrown errors in a tool", () => {
     expect(logs.text()).not.toContain("SECRET-MESSAGE");
   });
 });
+
+/** What section 8 sets on an /mcp answer, and what it should be for that answer's type. */
+const policyOf = (response: Response) => ({
+  status: response.status,
+  cache: response.headers.get("Cache-Control"),
+  nosniff: response.headers.get("X-Content-Type-Options"),
+});
+const expected = (response: Response) => ({
+  status: response.status,
+  cache: response.headers.get("Content-Type")?.startsWith("text/event-stream") ? "no-store, no-transform" : "no-store",
+  nosniff: "nosniff",
+});
+
+// Design.md section 8: every /mcp answer is the API's: never stored, never sniffed, streams kept untransformed.
+describe("section 8: /mcp response headers", () => {
+  it.each(MCP_VERSIONS)("sends no-store and nosniff on every answer to a %s client", async (version) => {
+    const world = new World();
+    const seen: Response[] = [];
+    const recording: Fetcher = {
+      fetch: async (request) => {
+        const response = await world.fetch(request);
+        seen.push(response.clone());
+        return response;
+      },
+    };
+    const client = await mcpClient(recording, { version });
+    await client.listTools();
+    expect((await callTool(client, "create_artifact", { title: "h", files: [index()] })).ok).toBe(true);
+    await client.close();
+    expect(seen.length).toBeGreaterThan(1);
+    for (const response of seen) expect(policyOf(response)).toEqual(expected(response));
+  });
+
+  it("keeps no-transform on an event stream and sends the same on the SDK's and the Worker's own errors", async () => {
+    const world = new World();
+    const list = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+    const stream = await world.fetch(rpcRequest(list));
+    expect(stream.headers.get("Content-Type")).toBe("text/event-stream");
+    expect(policyOf(stream)).toEqual({ status: 200, cache: "no-store, no-transform", nosniff: "nosniff" });
+    const answers = [
+      await world.fetch(rpcRequest(list, { headers: { Accept: "application/json" } })),
+      await world.fetch(rpcRequest("{")),
+      await world.fetch(rpcRequest(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }))),
+      await world.api("GET", "/mcp", { headers: { Accept: "text/event-stream" } }),
+      await world.fetch(rpcRequest(list, { token: null })),
+      await world.fetch(rpcRequest(list, { headers: { Origin: "https://evil.example.org" } })),
+    ];
+    expect(answers.map((response) => response.status)).toEqual([406, 400, 202, 405, 401, 403]);
+    for (const response of answers) {
+      expect(policyOf(response)).toEqual({ status: response.status, cache: "no-store", nosniff: "nosniff" });
+    }
+  });
+
+  it("passes an event stream through as the SDK writes it", async () => {
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const streaming: McpHandlerFactory = (factory, options) => ({
+      ...createMcpHandler(factory, options),
+      fetch: async () =>
+        new Response(readable, {
+          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform" },
+        }),
+    });
+    const response = await atBoundary(testDeps(), () => streaming).fetch(
+      rpcRequest(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })),
+    );
+    expect(policyOf(response)).toEqual({ status: 200, cache: "no-store, no-transform", nosniff: "nosniff" });
+    const writer = writable.getWriter();
+    const reader = response.body?.getReader();
+    expect(reader).toBeDefined();
+    const event = new TextEncoder().encode('event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{}}\n\n');
+    void writer.write(event);
+    // The first event is readable while the stream is still open.
+    const first = await reader?.read();
+    expect(first?.done).toBe(false);
+    expect(first?.value).toEqual(event);
+    await writer.close();
+    expect((await reader?.read())?.done).toBe(true);
+  });
+});

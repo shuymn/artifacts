@@ -5,6 +5,7 @@
  */
 import { parseArgs } from "node:util";
 
+import rootPackage from "../../../package.json" with { type: "json" };
 import { Api, ApiError, TIMEOUTS, type ArtifactJson, type ArtifactVersion, type Fetch, type Timeouts } from "./api.ts";
 import { readConfig, type Environment } from "./config.ts";
 import { CliError, EXIT, UsageError, type ExitStatus } from "./errors.ts";
@@ -22,6 +23,9 @@ export type Io = {
   /** Artifacts per listing page; the API's largest by default. */
   readonly pageSize?: number;
 };
+
+/** The release version: the root package's, which `bun build --compile` inlines into the binary. */
+export const VERSION: string = rootPackage.version;
 
 /** The authoring rule, in the same words as the MCP instructions and the REST reference (design.md section 4). */
 const AUTHORING_RULE =
@@ -51,6 +55,7 @@ Commands:
   delete <id>                         Delete the artifact: every URL answers 404.
   token <name>                        Generate an API token. Prints the token once, then its API_TOKENS entry.
   help                                Print this text.
+  --version                           Print the CLI's version.
 
 Options:
   --json   Print the API's JSON instead of text (list: every page's artifacts in one object).
@@ -317,6 +322,11 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitStatus> 
     io.stderr(`artifacts: ${errorText(error, io.env.ARTIFACTS_TOKEN)}\n`);
     return error instanceof CliError ? error.exitStatus : EXIT.failure;
   };
+  // Only alone: `get` and `pull` take `--version <n>`.
+  if (argv.length === 1 && argv[0] === "--version") {
+    io.stdout(`${VERSION}\n`);
+    return EXIT.ok;
+  }
   let parsed: ReturnType<typeof parse>;
   try {
     parsed = parse(argv);

@@ -23,26 +23,81 @@ does not state but a deployment of this repository showed.
 ## How a change reaches the deployment
 
 ```text
-main ──(release-please keeps a release PR open)──> merge the release PR ──> tag vX.Y.Z and GitHub release
-     ──(.github/workflows/release.yml fast-forwards)──> release ──(Workers Builds)──> scripts/deploy.ts
+main ──(release-please keeps a release PR open)──> merge the release PR ──> tag vX.Y.Z and a draft release
+     ──(.github/workflows/release.yml builds the CLI binaries and publishes)──> published release
+     ──(release.yml fast-forwards)──> release ──(Workers Builds)──> scripts/deploy.ts
 ```
 
 - `main` takes every change, dependency updates included, and is never deployed.
 - release-please keeps one release PR open with the next version and the changelog, from the Conventional Commits on
   `main` (one version for the repository: the `node` release type on the root package, tags `vX.Y.Z`, first release
-  `0.1.0`; `release-please-config.json`, `.release-please-manifest.json`). Merging it tags the release.
-- Releases are immutable (`release_immutability` in `.github/infra.yaml`): once published, a release's tag cannot be
-  moved or deleted, and deleting the release does not free its tag name
+  `0.1.0`; `release-please-config.json`, `.release-please-manifest.json`). Merging it tags the release and creates it
+  as a draft: `draft` keeps it unpublished, and `force-tag-creation` creates the tag with the draft, at the release's
+  commit, since GitHub creates a draft's tag only when it is published.
+- Releases are immutable (`release_immutability` in `.github/infra.yaml`): once published, a release's assets cannot
+  change, its tag cannot be moved or deleted, and deleting the release does not free its tag name
   ([immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)).
-  A bad release is fixed by the next one.
-- The release workflow then fast-forwards the `release` branch to the latest release. It refuses a release that is not
-  a commit of `main` and an update that is not a fast-forward: it updates the branch with `force=false`, which GitHub
-  refuses unless the update is a fast-forward
-  ([update a reference](https://docs.github.com/en/rest/git/refs#update-a-reference)). It runs on every push to `main`,
-  so running it again, or the next push, repairs a run that failed.
+  So the binaries go up while the release is a draft, and a bad release is fixed by the next one.
+- The release workflow then runs, in order, in the same run:
+  1. **prepare** runs release-please and finds the draft to finish: the one release-please just created; in a run
+     started again, the draft at the run's commit; in a manual run with `tag`, that tag's draft. It checks that the tag
+     is at the draft's commit and that the commit is on `main`. An ordinary push finds none and goes to step 4.
+  2. **build** (`.github/workflows/cli-binaries.yml`) builds the CLI's binary at that commit on each platform's own
+     runner: macOS arm64, Linux x64 and arm64 (glibc), Windows x64. Each checks that the root package's version is the
+     tag's, runs the smoke tests against the binary unpacked from its archive, and hands the archive to the next job.
+  3. **publish** runs only when every platform passed. It checks the four archives (names, the binary alone at the
+     root), writes `SHA256SUMS`, uploads them to the release while it is still a draft (replacing the assets an
+     earlier attempt left), checks the draft's assets against the files (size and SHA-256 digest) and
+     publishes the release.
+  4. **fast-forward** moves the `release` branch to the latest published release. It refuses a release that is not a
+     commit of `main` and an update that is not a fast-forward: it updates the branch with `force=false`, which GitHub
+     refuses unless the update is a fast-forward
+     ([update a reference](https://docs.github.com/en/rest/git/refs#update-a-reference)). It runs on every push to
+     `main` and in every manual run, after publish when the run finishes a draft.
+- A draft never moves `release`. **A failing binary build blocks deployment until it is fixed:** a platform that does
+  not build or fails its smoke tests leaves the release a draft, and `release` stays at the previous release.
 - Workers Builds deploys each push to `release` and nothing else.
 
-Both workflow steps use the repository's GitHub App token (`APP_CLIENT_ID`, `APP_PRIVATE_KEY`; `pnpm run github-app`
+The same platforms build and run the smoke tests in CI for every pull request that can change a binary (`packages/cli`,
+the root `package.json`, the lockfiles, `mise.toml`, the binaries workflow), so a build that would block a release
+fails before it is merged. That check is not required.
+
+### Adding an action to a workflow
+
+The repository admits only the actions `.github/infra.yaml` lists under `selected_actions` (`github_owned_allowed` is
+off). GitHub refuses a whole run whose workflow names any other action before a job starts, so an `if:` that would skip
+the job does not help: the run ends in `startup_failure` with no jobs. For the release workflow that means every push
+to `main` loses its fast-forward, and with it deployment. **Observed:** a release run of this repository whose workflow
+named an action not yet allowed ended in `startup_failure` with no jobs. A new action therefore lands in this order:
+
+1. Merge a pull request that only adds the action to `selected_actions` in `.github/infra.yaml`.
+2. Run `gh infra apply`.
+3. Check that GitHub admits it; the list holds the new pattern:
+
+   ```sh
+   gh api 'repos/{owner}/{repo}/actions/permissions/selected-actions' --jq '.patterns_allowed[]'
+   ```
+
+4. Only then merge the pull request whose workflow names the action. Its own checks may fail at startup until step 2;
+   run them again after it.
+
+### Recovering a release
+
+- **A failure outside the code** (a runner, the network, GitHub's API) during prepare, build or publish: run the failed
+  jobs again from the run's page, or run the release workflow manually on `main` with `tag` set to the draft's tag
+  (`gh workflow run release.yml --ref main -f tag=vX.Y.Z`). Either finishes the same draft at the same commit: it
+  checks the tag again, builds the binaries, replaces the draft's assets and publishes. Assets change only while the
+  release is a draft. A release published already (an earlier attempt published it, then lost the answer or failed
+  the check after it) is accepted, and the fast-forward follows, only if it holds exactly the run's files at the tag's
+  commit; otherwise publish fails and the next release replaces it. Publish refuses a draft holding an asset the
+  workflow does not make (remove it on the release's page first).
+- **A failure the code causes** (a build or a smoke test that fails): the tag cannot move, so this release cannot carry
+  the fix. Fix it on `main` and merge the next release PR; its draft is finished as usual and deployment resumes. The
+  failed release stays a draft and never deploys; delete it on the releases page (its tag stays).
+- **Publish succeeded but the fast-forward failed:** the fast-forward reads only the latest published release from
+  GitHub, so running the failed job again, a manual run or the next push to `main` repairs it.
+
+Every job that writes uses the repository's GitHub App token (`APP_CLIENT_ID`, `APP_PRIVATE_KEY`; `pnpm run github-app`
 creates the App, see [README](../README.md)): a pull request opened with `GITHUB_TOKEN` starts no workflow, so the
 release PR would never run the required checks. release-please creates its commits through the API without an author,
 which GitHub signs for an App ([bot
@@ -75,6 +130,29 @@ risks say what the shared-domain layout exposes.
   already has a `CNAME` record cannot become one ([Custom
   Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)). The artifact hosts are
   routes: `*-art.example.com/*` and `*-pub.example.com/*`, or one `*.example-content.net/*`.
+- **Configuration Rule.** Cloudflare serves the Worker's bytes unchanged only with the features that rewrite HTML or
+  inject scripts turned off on its hosts. Under **Rules → Configuration Rules**, create one rule
+  ([settings](https://developers.cloudflare.com/rules/configuration-rules/settings/)) for the app, API, content and
+  public hosts:
+
+  ```txt
+  (http.host in {"artifacts.example.com" "artifacts-api.example.com"})
+  or ends_with(http.host, "-art.example.com")
+  or ends_with(http.host, "-pub.example.com")
+  ```
+
+  Configuration Rules apply per zone, so the dedicated layout needs two rules with the same settings: one in
+  `example.com` matching the first line, and one in `example-content.net` matching
+  `ends_with(http.host, ".example-content.net")`. The rule turns
+  off **Email Obfuscation**, **Automatic HTTPS Rewrites**, **Rocket Loader** and **Fonts** (Cloudflare Fonts), and
+  turns on **Disable Real User Monitoring (RUM)** and **Disable Zaraz**. Each of them would change an artifact's bytes,
+  inject a script that the gallery's CSP blocks, or drop the `ETag` a revalidation needs.
+
+  **Known limit:** artifact HTML still loses its `ETag` on delivery. "Replace insecure JavaScript libraries" is on for
+  the whole zone and removes the `ETag` from HTML without a CSP `script-src` or `default-src`; Configuration Rules
+  cannot turn it off, and on a shared zone it serves other hosts too. Artifact HTML is therefore sent in full on every
+  revalidation. Other artifact files keep their `ETag`, and gallery pages carry a CSP, so neither is affected.
+
 - **D1.** `pnpm exec wrangler d1 create <DATABASE_NAME> --update-config=false` prints the database ID
   ([get started](https://developers.cloudflare.com/d1/get-started/)). The deploy applies the migrations. Without
   `--update-config=false`, Wrangler offers to add the new binding to `wrangler.jsonc`, yes by default, which would put
@@ -375,18 +453,17 @@ curl -sS https://artifacts-api.example.com/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-**The CLI** ([packages/cli/README.md](../packages/cli/README.md)), from the repository root, with `~/.local/bin` on
-`PATH`:
+**The CLI** ([packages/cli/README.md](../packages/cli/README.md)): the binary of the latest release, through mise's
+github backend, or from the release's archive checked against its `SHA256SUMS`:
 
 ```sh
-mkdir -p ~/.local/bin
-ln -s "$PWD/packages/cli/src/main.ts" ~/.local/bin/artifacts
+mise use -g github:shuymn/artifacts
 export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<token>
 ```
 
-From the OAuth release (Planned (OAuth)), the CLI has a runtime dependency: run `pnpm install --frozen-lockfile` at
-the repository root first, and again after pulling a change to the lockfile. Then sign in instead of setting
-`ARTIFACTS_TOKEN`, which, when set, still takes precedence:
+From the OAuth release (Planned (OAuth)), sign in instead of setting `ARTIFACTS_TOKEN`, which, when set, still takes
+precedence. The binary carries the OAuth client; a checkout that runs the source needs `pnpm install` first. On
+Windows the CLI keeps to `ARTIFACTS_TOKEN`: it stores no login there (design.md section 9).
 
 ```sh
 export ARTIFACTS_API_URL=https://artifacts-api.example.com
@@ -398,10 +475,13 @@ artifacts login                                     # opens the consent page; st
 1. Section 1: Workers Paid, zones, the wildcard record, the D1 database, the R2 bucket, the KV namespace (from the
    OAuth release), the two Access applications.
 2. Fill the deployment values (section 2).
-3. `gh infra apply`: it restricts who can push to `release` (below), adds the release-please labels and allows its
-   action. Until then the release workflow fails on every push to `main`, since the action is not allowed; the next
-   push after the apply runs it.
-4. Merge the first release PR; the release workflow creates `release` at its tag.
+3. `gh infra apply`: it restricts who can push to `release` (below), adds the release-please labels and allows the
+   actions the workflows use (release-please, and `actions/upload-artifact` and `actions/download-artifact`, which hand
+   the binaries to the publish job). Then check with the request of "Adding an action to a workflow" that GitHub
+   admits each of them. Until the apply, GitHub refuses at startup every run whose workflow names an action not yet
+   allowed, the release workflow's on every push to `main` among them; run those again after the check.
+4. Merge the first release PR; the release workflow publishes it with the CLI binaries and creates `release` at its
+   tag.
 5. Connect Workers Builds (section 3); its first build deploys. Its log shows Node of the major in `.node-version`
    among the tools Builds detected, no `Installing project dependencies` before the build command, and
    `install: pnpm <version> from mise.lock` followed by pnpm's `Done in … using pnpm v<version>`.
@@ -415,11 +495,11 @@ artifacts login                                     # opens the consent page; st
    the KV namespace (section 1) and add its `kv_namespaces` entry to the deployment values (section 2), in the build
    variable and in `wrangler.deploy.jsonc` if you keep one. Without it the deploy stops at the values check, and the
    previous release keeps serving.
-2. After the release that accepts OAuth tokens deploys: run checks 9 to 13 of section 7, then move each client to OAuth
+2. After the release that accepts OAuth tokens deploys: run checks 10 to 14 of section 7, then move each client to OAuth
    (section 5) and its API token out of `API_TOKENS`. From this release a token of the form `<a>:<b>:<c>`, which only
    a token made by hand can have, is read as an OAuth token and refused (design.md section 7): replace it with one
    from `artifacts token`.
-3. Once no client needs one, turn API tokens off (section 4) and run check 15, or keep one for automation.
+3. Once no client needs one, turn API tokens off (section 4) and run check 16, or keep one for automation.
 
 ### Restrict pushes to `release`
 
@@ -521,56 +601,75 @@ Logs below are the Worker's Workers Logs in the dashboard, kept 7 days on Worker
 
 7. **Gallery CSP** (ISO-5). In the signed-in browser's developer tools, the responses of `/` and of `/no-such-page`
    (404) carry `Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self';
-   base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, and the page loads its stylesheet, fonts and icon
-   without a CSP error.
+   base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, and the page loads its stylesheets, fonts and icon
+   without a CSP error. With the cache enabled, reload `/`: the stylesheets, fonts and SVG icon (`/assets/….<hash>.…`)
+   carry `cache-control: private, max-age=31536000, immutable` and come from the browser's cache without a request, so
+   Access and the edge pass the header through; only the page and `/favicon.ico` go to the network.
 
 8. **Logs** (DATA-1). In the logs: the probe's `artifact.created` and `artifact.changed` lines carry `"token":"check"`;
    a search for `art_` (the token prefix) and for `Bearer` finds nothing; filtering on `$cloudflare.$metadata.type =
    "cf-worker-event"`, which marks invocation logs, finds nothing, since `wrangler.jsonc` turns them off ([invocation
    logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/#invocation-logs)).
 
-The checks below are Planned (OAuth): run 9 to 13 once the release that accepts OAuth tokens deploys, 14 once the
-CLI signs in, and 15 when API tokens are turned off.
-
-9. **OAuth discovery** (design.md section 7). From the Worker, not an Access redirect, which also shows the API host's
-   Bypass (section 1):
+9. **Revalidation and unchanged bytes.** In the signed-in browser's developer tools, with the cache enabled, reload `/`:
+   the document's request carries `If-None-Match` and gets `304` with an `etag`, `vary: Accept-Encoding` and the CSP of
+   check 7; edit `probe/index.html`, run `ARTIFACTS_TOKEN=$TOKEN artifacts publish ./probe --id "$ID"` and reload: `200`
+   with a new `etag`. Then the Configuration Rule:
 
    ```sh
-   curl -s "$API/.well-known/oauth-authorization-server" \
-     | jq '{issuer, authorization_endpoint, client_id_metadata_document_supported, code_challenge_methods_supported}'
-   curl -s "$API/.well-known/oauth-protected-resource/mcp" | jq '{resource, authorization_servers}'
-   curl -s -o /dev/null -D - -X POST "$API/mcp" | grep -i -E '^(HTTP|www-authenticate)'
-   curl -s -o /dev/null -D - -X POST "$API/oauth/token" -H 'Origin: https://example.org' | grep -i -c access-control
-   curl -s -o /dev/null -w '%{http_code}\n' "https://$ID-pub.example.com/.well-known/oauth-authorization-server"
+   ARTIFACTS_TOKEN=$TOKEN artifacts public "$ID" on
+   curl -s "https://$ID-pub.example.com/" | cmp - probe/index.html
+   curl -sI "https://$ID-pub.example.com/" | grep -i -E '^(etag|vary)'
+   ARTIFACTS_TOKEN=$TOKEN artifacts public "$ID" off
    ```
 
-   Pass: `issuer` is `$API`, `authorization_endpoint` `https://artifacts.example.com/oauth/authorize`,
-   `client_id_metadata_document_supported` `true`, `["S256"]`; the resource is `$API/mcp` with `["$API"]`; the
-   `POST` answers 401 with `Bearer resource_metadata="$API/.well-known/oauth-protected-resource/mcp"`; no
-   `access-control-*` header (`0`); the public host answers `404`, as for any path the probe lacks.
+   Pass: `cmp` prints nothing, so the body is the probe's page byte for byte, with no injected script or rewritten
+   link; `vary: Accept-Encoding` once; no `etag` is the known limit of section 1, an `etag` means the zone's setting
+   has changed.
 
-10. **Real clients** (AC-14, AC-15). Sign in Claude Code, Codex CLI, claude.ai and Gemini CLI (section 5). Pass: each
+The checks below are Planned (OAuth): run 10 to 14 once the release that accepts OAuth tokens deploys, 15 once the
+CLI signs in, and 16 when API tokens are turned off.
+
+10. **OAuth discovery** (design.md section 7). From the Worker, not an Access redirect, which also shows the API host's
+    Bypass (section 1):
+
+    ```sh
+    curl -s "$API/.well-known/oauth-authorization-server" \
+      | jq '{issuer, authorization_endpoint, client_id_metadata_document_supported, code_challenge_methods_supported}'
+    curl -s "$API/.well-known/oauth-protected-resource/mcp" | jq '{resource, authorization_servers}'
+    curl -s -o /dev/null -D - -X POST "$API/mcp" | grep -i -E '^(HTTP|www-authenticate|cache-control)'
+    curl -s -o /dev/null -D - -X POST "$API/oauth/token" -H 'Origin: https://example.org' | grep -i -c access-control
+    curl -s -o /dev/null -w '%{http_code}\n' "https://$ID-pub.example.com/.well-known/oauth-authorization-server"
+    ```
+
+    Pass: `issuer` is `$API`, `authorization_endpoint` `https://artifacts.example.com/oauth/authorize`,
+    `client_id_metadata_document_supported` `true`, `["S256"]`; the resource is `$API/mcp` with `["$API"]`; the
+    `POST` answers 401 with `Bearer resource_metadata="$API/.well-known/oauth-protected-resource/mcp"` and
+    `cache-control: no-store`; no `access-control-*` header (`0`); the public host answers `404`, as for any path the
+    probe lacks.
+
+11. **Real clients** (AC-14, AC-15). Sign in Claude Code, Codex CLI, claude.ai and Gemini CLI (section 5). Pass: each
     consent page names the client, with `claude.ai` or `chatgpt.com` as the domain of a CIMD client and "registered
     itself" for Gemini CLI, and shows its redirect host; after **Allow**, `/mcp` lists the nine tools and a publish
     works; a day later a call works without a new sign-in. For a client that cannot sign in, note the step that failed
     and the client's version.
 
-11. **Consent page** (AC-19, ISO-5). In the browser's developer tools, the consent page for Claude Code carries
-    `Content-Security-Policy` with `form-action 'self' http://localhost:<port>` and `frame-ancestors 'none'`, and
-    `X-Frame-Options: DENY`; the redirect after **Allow** is not blocked. An authorization URL opened in a private
-    window as another identity is denied by Access.
+12. **Consent page** (AC-19, ISO-5). In the browser's developer tools, the consent page for Claude Code carries
+    `Content-Security-Policy` with `form-action 'self' http://localhost:<port>` and `frame-ancestors 'none'`,
+    `X-Frame-Options: DENY`, and `cache-control: no-store` without an `etag` (design.md section 10); the redirect after
+    **Allow** is not blocked. An authorization URL opened in a private window as another identity is denied by Access.
 
-12. **Publisher and logs** (AC-17, DATA-1). The version a signed-in client published shows its publisher name in the
+13. **Publisher and logs** (AC-17, DATA-1). The version a signed-in client published shows its publisher name in the
     gallery; its `artifact.created` line carries that name and the grant's ID, and `grant.created` names the same
     grant. A search of the logs for `owner:`, the start of every OAuth token, finds nothing.
 
-13. **Revocation** (AC-20). List the grants and revoke Claude Code's with the check token, as section 4 shows
+14. **Revocation** (AC-20). List the grants and revoke Claude Code's with the check token, as section 4 shows
     (`artifacts grants` and `artifacts revoke <grant>` once the CLI has them), then have Claude Code call a tool every
     10 s. Pass: the `DELETE` answers `204`; the calls are refused within 5 minutes, this project's threshold, since
     Cloudflare documents no bound on KV's propagation; afterwards `/mcp` asks to sign in again, and the grant stays out
     of the listing. Note the delay.
 
-14. **The CLI's sign-in** (AC-16). `artifacts login`; `ls -l ~/.config/artifacts/credentials.json` shows
+15. **The CLI's sign-in** (AC-16). `artifacts login`; `ls -l ~/.config/artifacts/credentials.json` shows
     `-rw-------`; `artifacts list` works without `ARTIFACTS_TOKEN`. Publish a second probe, so the two publishes below
     cannot conflict:
 
@@ -592,10 +691,10 @@ CLI signs in, and 15 when API tokens are turned off.
     file kept the token the server holds. Then `artifacts logout`; `artifacts list` fails, naming `artifacts login`;
     the grant listing (section 4) no longer shows the CLI's grant.
 
-15. **API tokens off** (AC-18). The `curl` of section 5 with the check token answers 401, and a signed-in client still
+16. **API tokens off** (AC-18). The `curl` of section 5 with the check token answers 401, and a signed-in client still
     works.
 
-Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"` (and `"$ID2"` after check 14), revoke the check token,
+Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"` (and `"$ID2"` after check 15), revoke the check token,
 and revoke the grants made only for the checks.
 
 ## 8. Backups and restore

@@ -260,11 +260,30 @@ no limit on versions.
   share link; a page can set its own policy), no CORS headers (SRV-1, ISO-2).
 - `ETag` names the representation, the bytes with their type: 32 hex digits of the SHA-256 over the file's SHA-256 and
   its content type. The same bytes published again under another type get another tag, so a cached copy with the old
-  type is not revalidated. The REST file route sends the same tag.
+  type is not revalidated. The REST file route sends the same tag. Cloudflare removes the tag from artifact HTML on
+  delivery, so HTML is sent in full on every revalidation ([operations.md](operations.md), section 1, "Known limit").
 - `Cache-Control: private, no-cache` on private hosts and `no-cache` on public hosts, for the latest and pinned versions
   alike. Access, the public flag and existence are checked before `If-None-Match` answers 304 (SRV-3), so revoking
   access, making an artifact private or deleting it takes effect on the next request. Immutability belongs to storage,
   not to the cache.
+- **Gallery assets** (section 10) are cached as immutable instead. They are not artifact files: the stylesheets, fonts
+  and SVG icon are bundled with the Worker and are the same for every request that passes Access, whatever an artifact's
+  visibility, so no later check could change the answer. Each is served at a fingerprinted path, its name with 16 hex
+  digits of the SHA-256 of its bytes (`/assets/gallery.<hash>.css`), computed when the Worker loads, with
+  `Cache-Control: private, max-age=31536000, immutable`: changed bytes get a new path, so a cached copy never goes stale
+  and a reload requests none of them. Only that exact path is immutable. A page can load its assets after the next
+  deployment is live, and a release before fingerprints named unhashed paths, so a path with a current asset's name and
+  extension under another fingerprint (`/assets/gallery.<other>.css`) or none (`/assets/gallery.css`) answers 200 with
+  the current file, `private, no-cache` and its `ETag`: the page gets today's stylesheet and fonts rather than none, and
+  no browser keeps them under a path that named other bytes. The Worker holds only the deployed bytes; keeping earlier
+  deployments' files would need storage that outlives a deployment. A `fonts.css` answered this way names the current
+  fonts' paths, which are immutable. A path that names no current asset answers 404. `/favicon.ico` keeps its fixed URL,
+  which browsers request on their own, and revalidates with the app host's `private, no-cache` and its `ETag`.
+- `Vary: Accept-Encoding` on every response with a body or a validator, 200 and 304 alike: artifact files, the fallback
+  icon, gallery pages and gallery assets. The Workers runtime and Cloudflare compress by the request's
+  `Accept-Encoding`, and the runtime adds no `Vary` itself (checked with `wrangler dev`), so without it a cache between
+  the browser and Cloudflare could hand one client an encoding it did not ask for. Refusals, redirects and errors carry
+  neither a body worth caching nor a validator, and go without it.
 - `Cross-Origin-Resource-Policy: same-origin` on every response of a private content host and of the app host,
   including 304, 308 and 404, so another origin cannot load private content as a script, image, stylesheet or media
   with the owner's cookie (ISO-2). Public hosts omit it: their content needs no credential, and other sites may embed
@@ -572,7 +591,11 @@ under `/.well-known/oauth-protected-resource` answer 404. The router does not us
   played by the test with an app-audience JWT, the code with PKCE, tool calls, refresh with rotation, RFC 7009 and
   `/v1/grants` revocation); CIMD with a stubbed fetch of the client's document; and each plan-layer row. The CLI's
   login runs against the Worker as the CLI's end-to-end test does, with the browser step injected and the Worker built
-  with the test's Access verifier.
+  with the test's Access verifier. That test runs on Node, since wrangler's test harness does not run under Bun
+  (decisions.md); the CLI's unit tests, the lock's among them, run on Bun, the binaries' runtime. The smoke tests
+  therefore run the release binary's `login`, a refresh and `logout` on macOS and Linux against a local server standing
+  in for the authorization server and the API, with a stand-in for the system's opener on `PATH` playing the browser,
+  and its refusal on Windows.
 - **Only on the deployment:** Access in front of the authorize endpoint, the real clients of the purpose layer, the
   delay of revocation across locations, and Workers Logs ([operations.md](operations.md), post-deployment checklist).
 
@@ -701,6 +724,11 @@ so REST's `invalid_request` for the same input has no exact MCP twin.
   checks the host, the credential and the `Origin` first, removes the `Authorization` header, then builds the handler
   for the request with a factory whose closure holds the publisher name; the credential never reaches the SDK (TOK-2).
   `McpAgent` from `agents` is not used: nothing needs sessions.
+- Every `/mcp` answer carries `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, as the REST API's do: the
+  SDK's answers, its errors (405, 406, 400) and the Worker's own refusals (401 with section 7's challenge, 403, and 503
+  when a credential cannot be checked). The SDK marks an event stream `no-cache, no-transform`; the Worker keeps
+  `no-transform` (`no-store, no-transform`) so no proxy buffers or recompresses the stream. It replaces the headers
+  only and passes the body stream through unread, so events reach the client as the SDK writes them.
 - Every tool has input and output schemas. Annotations: reads are `readOnlyHint`; `create_artifact` only adds, so it
   is not `destructiveHint`; every other change is `destructiveHint`, since an update can remove files, `set_public` can
   revoke public access, `set_archive` replaces a setting and `delete_artifact` deletes; `set_public`, `set_archive` and
@@ -734,11 +762,11 @@ every version needs index.html at its root.
 
 - **Commands:** `publish <dir> [--id <id>] [--title <t>] [--description <d>]`, `list [--archived only|include]`,
   `get <id> [--version <n>]`, `pull <id> <dir> [--version <n>]`, `public <id> on|off`, `archive <id> on|off|auto`,
-  `delete <id>`, `token <name>`, `login`, `logout`, `grants`, `revoke <grant>`; `--json` prints the API's JSON.
-  `list` follows every page. Configuration: `ARTIFACTS_API_URL`, the API origin (`http` only for `localhost` names,
-  since the credential travels with it), and a credential: `ARTIFACTS_TOKEN` when it is set, otherwise the login stored
-  for that origin, so a script that sets the token behaves as before. Neither is ever printed, and a 401 names both.
-  The help text carries the authoring rule.
+  `delete <id>`, `token <name>`, `login`, `logout`, `grants`, `revoke <grant>`; `--json` prints the API's JSON, and
+  `artifacts --version` alone prints the CLI's version. `list` follows every page. Configuration: `ARTIFACTS_API_URL`,
+  the API origin (`http` only for `localhost` names, since the credential travels with it), and a credential:
+  `ARTIFACTS_TOKEN` when it is set, otherwise the login stored for that origin, so a script that sets the token behaves
+  as before. Neither is ever printed, and a 401 names both. The help text carries the authoring rule.
 - **`publish` without `--id`** creates (`--title` required). After a lost response (no answer, or a 5xx) it lists
   every artifact and takes the one with the same title and description, version 1 and the same files (path and
   SHA-256), creating once more only when none matches. **With `--id`** it reads the latest version, hashes local files
@@ -758,8 +786,8 @@ every version needs index.html at its root.
   2. On the first login for an origin it registers through DCR (`artifacts CLI`, `http://127.0.0.1/callback`, method
      `none`) and keeps the client ID; a client the server no longer knows is registered again.
   3. It listens on `127.0.0.1`, on a port the system picks, for one request to `/callback`, opens the browser at the
-     authorization URL (PKCE S256, `state`, `resource=<origin>/v1`) and prints that URL for a browser that does not
-     open.
+     authorization URL (PKCE S256, `state`, `resource=<origin>/v1`) with the system's opener (`open` on macOS,
+     `xdg-open` on Linux) and prints that URL for a browser that does not open.
   4. It checks `state` and `iss` on the callback, exchanges the code and stores the tokens. The listener closes after
      the first callback, on every failure and after 5 minutes without a callback; the page it answers says only whether
      to return to the terminal.
@@ -767,7 +795,9 @@ every version needs index.html at its root.
   origin with the client ID, the tokens and the access token's expiry. The directory is created with mode `0700` and
   the file with `0600`, written to a temporary file beside it and renamed over it. The CLI refuses to use a file or
   directory that another user can read or write, naming the path, as OpenSSH refuses a private key. Error messages
-  redact the stored tokens as they do `ARTIFACTS_TOKEN`.
+  redact the stored tokens as they do `ARTIFACTS_TOKEN`. These checks need POSIX file modes, which Windows does not
+  have (decisions.md), so a login is stored on macOS and Linux only: on Windows, `login` and `logout` refuse, naming
+  `ARTIFACTS_TOKEN`, and no command reads a stored login.
 - **Refresh:** an access token that expires within a minute is refreshed before the request, and a 401 to a request
   sent with a stored token refreshes once and sends that request once more, which is safe because a 401 changes
   nothing (AC-7). Every request of `login`, `logout` and a refresh waits at most 30 s.
@@ -782,8 +812,9 @@ every version needs index.html at its root.
   - A waiter looks again every 100 ms for at most 75 s, longer than the refresh's 30 s, then fails, naming the lock
     file to remove when no `artifacts` command is running. A lock is never taken from a holder that may still be
     alive, however long it holds it: a paused holder that resumes writes the file as the only holder.
-  - A lock whose host name is this machine's and whose process is not running belongs to a holder that is gone, and a
-    waiter removes it. It first links the lock to `credentials.json.lock.<owner token>.dead`, which fails if another
+  - A lock whose host name is this machine's and whose process is not running (signal 0 to its process ID fails
+    with `ESRCH`; `EPERM`, another user's process, counts as running) belongs to a holder that is gone, and a waiter
+    removes it. It first links the lock to `credentials.json.lock.<owner token>.dead`, which fails if another
     waiter did so first; the waiter that made the link removes the lock if the link holds that token, then removes
     the link. A gone holder releases nothing and no other waiter removes that lock, so it cannot change in between,
     and two waiters never remove each other's lock. A reused process ID can make a gone holder look alive, never a
@@ -803,9 +834,11 @@ every version needs index.html at its root.
   itself (a loop), is refused. The root
   `index.html`, the file count and the request bound are checked before sending; a publish over the bound is refused,
   not split into versions.
-- **Distribution:** TypeScript with one runtime dependency, `oauth4webapi` for the OAuth protocol (decisions.md), run by
-  Node 24 from a checkout after `pnpm install` and put on `PATH` by a symbolic link; Node strips types outside
-  `node_modules`, so there is no build and no npm package.
+- **Distribution:** TypeScript with one runtime dependency, `oauth4webapi` for the OAuth protocol (decisions.md). Each
+  release carries a single binary per platform (macOS arm64, Linux x64 and arm64 with glibc, Windows x64), compiled by
+  `bun build --compile` with the root package's version inlined and the dependency bundled, with `SHA256SUMS`; it
+  installs with mise's github backend. From a checkout, Bun runs the source after `pnpm install`, put on `PATH` by a
+  symbolic link. There is no npm package.
 
 ## 10. Gallery
 
@@ -821,6 +854,20 @@ Server-rendered on `APP_HOST`, without script or frames, and without forms excep
 A deleted artifact and any other path answer 404. Artifact text is escaped and the CSP forbids scripts and framing
 (ISO-5). The gallery links to artifacts rather than framing them: Access's behavior in frames is not documented.
 
+A page is `private, no-cache` with an `ETag`: 32 hex digits of the SHA-256 of its rendered bytes, so a matching
+`If-None-Match` answers 304 with the 200's headers (CSP, CORP, `nosniff`, referrer policy, `Cache-Control`). The tag
+covers everything the page shows, the archive counts, links and relative times included, which no stored timestamp
+would: a page with the same data an hour later reads differently. The Worker renders the page before it compares, after
+Access (ACC-1) and a successful query, so a 304 skips no check (SRV-3) and saves only the transfer; a refusal, a 404 and
+a failed read carry no tag.
+
+Every page links its stylesheets, preloads the fonts it uses ([gallery/design.md](gallery/design.md), "Ground rules")
+and links the gallery's icon ([gallery/design.md](gallery/design.md), "Icon"): `icon.svg` at its fingerprinted path
+(section 6), and `/favicon.ico` for browsers that take no SVG icon. `/favicon.ico` is a real ICO file rather than SVG
+content: Safari reads SVG icons only from version 26 ([caniuse](https://caniuse.com/link-icon-svg)), and no browser
+documents taking SVG at that path. The SVG is cached as immutable like the other assets and `/favicon.ico` revalidates
+(section 6); the CSP's `img-src 'self'` lets both load, since Firefox applies `img-src` to a page's icon.
+
 **The consent page** (section 7) is the app host's one form and a new screen of the design system. Its text field,
 buttons and notice are new components, so it goes through [gallery/design.md](gallery/design.md)'s change rule: the
 design file (`gallery/gallery.pen`) first, then the tokens, the stylesheet and a reference page,
@@ -831,11 +878,11 @@ shows the client and the request as an `info` list, the publisher name with its 
 **Allow** and **Deny**; the field and the buttons take the focus ring links take. Its error page has the same frame,
 and every value on both is escaped by the gallery's template (ISO-5).
 
-Every page links the gallery's icon ([gallery/design.md](gallery/design.md), "Icon"): `/assets/icon.svg`, and
-`/favicon.ico` for browsers that take no SVG icon. `/favicon.ico` is a real ICO file rather than SVG content: Safari
-reads SVG icons only from version 26 ([caniuse](https://caniuse.com/link-icon-svg)), and no browser documents taking
-SVG at that path. Both are served as the other assets are; the CSP's `img-src 'self'` lets them load, since Firefox
-applies `img-src` to a page's icon.
+The consent page is the one page of the app host without the pages' caching: it, its error pages and the redirects
+that end it are `Cache-Control: no-store` without `ETag` or `Vary`, as the library's consent helpers make theirs. Each
+`GET` begins a new transaction with its own handle and cookie, so the page's bytes never repeat and a tag would never
+match, and the handle, which opens the transaction with that cookie, stays out of every cache. With nothing stored,
+`Vary` has nothing to select, as on the API's `no-store` answers.
 
 ## 11. Operations
 
@@ -859,8 +906,9 @@ The steps are in [operations.md](operations.md).
   million KV reads and 1 million writes a month ([KV pricing](https://developers.cloudflare.com/kv/platform/pricing/));
   a request with an OAuth token costs two reads, its token and its grant's revocation record, and a sign-in or a
   refresh a few writes.
-- **Releases:** `main` is never deployed. release-please keeps a release PR open; merging it tags a version, a
-  workflow fast-forwards the `release` branch to it, and Workers Builds deploys `release` only.
+- **Releases:** `main` is never deployed. release-please keeps a release PR open; merging it tags a version as a
+  draft release, a workflow builds the CLI binaries, attaches them and publishes it, then fast-forwards the `release`
+  branch to it, and Workers Builds deploys `release` only.
 - **Cloudflare setup by the owner:** the proxied wildcard DNS record, the two Access applications, the D1 database, a
   private R2 bucket and the KV namespace, on Workers Paid.
 - **Logging:** `logEvent` only, with closed fields; every change logs its publisher name, and an OAuth credential's
@@ -968,7 +1016,7 @@ OAuth rows run the Worker with production-shaped hosts and the test Access key s
 | PL-46 | While `API_TOKENS` is missing or `{}`, the Worker shall refuse every API token and serve OAuth; a malformed value shall answer 503.                                                                                                                                                                                                                         | TOK-1, section 7          | the three states                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | PL-47 | Outside a `localhost` configuration, a Worker without `OAUTH_KV` shall answer 503 on every host; in one, every OAuth path shall answer 404.                                                                                                                                                                                                                 | section 11, ACC-2         | both                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | PL-48 | If the deployment values lack a KV namespace ID of 32 hexadecimal characters, or the namespace does not exist, then the deployment script shall stop before the migrations.                                                                                                                                                                                 | DATA-2, section 11        | each refusal; a stubbed namespace listing without the ID                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| PL-49 | When the CLI logs in, it shall send credentials only to the configured origin, accept one callback on `127.0.0.1` for at most 5 minutes, check `state` and `iss`, and store the tokens in a `0600` file.                                                                                                                                                    | AC-16                     | the CLI against the Worker built with the test's Access verifier, the browser step injected: metadata naming another issuer or resource refused; metadata with the right issuer and a token or registration endpoint on another origin refused; a redirect from either metadata document, the registration or the token endpoint refused, not followed; a wrong `state` or `iss` refused; the listener closed after the timeout and on failure; file and directory modes; a group-readable file refused                                                                                                                                                                                                                                                                                                                                |
+| PL-49 | When the CLI logs in, it shall send credentials only to the configured origin, accept one callback on `127.0.0.1` for at most 5 minutes, check `state` and `iss`, and store the tokens in a `0600` file; if it runs on Windows, then it shall refuse to log in.                                                                                             | AC-16                     | the CLI against the Worker built with the test's Access verifier, the browser step injected: metadata naming another issuer or resource refused; metadata with the right issuer and a token or registration endpoint on another origin refused; a redirect from either metadata document, the registration or the token endpoint refused, not followed; a wrong `state` or `iss` refused; the listener closed after the timeout and on failure; file and directory modes; a group-readable file refused; in the smoke tests, the release binary's `login`, a refresh and `logout` on macOS and Linux and its refusal on Windows                                                                                                                                                                                                        |
 | PL-50 | When CLI processes change the stored login at once, the CLI shall make the changes one at a time under its lock, never take the lock from a holder that may be alive, and follow a 401 with exactly one refresh and one retry.                                                                                                                              | AC-16                     | CLI processes held at barriers: two with an expired access token refresh once and both succeed; a refresh delayed 20 s while another waits, which then uses its tokens, and one delayed past 30 s, aborted with the lock released and the file as it was; a holder stopped between its last read and its rename while a waiter tries to recover the lock and runs out its 75 s: the waiter fails naming the file and leaves the lock, and the resumed holder writes and releases; a gone process's lock removed by exactly one of two waiters at once; the lock of a running process, of another host, or of a reused process ID never removed; `login` and `logout` each racing a refresh: the login's tokens stored, the removed entry not written back; a 401 answered by exactly one refresh request and one replay of the request |
 | PL-51 | When `ARTIFACTS_TOKEN` is set, the CLI shall use it and not read the stored login, and `logout` shall remove the stored login only after the revocation succeeds or the server refuses the login.                                                                                                                                                           | section 9                 | both credentials present; two live grants of the CLI's client, the current one deleted first: `logout` revokes the one its token names, sends nothing after it, completes, and leaves the other listed; a failed revocation and a grant not listed yet (404) each keeping the entry; a stored login the server refuses removed; no command output carries a stored token                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
@@ -998,7 +1046,8 @@ flow works: before it, no `401` names the metadata.
    protected resource metadata, the challenge, the publisher name and grant ID in versions and logs, and the
    full-flow test. PL-7, PL-34, PL-40, PL-42.
 7. **`feat(cli): sign in with OAuth`**: `oauth4webapi`, `login`, `logout`, the stored login and its lock, the
-   credential precedence and the 401 hint, with the end-to-end test against the Worker. PL-49 to PL-51.
+   credential precedence, the 401 hint and the refusal on Windows, with the end-to-end test against the Worker and
+   the binaries' smoke tests. PL-49 to PL-51.
 8. **`feat(cli): list and revoke grants`**: `grants` and `revoke <grant>`.
 
 After the release that carries steps 1 to 6, the post-deployment checklist covers AC-14, AC-15 and AC-17 to AC-20; after

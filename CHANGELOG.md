@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.0](https://github.com/shuymn/artifacts/compare/v0.2.2...v0.3.0) (2026-11-16)
+
+
+### Features
+
+* **cli:** ship the CLI as single binaries on releases ([64028fd](https://github.com/shuymn/artifacts/commit/64028fdb007c3b74bca99c9f9add8412a975ac3a))
+
+## [0.2.2](https://github.com/shuymn/artifacts/compare/v0.2.1...v0.2.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* revalidate gallery pages, set Vary and MCP headers ([e1a1171](https://github.com/shuymn/artifacts/commit/e1a1171df697e666d20f3b9f6c4e319847a9e100))
+
+## [0.2.1](https://github.com/shuymn/artifacts/compare/v0.2.0...v0.2.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **gallery:** serve stale asset paths, revalidated ([846f9c8](https://github.com/shuymn/artifacts/commit/846f9c888171fb540561e17ac048dc966b42d2bf))
+* **gallery:** stop the font flash on reload ([fa6a312](https://github.com/shuymn/artifacts/commit/fa6a3123f983b922e66c5acbb40729e61a8f8fa6))
+* **gallery:** stop the font flash on reload ([a0fe73b](https://github.com/shuymn/artifacts/commit/a0fe73bdfdc635b311950c99a08dbfae818b484b))
+
 ## [0.2.0](https://github.com/shuymn/artifacts/compare/v0.1.2...v0.2.0) (2026-11-16)
 
 

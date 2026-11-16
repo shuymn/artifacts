@@ -1,60 +1,22 @@
 // The command line, configuration, token generation and failure paths, against stubbed API answers. The Worker itself
 // answers in e2e.test.ts.
 import { createHash } from "node:crypto";
-import { once } from "node:events";
 import { mkdir, readdir, readFile, symlink } from "node:fs/promises";
-import { createServer, type RequestListener } from "node:http";
+import type { RequestListener } from "node:http";
 import { join, posix, win32 } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
+import rootPackage from "../../../package.json" with { type: "json" };
 import type { Fetch } from "./api.ts";
 import { HELP } from "./cli.ts";
 import { targetOf } from "./pull.ts";
-import { cli, tempDir, writeTree } from "./test-support.ts";
+import { artifact, cli, ID, local, tempDir, TOKEN, version, writeTree } from "./test-support.ts";
 
-const TOKEN = `art_${"t".repeat(32)}`;
 const ENV = { ARTIFACTS_API_URL: "https://artifacts-api.example.com", ARTIFACTS_TOKEN: TOKEN };
-const ID = "a".repeat(26);
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-
-function artifact(id: string, title = "t") {
-  return {
-    id,
-    title,
-    description: "",
-    public: false,
-    archived: false,
-    archive: null,
-    latest_version: 1,
-    created_at: "2026-11-16T09:00:00.000Z",
-    updated_at: "2026-11-16T09:00:00.000Z",
-    url: `https://${id}-art.example.com/`,
-    public_url: null,
-    gallery_url: `https://artifacts.example.com/a/${id}`,
-  };
-}
-
-function version(files: { path: string; body: string }[]) {
-  return {
-    number: 1,
-    created_at: "2026-11-16T09:00:00.000Z",
-    published_by: "codex",
-    title: "t",
-    description: "",
-    file_count: files.length,
-    total_bytes: 0,
-    url: `https://${ID}-art.example.com/_v/1/`,
-    files: files.map(({ path, body }) => ({
-      path,
-      size: Buffer.byteLength(body),
-      sha256: createHash("sha256").update(body).digest("hex"),
-      content_type: "text/plain; charset=utf-8",
-    })),
-  };
-}
 
 /** A fetch that never answers until its request's signal aborts, as a stalled connection does. */
 const stalled: Fetch = (_input, init) =>
@@ -67,6 +29,12 @@ const oneFile: Fetch = async (input) =>
   input.includes("/files/")
     ? new Response("x")
     : json(200, { artifact: artifact(ID), version: version([{ path: "index.html", body: "x" }]) });
+
+/** A version holding index.html, whose bytes differ from the listing. */
+const tampered: Fetch = async (input) =>
+  input.includes("/files/")
+    ? new Response("tampered")
+    : json(200, { artifact: artifact(ID), version: version([{ path: "index.html", body: "original" }]) });
 
 /** `oneFile`, except that a POST gets no answer. */
 const postLost: Fetch = async (input, init) =>
@@ -96,6 +64,19 @@ describe("help", () => {
     }
     expect((await cli([])).stdout).toBe(HELP);
     expect((await cli(["get", "--help"])).stdout).toBe(HELP);
+  });
+});
+
+describe("version", () => {
+  it("prints the root package's version for exactly --version, and get keeps --version <n>", async () => {
+    expect(await cli(["--version"])).toEqual({ status: 0, stdout: `${rootPackage.version}\n`, stderr: "" });
+    const urls: string[] = [];
+    const fetch: Fetch = async (input) => {
+      urls.push(input);
+      return json(200, { artifact: artifact(ID), version: version([]) });
+    };
+    expect((await cli(["get", ID, "--version", "2"], { env: ENV, fetch })).status).toBe(0);
+    expect(urls).toEqual([`https://artifacts-api.example.com/v1/artifacts/${ID}/versions/2`]);
   });
 });
 
@@ -259,28 +240,6 @@ describe("timeouts", () => {
   });
 });
 
-const servers: ReturnType<typeof createServer>[] = [];
-
-afterEach(async () => {
-  for (const server of servers.splice(0)) {
-    server.closeAllConnections();
-    server.close();
-    await once(server, "close");
-  }
-});
-
-/** A local HTTP server answering with `handler`, and the configuration that points the CLI at it. */
-async function local(handler: RequestListener) {
-  const server = createServer(handler);
-  servers.push(server);
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new Error("the server has no port");
-  const { port } = address;
-  return { ARTIFACTS_API_URL: `http://127.0.0.1:${port}`, ARTIFACTS_TOKEN: TOKEN };
-}
-
 const network: Fetch = (input, init) => fetch(input, init);
 
 /** An API that records each request; a POST gets `post`, any other request `get` (an empty listing by default). */
@@ -433,12 +392,8 @@ describe("pull", () => {
   });
 
   it("refuses bytes that differ from the listing and removes the file", async () => {
-    const fetch: Fetch = async (input) =>
-      input.includes("/files/")
-        ? new Response("tampered")
-        : json(200, { artifact: artifact(ID), version: version([{ path: "index.html", body: "original" }]) });
     const target = join(await tempDir(), "out");
-    const { status, stderr } = await cli(["pull", ID, target], { env: ENV, fetch });
+    const { status, stderr } = await cli(["pull", ID, target], { env: ENV, fetch: tampered });
     expect(status).toBe(1);
     expect(stderr).toContain(`the bytes of "index.html" differ from the version's listing`);
     expect(await readdir(target)).toEqual([]);

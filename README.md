@@ -18,13 +18,13 @@ moves by hand: change `.node-version` and `engines.node` in `package.json` and `
 `mise lock`.
 
 ```sh
-mise install                # Node.js, pnpm and the workflow linters
+mise install                # Node.js, pnpm, Bun (the CLI's runtime) and the workflow linters
 pnpm install                # dependencies
 pnpm exec lefthook install  # git hooks (optional)
 pnpm run lint               # oxlint with type-aware rules
 pnpm run fmt                # oxfmt check (pnpm run fmt:fix to apply)
 pnpm run typecheck          # TypeScript
-pnpm run test               # Vitest
+pnpm run test               # Vitest (the CLI's unit tests under Bun)
 ```
 
 The GitHub repository settings are declared in `.github/infra.yaml`; review

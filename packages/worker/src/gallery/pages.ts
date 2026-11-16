@@ -11,6 +11,7 @@ import type {
   ListedArtifact,
   VersionJson,
 } from "../operations.ts";
+import { assetPath } from "./assets.ts";
 import { byteSize, relativeTime, utcMinute } from "./format.ts";
 import { html, type Markup, type Value } from "./html.ts";
 
@@ -26,14 +27,35 @@ export type Chrome = {
   readonly archiveAfterDays: number;
 };
 
-const STYLESHEETS = ["/assets/fonts.css", "/assets/gallery.css"] as const;
+const STYLESHEETS = ["fonts.css", "gallery.css"].map(
+  (name) => html`<link rel="stylesheet" href="${assetPath(name)}" />`,
+);
+
+/**
+ * The fonts the top of every page uses (docs/gallery/design.md, "Ground rules"), preloaded so they load with the
+ * stylesheets rather than after them. Sans 400 (body text), Sans 600 (headings, titles) and Mono 400 (counts, meta)
+ * carry most of the text and load at a font's default priority; Sans 500 (links, badges) and Mono 600 (the brand) load
+ * at low priority. Mono 500 is not used and is not preloaded.
+ */
+const PRELOADS = (
+  [
+    ["fonts/ibm-plex-sans-latin-400-normal.woff2", null],
+    ["fonts/ibm-plex-sans-latin-600-normal.woff2", null],
+    ["fonts/ibm-plex-mono-latin-400-normal.woff2", null],
+    ["fonts/ibm-plex-sans-latin-500-normal.woff2", html`fetchpriority="low"`],
+    ["fonts/ibm-plex-mono-latin-600-normal.woff2", html`fetchpriority="low"`],
+  ] as const
+).map(
+  ([name, priority]) =>
+    html`<link rel="preload" href="${assetPath(name)}" as="font" type="font/woff2" crossorigin ${priority} />`,
+);
 
 /**
  * The icon (docs/gallery/design.md, "Icon"): the SVG where a browser takes one, the ICO elsewhere. The ICO's
  * `sizes="32x32"` keeps Chrome from choosing it over the SVG.
  */
 const ICONS = html`<link rel="icon" href="/favicon.ico" sizes="32x32" />
-  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />`;
+  <link rel="icon" href="${assetPath("icon.svg")}" type="image/svg+xml" />`;
 
 /** Each section's nav tab: its label and the list it links to. */
 const SECTIONS: Readonly<Record<Section, { readonly label: string; readonly href: string }>> = {
@@ -63,7 +85,7 @@ function document(title: string, chrome: Chrome, current: Section, page: "list" 
         <meta name="viewport" content="width=device-width" />
         <meta name="text-scale" content="scale" />
         <title>${title} · artifacts</title>
-        ${STYLESHEETS.map((href) => html`<link rel="stylesheet" href="${href}" />`)} ${ICONS}
+        ${PRELOADS} ${STYLESHEETS} ${ICONS}
       </head>
       <body>
         <header class="site-header">

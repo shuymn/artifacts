@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { assetPath } from "./gallery/assets.ts";
 import favicon from "./gallery/favicon.ico";
 import { APP_HOST, CONTENT_SUFFIX, objectKeys, PUBLIC_SUFFIX, World } from "./test-support.ts";
 
@@ -155,6 +156,7 @@ describe("SRV-1: response headers", () => {
         "content-type": type,
         "content-length": String(file?.size),
         etag: expect.stringMatching(/^"[0-9a-f]{32}"$/),
+        vary: "Accept-Encoding",
       });
       noCors(response);
     }
@@ -191,12 +193,12 @@ describe("ISO-2: cross-origin headers", () => {
     const id = await threeVersions(world);
     const app = (path: string, init: RequestInit = {}) => world.fetch(`https://${APP_HOST}${path}`, init);
     const jwt = { "Cf-Access-Jwt-Assertion": await world.jwt({ aud: "app-audience" }) };
-    const etag = (await app("/assets/gallery.css", { headers: jwt })).headers.get("ETag") ?? "";
+    const etag = (await app(assetPath("gallery.css"), { headers: jwt })).headers.get("ETag") ?? "";
     const responses = [
       await app("/", { headers: jwt }),
       await app("/archived", { headers: jwt }),
       await app(`/a/${id}`, { headers: jwt }),
-      await app("/assets/gallery.css", { headers: { ...jwt, "If-None-Match": etag } }),
+      await app(assetPath("gallery.css"), { headers: { ...jwt, "If-None-Match": etag } }),
       await app("/"),
       await app("/a/x", { headers: jwt }),
       await app("/", { method: "DELETE" }),
@@ -389,6 +391,7 @@ describe("section 6: the fallback icon", () => {
         "content-type": ICO,
         "content-length": String(icon.byteLength),
         etag: expect.stringMatching(/^"[0-9a-f]{32}"$/),
+        vary: "Accept-Encoding",
       });
       expect(new Uint8Array(await response.arrayBuffer())).toEqual(icon);
       noCors(response);
@@ -485,5 +488,53 @@ describe("section 6: the fallback icon", () => {
     expect((await world.content(id, "/favicon.ico", { headers: conditional })).status).toBe(304);
     expect((await world.api("DELETE", `/v1/artifacts/${id}`)).status).toBe(204);
     expect((await world.content(id, "/favicon.ico", { headers: conditional })).status).toBe(404);
+  });
+});
+
+// Design.md section 6: the runtime and Cloudflare compress by Accept-Encoding, so every response with a body or a
+// validator says so, on 200 and 304 alike; refusals and redirects do not.
+describe("section 6: Vary", () => {
+  it("sends Vary: Accept-Encoding once on pages, assets, the icon and artifact files, 200 and 304", async () => {
+    const world = new World();
+    const created = await world.created({ title: "v", files: { "index.html": "<p>v</p>", "a.txt": "a" } });
+    const id = created.artifact.id;
+    expect((await world.patch(id, { public: true })).status).toBe(200);
+    const appJwt = await world.jwt({ aud: "app-audience" });
+    const app = (path: string, headers: Record<string, string> = {}) =>
+      world.fetch(`https://${APP_HOST}${path}`, { headers: { "Cf-Access-Jwt-Assertion": appJwt, ...headers } });
+    const requests: [string, (headers: Record<string, string>) => Promise<Response>][] = [
+      ["gallery page", (headers) => app("/", headers)],
+      ["artifact page", (headers) => app(`/a/${id}`, headers)],
+      ["asset", (headers) => app(assetPath("gallery.css"), headers)],
+      ["stale asset", (headers) => app("/assets/gallery.css", headers)],
+      ["app favicon", (headers) => app("/favicon.ico", headers)],
+      ["content file", (headers) => world.content(id, "/a.txt", { headers })],
+      ["pinned file", (headers) => world.content(id, "/_v/1/a.txt", { headers })],
+      ["fallback icon", (headers) => world.content(id, "/favicon.ico", { headers })],
+      ["public file", (headers) => world.public(id, "/", { headers })],
+    ];
+    for (const [label, request] of requests) {
+      const first = await request({});
+      const etag = first.headers.get("ETag") ?? "";
+      const again = await request({ "If-None-Match": etag });
+      expect({ label, statuses: [first.status, again.status] }).toEqual({ label, statuses: [200, 304] });
+      for (const response of [first, again]) {
+        expect({ label, vary: response.headers.get("Vary") }).toEqual({ label, vary: "Accept-Encoding" });
+      }
+    }
+  });
+
+  it("sends no Vary on a refusal, a redirect or a 404", async () => {
+    const world = new World();
+    const id = (await world.created({ title: "v", files: { "index.html": "<p>v</p>", "d/index.html": "d" } })).artifact
+      .id;
+    const responses = [
+      await world.fetch(`https://${APP_HOST}/`),
+      await world.content(id, "/d"),
+      await world.content(id, "/missing"),
+      await world.public(id, "/"),
+    ];
+    expect(responses.map((response) => response.status)).toEqual([403, 308, 404, 404]);
+    for (const response of responses) expect(response.headers.has("Vary")).toBe(false);
   });
 });
