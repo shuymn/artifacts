@@ -823,7 +823,8 @@ A deleted artifact and any other path answer 404. Artifact text is escaped and t
 
 **The consent page** (section 7) is the app host's one form and a new screen of the design system. Its text field,
 buttons and notice are new components, so it goes through [gallery/design.md](gallery/design.md)'s change rule: the
-Penpot file first, then the tokens, the stylesheet and a reference page, `reference/consent.html`, with the ground rule
+design file (`gallery/gallery.pen`) first, then the tokens, the stylesheet and a reference page,
+`reference/consent.html`, with the ground rule
 "no forms" naming this form as its one exception. The other ground rules hold: dark only, text that scales with the
 user's setting, no script. The header carries the brand alone, since the gallery's tabs show counts from D1. The page
 shows the client and the request as an `info` list, the publisher name with its label, help and message, then
@@ -986,7 +987,7 @@ flow works: before it, no `401` names the metadata.
    `OAuthAuthorizationServer` on the three API-host paths behind the host classifier, with CIMD, DCR and the lifetimes
    of section 7, `Access-Control-*` removed, `OPTIONS` answered 405, counted bodies, the `onError` hook, the KV
    wrapper that writes revocation records and the records' check before the token endpoint. PL-43 to PL-45.
-3. **`feat(gallery): design the consent page`**: the Penpot screen and its components, then `tokens.json`,
+3. **`feat(gallery): design the consent page`**: the screen and its components in `gallery.pen`, then `tokens.json`,
    `gallery.css`, `reference/consent.html` and the ground rule's exception (section 10).
 4. **`feat(worker): add the OAuth consent page`**: `/oauth/authorize` on the app host with the library's helpers, the
    refusals of this deployment's hosts, the PKCE requirement, the publisher name, the CSP, the error pages, the
