@@ -238,8 +238,14 @@ export class Credentials {
     this.file = join(this.directory, "credentials.json");
   }
 
+  /** In a new directory, removed after the test. */
   static async create(): Promise<Credentials> {
     return new Credentials(await tempDir());
+  }
+
+  /** In `home`, which the caller removes. */
+  static at(home: string): Credentials {
+    return new Credentials(home);
   }
 
   /** The environment that points the CLI at `standIn` with this directory and no token. */
