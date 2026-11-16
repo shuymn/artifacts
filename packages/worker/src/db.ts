@@ -43,6 +43,9 @@ export const FILE_ROW = {
 /** The artifact columns a commit returns; the title and description come from the version it wrote. */
 export const ADVANCED_ROW = ADVANCED_SHAPE;
 export const STATE_ROW = { latest_version: "integer", deleted: "integer" } as const satisfies Shape;
+/** A listed artifact with its latest version's publisher, which the gallery shows. */
+export const LISTED_ROW = { ...ARTIFACT_ROW, published_by: "text" } as const satisfies Shape;
+export const COUNTS_ROW = { active: "integer", archived: "integer" } as const satisfies Shape;
 
 export type ArtifactRow = Row<typeof ARTIFACT_ROW>;
 export type VersionRow = Row<typeof VERSION_ROW>;
@@ -151,9 +154,15 @@ export function selectServedFiles(
 export type ArtifactCursor = { readonly updatedAt: number; readonly id: string };
 
 /**
+ * Whether artifact `a` is archived (design.md section 5), with `param` the placeholder bound to the time before which an
+ * unset setting means archived.
+ */
+const archivedSql = (param: string) => `(a.archive IS 'archived' OR (a.archive IS NULL AND a.updated_at < ${param}))`;
+
+/**
  * A page of live artifacts in `(updated_at DESC, id DESC)` order after `cursor`, filtered by the archive state
- * (design.md section 5) before the page is cut. `archivedBefore` is the time before which an unset setting means
- * archived.
+ * (design.md section 5) before the page is cut, each with its latest version's publisher (LISTED_ROW). `archivedBefore`
+ * is the time before which an unset setting means archived.
  */
 export function selectArtifactPage(
   db: D1Database,
@@ -164,16 +173,25 @@ export function selectArtifactPage(
 ): D1PreparedStatement {
   return db
     .prepare(
-      `SELECT ${ARTIFACT_COLUMNS} FROM artifacts a
+      `SELECT ${ARTIFACT_COLUMNS}, v.published_by FROM artifacts a
        JOIN versions v ON v.artifact_id = a.id AND v.number = a.latest_version
        WHERE a.deleted_at IS NULL
-         AND (?1 = 'include'
-              OR (?1 = 'only') = (a.archive IS 'archived' OR (a.archive IS NULL AND a.updated_at < ?2)))
+         AND (?1 = 'include' OR (?1 = 'only') = ${archivedSql("?2")})
          AND (?3 IS NULL OR a.updated_at < ?3 OR (a.updated_at = ?3 AND a.id < ?4))
        ORDER BY a.updated_at DESC, a.id DESC
        LIMIT ?5`,
     )
     .bind(filter, archivedBefore, cursor?.updatedAt ?? null, cursor?.id ?? null, limit);
+}
+
+/** How many live artifacts are out of the archive and in it (COUNTS_ROW), by selectArtifactPage's rule. */
+export function selectArchiveCounts(db: D1Database, archivedBefore: number): D1PreparedStatement {
+  return db
+    .prepare(
+      `SELECT COALESCE(SUM(NOT archived), 0) AS active, COALESCE(SUM(archived), 0) AS archived
+       FROM (SELECT ${archivedSql("?1")} AS archived FROM artifacts a WHERE a.deleted_at IS NULL)`,
+    )
+    .bind(archivedBefore);
 }
 
 /** A page of an artifact's versions in `number DESC` order below `before`. */

@@ -9,11 +9,14 @@ import { contentTypeFor } from "./content-type.ts";
 import {
   ADVANCED_ROW,
   ARTIFACT_ROW,
+  COUNTS_ROW,
   createStatements,
   deleteStatements,
   FILE_ROW,
+  LISTED_ROW,
   read,
   rows,
+  selectArchiveCounts,
   selectArtifact,
   selectArtifactPage,
   selectFiles,
@@ -392,6 +395,21 @@ export type ListInput = {
 };
 
 const ARTIFACT_CURSOR = /^(0|[1-9][0-9]{0,15})\.([a-z2-7]{26})$/;
+const INVALID_CURSOR = invalid([{ field: "cursor", reason: "invalid_cursor" }]);
+
+/** A listing's cursor: null for the first page, undefined when `parse` refuses it. */
+const cursorOf = <C>(raw: string | undefined, parse: (raw: string) => C | undefined): C | null | undefined =>
+  raw === undefined ? null : parse(raw);
+
+/** A page read with `limit + 1` rows, cut to `limit`, and the cursor naming its last row when more follow. */
+function cutPage<R>(found: readonly R[], limit: number, key: (row: R) => string): { shown: R[]; next: string | null } {
+  const shown = found.slice(0, limit);
+  const last = shown.at(-1);
+  return { shown, next: found.length > limit && last !== undefined ? key(last) : null };
+}
+
+const artifactKey = (row: ArtifactRow) => `${row.updated_at}.${row.id}`;
+const versionKey = (row: VersionRow) => String(row.number);
 
 function parseArtifactCursor(cursor: string): ArtifactCursor | undefined {
   const match = ARTIFACT_CURSOR.exec(cursor);
@@ -407,24 +425,15 @@ function parseArtifactCursor(cursor: string): ArtifactCursor | undefined {
  */
 export async function listArtifacts(deps: OperationDeps, input: ListInput): Promise<Result<ArtifactPage>> {
   const limit = input.limit ?? LIMITS.pageDefault;
-  let cursor: ArtifactCursor | null = null;
-  if (input.cursor !== undefined) {
-    const parsed = parseArtifactCursor(input.cursor);
-    if (parsed === undefined) return invalid([{ field: "cursor", reason: "invalid_cursor" }]);
-    cursor = parsed;
-  }
+  const cursor = cursorOf(input.cursor, parseArtifactCursor);
+  if (cursor === undefined) return INVALID_CURSOR;
   return guarded(undefined, async () => {
     const now = deps.now();
     const [page] = await read(database(deps), [
       selectArtifactPage(deps.db, input.archived ?? "exclude", archivedBefore(deps, now), cursor, limit + 1),
     ]);
-    const found = rows(page, ARTIFACT_ROW);
-    const shown = found.slice(0, limit);
-    const last = shown.at(-1);
-    return succeed({
-      artifacts: shown.map((row) => artifactJson(deps, row, now)),
-      next_cursor: found.length > limit && last !== undefined ? `${last.updated_at}.${last.id}` : null,
-    });
+    const { shown, next } = cutPage(rows(page, ARTIFACT_ROW), limit, artifactKey);
+    return succeed({ artifacts: shown.map((row) => artifactJson(deps, row, now)), next_cursor: next });
   });
 }
 
@@ -439,25 +448,16 @@ export async function listVersions(deps: OperationDeps, input: ListVersionsInput
   const id = input.id;
   if (!isArtifactId(id)) return NOT_FOUND;
   const limit = input.limit ?? LIMITS.pageDefault;
-  let before: number | null = null;
-  if (input.cursor !== undefined) {
-    const parsed = parseVersionNumber(input.cursor);
-    if (parsed === undefined) return invalid([{ field: "cursor", reason: "invalid_cursor" }]);
-    before = parsed;
-  }
+  const before = cursorOf(input.cursor, parseVersionNumber);
+  if (before === undefined) return INVALID_CURSOR;
   return guarded(id, async () => {
     const [artifactResult, page] = await read(database(deps), [
       selectArtifact(deps.db, id),
       selectVersionPage(deps.db, id, before, limit + 1),
     ]);
     if (rows(artifactResult, ARTIFACT_ROW)[0] === undefined) return NOT_FOUND;
-    const found = rows(page, VERSION_ROW);
-    const shown = found.slice(0, limit);
-    const last = shown.at(-1);
-    return succeed({
-      versions: shown.map((row) => versionJson(deps, id, row)),
-      next_cursor: found.length > limit && last !== undefined ? String(last.number) : null,
-    });
+    const { shown, next } = cutPage(rows(page, VERSION_ROW), limit, versionKey);
+    return succeed({ versions: shown.map((row) => versionJson(deps, id, row)), next_cursor: next });
   });
 }
 
@@ -557,5 +557,103 @@ export async function deleteArtifact(
       });
     }
     return succeed({ deleted: id });
+  });
+}
+
+export type ArchiveCounts = { readonly active: number; readonly archived: number };
+/** An artifact as the gallery lists it: with its latest version's publisher. */
+export type ListedArtifact = ArtifactJson & { readonly published_by: string };
+export type GalleryList = {
+  readonly artifacts: readonly ListedArtifact[];
+  readonly next_cursor: string | null;
+  readonly counts: ArchiveCounts;
+};
+
+export type GalleryListInput = {
+  readonly archived: "exclude" | "only";
+  readonly limit: number;
+  readonly cursor?: string | undefined;
+};
+
+const countsOf = (result: D1Result | undefined): ArchiveCounts => {
+  const row = rows(result, COUNTS_ROW)[0];
+  return { active: row?.active ?? 0, archived: row?.archived ?? 0 };
+};
+
+/**
+ * The gallery's lists (design.md section 10): a page as `listArtifacts` gives it, each artifact with its latest
+ * version's publisher, and how many live artifacts are out of the archive and in it, all from one snapshot.
+ */
+export async function listForGallery(deps: OperationDeps, input: GalleryListInput): Promise<Result<GalleryList>> {
+  const cursor = cursorOf(input.cursor, parseArtifactCursor);
+  if (cursor === undefined) return INVALID_CURSOR;
+  return guarded(undefined, async () => {
+    const now = deps.now();
+    const before = archivedBefore(deps, now);
+    const [page, counts] = await read(database(deps), [
+      selectArtifactPage(deps.db, input.archived, before, cursor, input.limit + 1),
+      selectArchiveCounts(deps.db, before),
+    ]);
+    const { shown, next } = cutPage(rows(page, LISTED_ROW), input.limit, artifactKey);
+    return succeed({
+      artifacts: shown.map((row) => ({ ...artifactJson(deps, row, now), published_by: row.published_by })),
+      next_cursor: next,
+      counts: countsOf(counts),
+    });
+  });
+}
+
+export type GalleryArtifact = {
+  readonly artifact: ArtifactJson;
+  /** The latest version, with its files. */
+  readonly latest: VersionJson;
+  /** Version 1, whose publisher created the artifact. */
+  readonly first: VersionJson;
+  /** A page of the version history, newest first, without files. */
+  readonly versions: VersionPage;
+  readonly counts: ArchiveCounts;
+};
+
+export type GalleryArtifactInput = {
+  readonly id: string;
+  readonly limit: number;
+  /** The version history's cursor, as `listVersions` takes it. */
+  readonly cursor?: string | undefined;
+};
+
+/**
+ * The gallery's artifact page (design.md section 10): a live artifact, its latest version with its files, version 1, a
+ * page of its version history, and the archive counts, all from one snapshot.
+ */
+export async function getForGallery(
+  deps: OperationDeps,
+  input: GalleryArtifactInput,
+): Promise<Result<GalleryArtifact>> {
+  const id = input.id;
+  if (!isArtifactId(id)) return NOT_FOUND;
+  const before = cursorOf(input.cursor, parseVersionNumber);
+  if (before === undefined) return INVALID_CURSOR;
+  return guarded(id, async () => {
+    const now = deps.now();
+    const [artifactResult, latestResult, filesResult, firstResult, page, counts] = await read(database(deps), [
+      selectArtifact(deps.db, id),
+      selectVersion(deps.db, id, null),
+      selectFiles(deps.db, id, null),
+      selectVersion(deps.db, id, 1),
+      selectVersionPage(deps.db, id, before, input.limit + 1),
+      selectArchiveCounts(deps.db, archivedBefore(deps, now)),
+    ]);
+    const artifact = rows(artifactResult, ARTIFACT_ROW)[0];
+    const latest = rows(latestResult, VERSION_ROW)[0];
+    const first = rows(firstResult, VERSION_ROW)[0];
+    if (artifact === undefined || latest === undefined || first === undefined) return NOT_FOUND;
+    const { shown, next } = cutPage(rows(page, VERSION_ROW), input.limit, versionKey);
+    return succeed({
+      artifact: artifactJson(deps, artifact, now),
+      latest: versionJson(deps, id, latest, rows(filesResult, FILE_ROW)),
+      first: versionJson(deps, id, first),
+      versions: { versions: shown.map((row) => versionJson(deps, id, row)), next_cursor: next },
+      counts: countsOf(counts),
+    });
   });
 }
