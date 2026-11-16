@@ -26,6 +26,10 @@ main ──(release-please keeps a release PR open)──> merge the release PR 
 - release-please keeps one release PR open with the next version and the changelog, from the Conventional Commits on
   `main` (one version for the repository: the `node` release type on the root package, tags `vX.Y.Z`, first release
   `0.1.0`; `release-please-config.json`, `.release-please-manifest.json`). Merging it tags the release.
+- Releases are immutable (`release_immutability` in `.github/infra.yaml`): once published, a release's tag cannot be
+  moved or deleted, and deleting the release does not free its tag name
+  ([immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)).
+  A bad release is fixed by the next one.
 - The release workflow then fast-forwards the `release` branch to the latest release. It refuses a release that is not
   a commit of `main` and an update that is not a fast-forward: it updates the branch with `force=false`, which GitHub
   refuses unless the update is a fast-forward
@@ -290,8 +294,8 @@ export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<toke
 
 1. Section 1: Workers Paid, zones, the wildcard record, the D1 database, the R2 bucket, the two Access applications.
 2. Fill the deployment values (section 2).
-3. Restrict who can push to `release` (below), then `gh infra apply`: it also adds the release-please labels and allows
-   its action. Until then the release workflow fails on every push to `main`, since the action is not allowed; the next
+3. `gh infra apply`: it restricts who can push to `release` (below), adds the release-please labels and allows its
+   action. Until then the release workflow fails on every push to `main`, since the action is not allowed; the next
    push after the apply runs it.
 4. Merge the first release PR; the release workflow creates `release` at its tag.
 5. Connect Workers Builds (section 3); its first build deploys.
@@ -300,30 +304,12 @@ export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<toke
 
 ### Restrict pushes to `release`
 
-A push to `release` deploys, so only the release workflow's App may update it. `.github/infra.yaml` reconciles rulesets
-authoritatively: a ruleset made in the GitHub settings would be deleted by the next `gh infra apply`, so declare it
-there, with the App's ID from its settings page (a private App is named as `id:<APP_ID>`; [gh-infra
-rulesets](https://github.com/babarot/gh-infra/blob/main/docs/src/content/docs/resources/repository/rulesets.md)):
-
-```yaml
-- name: release
-  target: branch
-  enforcement: active
-  bypass_actors:
-    - app: id:<APP_ID>
-      bypass_mode: always
-  conditions:
-    ref_name:
-      include:
-        - refs/heads/release
-  rules:
-    creation: true
-    update: true
-    deletion: true
-    non_fast_forward: true
-```
-
-Check it with `gh infra plan` before applying.
+A push to `release` deploys, so only the release workflow's App may update it. The `release` ruleset in
+`.github/infra.yaml` does this, naming the repository's App by its numeric ID (a private App is named as `id:<APP_ID>`;
+[gh-infra rulesets](https://github.com/babarot/gh-infra/blob/main/docs/src/content/docs/resources/repository/rulesets.md)).
+`gh infra apply` reconciles rulesets authoritatively, so a ruleset made in the GitHub settings would be deleted by the
+next apply; change it in the file. A copy of the repository with its own App puts that App's ID there. Check with
+`gh infra plan` before applying.
 
 ## 7. Post-deployment checklist
 
