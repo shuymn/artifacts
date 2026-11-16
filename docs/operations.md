@@ -669,7 +669,8 @@ CLI signs in, and 16 when API tokens are turned off.
     Cloudflare documents no bound on KV's propagation; afterwards `/mcp` asks to sign in again, and the grant stays out
     of the listing. Note the delay.
 
-15. **The CLI's sign-in** (AC-16). `artifacts login`; `ls -l ~/.config/artifacts/credentials.json` shows
+15. **The CLI's sign-in** (AC-16), on macOS or Linux; on Windows `artifacts login` refuses and names `ARTIFACTS_TOKEN`.
+    `artifacts login`; `ls -l ~/.config/artifacts/credentials.json` shows
     `-rw-------`; `artifacts list` works without `ARTIFACTS_TOKEN`. Publish a second probe, so the two publishes below
     cannot conflict:
 
