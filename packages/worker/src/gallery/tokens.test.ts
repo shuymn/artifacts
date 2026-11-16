@@ -137,15 +137,22 @@ function* penNodes(
 // Pencil drops a variable bound to a width, so these frames repeat the size tokens as numbers (design.md, "Tokens").
 type Match = (node: Record<string, unknown>, parent: Record<string, unknown> | undefined) => boolean;
 const component =
-  (...names: string[]): Match =>
+  (name: string): Match =>
   (n) =>
-    n.reusable === true && names.includes(String(n.name));
+    n.reusable === true && n.name === name;
+const screen =
+  (name: string): Match =>
+  (n, p) =>
+    p === design && n.name === name;
+// Each matcher stands for one frame or component and must find at least one node, so a renamed or deleted frame fails
+// even when others carry the same token.
 const SIZED: Record<string, Match[]> = {
-  "size.page": [
-    (n, p) => p === design && ["index", "archived", "artifact"].includes(String(n.name)),
-    component("site-header"),
+  "size.page": [screen("index"), screen("archived"), screen("artifact"), component("site-header")],
+  "size.content": [
+    (n) => n.type === "frame" && /^page( |$)/.test(String(n.name)),
+    component("pager"),
+    component("artifact-row"),
   ],
-  "size.content": [(n) => n.type === "frame" && /^page( |$)/.test(String(n.name)), component("pager", "artifact-row")],
   "size.prose": [(n, p) => n.name === "Description" && p?.name === "artifact-heading"],
   "size.label": [(n, p) => n.name === "Term" && p?.reusable === true && String(p.name).startsWith("info-row/")],
 };
@@ -180,15 +187,13 @@ describe("gallery.pen and tokens.json", () => {
   });
 
   it("gives the frames that stand for a size token its width", () => {
-    const got: Record<string, unknown[]> = {};
-    const want: Record<string, unknown[]> = {};
+    const got: Record<string, unknown[][]> = {};
+    const want: Record<string, unknown[][]> = {};
     for (const [name, matches] of Object.entries(SIZED)) {
-      got[name] = [];
-      for (const [n, p] of penNodes(design)) if (matches.some((match) => match(n, p))) got[name].push(n.width);
       const token = all.get(name);
       const px = token?.$type === "dimension" ? Number(String(token.$value).replace(/px$/, "")) : undefined;
-      // At least one frame per token, so a renamed frame cannot pass by matching nothing.
-      want[name] = Array.from({ length: Math.max(got[name].length, 1) }, () => px);
+      got[name] = matches.map((match) => [...penNodes(design)].filter(([n, p]) => match(n, p)).map(([n]) => n.width));
+      want[name] = got[name].map((widths) => Array.from({ length: Math.max(widths.length, 1) }, () => px));
     }
     expect(got).toEqual(want);
   });
