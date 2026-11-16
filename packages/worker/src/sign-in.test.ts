@@ -38,6 +38,7 @@ import {
   callTool,
   clearOAuthStorage,
   sha256Text,
+  snapshot,
   stringAt,
   toolOutcome,
   World,
@@ -251,7 +252,7 @@ describe("PL-34: an MCP client signs in through the Worker", () => {
 });
 
 describe("a REST client signs in to /v1", () => {
-  it("discovers from the 401, registers, signs in, publishes, refreshes, and publishes with the new token", async () => {
+  it("discovers from the 401, registers, signs in, publishes, and refreshes on a 401 once its token expires", async () => {
     const world = new World();
     // 1. The 401 names /v1's metadata, which names the authorization server, whose metadata names the endpoints.
     const refused = await world.api("GET", "/v1/artifacts", { token: null });
@@ -301,7 +302,16 @@ describe("a REST client signs in to /v1", () => {
     expect(created.version.published_by).toBe("rest-agent");
     expect((await useToken(world, "mcp", tokens.access_token)).status).toBe(401);
 
-    // 4. A refresh, and a call with the new token.
+    // 4. Once the access token expires, a call answers 401 with the challenge and changes nothing; the client refreshes
+    // and sends the same call again with the new token.
+    await expire(tokens.access_token);
+    const before = await snapshot();
+    const expired = await world.update(created.artifact.id, { base_version: 1 }, tokens.access_token);
+    expect(expired.status).toBe(401);
+    expect(expired.headers.get("WWW-Authenticate")).toBe(
+      `Bearer resource_metadata="${API}/.well-known/oauth-protected-resource/v1", error="invalid_token"`,
+    );
+    expect(await snapshot()).toEqual(before);
     const refreshed = await tokensOf(
       await tokenRequest(world, {
         grant_type: "refresh_token",
@@ -309,6 +319,7 @@ describe("a REST client signs in to /v1", () => {
         client_id: clientId,
       }),
     );
+    expect(refreshed).toMatchObject({ resource: V1 });
     const updated = await world.update(created.artifact.id, { base_version: 1 }, refreshed.access_token);
     expect(updated.status).toBe(201);
     expect((await updated.json<PublishJson>()).version.published_by).toBe("rest-agent");
