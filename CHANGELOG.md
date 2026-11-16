@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/shuymn/artifacts/compare/v0.3.0...v0.4.0) (2026-11-16)
+
+
+### Features
+
+* **gallery:** show the icon and version in header ([8eef0bd](https://github.com/shuymn/artifacts/commit/8eef0bdad7152267227a8385585a1f08d75d7446))
+* **gallery:** show the icon and version in the header ([76c3cb1](https://github.com/shuymn/artifacts/commit/76c3cb198916e2b2fe347f6a1c9c73ac11ee0e0b))
+
+
+### Bug Fixes
+
+* **gallery:** set the header icon on the baseline ([1c52174](https://github.com/shuymn/artifacts/commit/1c52174325613e5073d67de10c8b06d12c617ab9))
+* **gallery:** wrap the header at narrow widths ([532147e](https://github.com/shuymn/artifacts/commit/532147ec1fa68ef3e207375d4d580cb629cbfb38))
+* **hooks:** keep oxfmt from restaging .pen files ([71f6224](https://github.com/shuymn/artifacts/commit/71f6224b7e20749069fbc40328aa8a71ba2e1e49))
+* **hooks:** stage the stripped design file first ([79228f4](https://github.com/shuymn/artifacts/commit/79228f49a2ed637e98627a112136a8d7d37d5ee3))
+* **hooks:** strip fileToken from the staged blob only ([66f5932](https://github.com/shuymn/artifacts/commit/66f5932590c7190e93402da6c5b93aa59daddb88))
+
 ## [0.3.0](https://github.com/shuymn/artifacts/compare/v0.2.2...v0.3.0) (2026-11-16)
 
 
