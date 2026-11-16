@@ -238,6 +238,56 @@ describe("the CLI's login against the Worker", () => {
     ]);
   });
 
+  it("lists the login's grant with its publisher name, and revokes another, whose tokens are then refused", async () => {
+    const stored = (await credentials.read())[API];
+    const grant = stored?.tokens?.access_token?.split(":")[1] ?? "";
+    // Another client's login makes another grant.
+    const other = await Credentials.create();
+    const otherEnv = { ARTIFACTS_API_URL: API, XDG_CONFIG_HOME: other.home };
+    const signedIn = await artifacts(["login"], otherEnv, { requests: [] }, "other-agent");
+    expect(signedIn).toMatchObject({ status: 0 });
+    expect((await signedIn.browser)?.status).toBe(200);
+    const otherStored = (await other.read())[API];
+    const otherGrant = otherStored?.tokens?.access_token?.split(":")[1] ?? "";
+    expect(otherGrant).not.toBe(grant);
+
+    const listed = await artifacts(["grants"], env);
+    expect(listed).toMatchObject({ status: 0, stderr: "" });
+    for (const [id, publisher, client] of [
+      [grant, "artifacts-cli", stored?.client_id],
+      [otherGrant, "other-agent", otherStored?.client_id],
+    ]) {
+      expect(listed.stdout).toContain(
+        `${id}  publisher: ${publisher}\n  client: artifacts CLI (${client})\n` +
+          `  redirect host: 127.0.0.1  resource: ${API}/v1\n`,
+      );
+    }
+
+    const seen: Seen = { requests: [] };
+    const revoked = await artifacts(["revoke", "--", otherGrant], env, seen);
+    expect(revoked).toMatchObject({ status: 0, stdout: `revoked ${otherGrant}\n`, stderr: "" });
+    expect(seen.requests).toEqual([`DELETE /v1/grants/${otherGrant} 204`]);
+    // The listing, read with an API token as well, no longer holds it; the login's own grant stays.
+    const after = await artifacts(["grants", "--json"], { ARTIFACTS_API_URL: API, ARTIFACTS_TOKEN: apiToken });
+    const afterJson: { grants: { id: string }[] } = JSON.parse(after.stdout);
+    const ids = afterJson.grants.map(({ id }) => id);
+    expect(ids).toContain(grant);
+    expect(ids).not.toContain(otherGrant);
+
+    // The revoked grant's access token answers 401, and its refresh is refused.
+    const refusedSeen: Seen = { requests: [] };
+    const refused = await artifacts(["list"], otherEnv, refusedSeen);
+    expect(refused).toMatchObject({
+      status: 1,
+      stderr: "artifacts: the server no longer accepts the stored login; sign in with artifacts login\n",
+    });
+    expect(refusedSeen.requests).toEqual([
+      "GET /v1/artifacts 401",
+      "GET /.well-known/oauth-authorization-server 200",
+      "POST /oauth/token 400",
+    ]);
+  });
+
   it("signs out: revokes its grant with its own token, keeps the client ID, and commands then name login", async () => {
     const stored = (await credentials.read())[API];
     const grant = stored?.tokens?.access_token?.split(":")[1] ?? "";

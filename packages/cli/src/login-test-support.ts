@@ -33,7 +33,13 @@ export type Seen = {
   readonly authorization?: string;
 };
 
-type Grant = { readonly id: string; readonly client: string; readonly redirect: string; readonly challenge: string };
+type Grant = {
+  readonly id: string;
+  readonly client: string;
+  readonly redirect: string;
+  readonly challenge: string;
+  readonly created: string;
+};
 
 /** A JSON object's fields as text, as the stand-in records them. */
 function jsonFields(text: string): Record<string, string> {
@@ -102,7 +108,7 @@ export class StandIn {
   /** A grant, client and tokens as a finished `login` leaves them. */
   issue(client = this.register()): { client: string; grant: string; tokens: Tokens } {
     const grant = random(12);
-    this.grants.set(grant, { id: grant, client, redirect: "", challenge: "" });
+    this.grants.set(grant, { id: grant, client, redirect: "", challenge: "", created: new Date().toISOString() });
     return { client, grant, tokens: this.tokens(grant) };
   }
 
@@ -133,6 +139,7 @@ export class StandIn {
       client: params.get("client_id") ?? "",
       redirect: params.get("redirect_uri") ?? "",
       challenge: params.get("code_challenge") ?? "",
+      created: new Date().toISOString(),
     });
     const code = `owner:${grant}:${random(24)}`;
     this.codes.set(code, grant);
@@ -214,7 +221,20 @@ export class StandIn {
       return { status: 401, body: { error: { code: "unauthorized", message: "a valid bearer token is required" } } };
     }
     if (route === "GET /v1/artifacts") return { status: 200, body: { artifacts: [], next_cursor: null } };
-    if (route === "GET /v1/grants") return { status: 200, body: { grants: [...this.grants.keys()] } };
+    if (route === "GET /v1/grants") {
+      // Newest first, as the Worker answers; the stand-in keeps no consent metadata.
+      const grants = [...this.grants.values()].toReversed().map((listed) => ({
+        id: listed.id,
+        publisher: null,
+        client_id: listed.client,
+        client_name: null,
+        redirect_host: listed.redirect === "" ? null : new URL(listed.redirect).hostname,
+        resource: `${this.origin}/v1`,
+        created_at: listed.created,
+        expires_at: null,
+      }));
+      return { status: 200, body: { grants } };
+    }
     if (method === "DELETE" && path.startsWith("/v1/grants/")) {
       const id = decodeURIComponent(path.slice("/v1/grants/".length));
       if (!this.grants.delete(id)) return { status: 404, body: { error: { code: "not_found", message: "no grant" } } };

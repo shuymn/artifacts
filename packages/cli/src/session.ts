@@ -10,6 +10,12 @@ import { CliError } from "./errors.ts";
 import { authorizationServer, OAuthRefusal, refresh, type Server } from "./oauth.ts";
 import type { Store, Tokens } from "./store.ts";
 
+/** The ID of the grant a token of the library's form, `<user>:<grant ID>:<secret>`, names. */
+export function grantOf(token: string): string | undefined {
+  const parts = token.split(":");
+  return parts.length === 3 && parts[1] !== "" ? parts[1] : undefined;
+}
+
 /** What `Api` asks of a credential. */
 export interface Credential {
   /** The bearer token for the next request. */
@@ -82,6 +88,11 @@ export class StoredLogin implements Credential {
       throw new CliError(`${SET_TOKEN_OR_SIGN_IN} (no stored login for ${origin})`);
     }
     return this.#keep(tokens);
+  }
+
+  /** The grant of the tokens this login sent last; undefined before it read any. */
+  grant(): string | undefined {
+    return this.#tokens === undefined ? undefined : grantOf(this.#tokens.access_token);
   }
 
   async token(): Promise<string> {
