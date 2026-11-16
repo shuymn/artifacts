@@ -3,9 +3,6 @@ name: CLI binaries
 # Builds the CLI's binary on each release platform's own runner with packages/cli/scripts/build.ts, then runs the smoke
 # tests (packages/cli/scripts/smoke.test.ts) against the binary unpacked from its archive. ci.yml calls this for pull
 # requests that can change a binary; release.yml calls it with `upload` to hand the archives to its publish job.
-#
-# The two jobs share their steps through YAML anchors. A job resolves every action its steps name when it is set up,
-# skipped steps included, so the pull request job names no action that only a release needs (actions/upload-artifact).
 
 on:
   workflow_call:
@@ -26,12 +23,11 @@ on:
 permissions: {}
 
 jobs:
-  check:
+  build:
     name: Build and smoke-test (${{ matrix.platform }})
-    if: ${{ !inputs.upload }}
     strategy:
       fail-fast: false
-      matrix: &platforms
+      matrix:
         include:
           - runner: macos-15
             platform: darwin-arm64
@@ -46,51 +42,31 @@ jobs:
     permissions:
       contents: read
     steps:
-      - &checkout
-        name: Checkout code
+      - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
-      - &mise
-        name: Set up mise
+      - name: Set up mise
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           install_args: node pnpm bun
 
-      - &install
-        name: Install dependencies
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - &build
-        name: Build the binary
+      - name: Build the binary
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_PLATFORM: ${{ matrix.platform }}
         run: pnpm --filter @artifacts/cli run build
 
-      - &smoke
-        name: Smoke-test the binary
+      - name: Smoke-test the binary
         run: pnpm --filter @artifacts/cli run smoke
 
-  release:
-    name: Build for the release (${{ matrix.platform }})
-    if: ${{ inputs.upload }}
-    strategy:
-      fail-fast: false
-      matrix: *platforms
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - *checkout
-      - *mise
-      - *install
-      - *build
-      - *smoke
       - name: Upload the archive
+        if: inputs.upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: artifacts-${{ inputs.tag }}-${{ matrix.platform }}
