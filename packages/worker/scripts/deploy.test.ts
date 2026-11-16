@@ -575,6 +575,19 @@ const node = (script: string, timeoutMs = 10_000, graceMs = 10_000) =>
 const runNode = (script: string, options: { timeoutMs?: number; graceMs?: number; signal?: AbortSignal } = {}) =>
   node(script, options.timeoutMs, options.graceMs)([], options.signal ?? new AbortController().signal);
 
+/** Whether the process has exited, allowing the system a moment to reap it. */
+async function exited(pid: number): Promise<boolean> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return false;
+}
+
 describe("createRunner", () => {
   it("reports the exit status", async () => {
     expect(await runNode("process.exit(0)")).toEqual({ ok: true });
@@ -611,6 +624,83 @@ describe("createRunner", () => {
       reason: "timed out after 0.2 s",
     });
     expect(Date.now() - started).toBeGreaterThanOrEqual(450);
+  });
+
+  // wrangler's launcher runs wrangler in a second process; signalling the launcher alone would leave it running, reading
+  // the configuration the deploy removes next.
+  describe("a command that runs another process", () => {
+    let dir: string;
+    let pids: number[];
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "deploy-runner-"));
+      pids = [];
+    });
+
+    afterEach(() => {
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+      }
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    /**
+     * Like wrangler's launcher, starts a second Node process, forwards SIGINT and SIGTERM to it, and exits with its
+     * status; with `exitCode`, exits with it as soon as the second process runs instead. The second process ignores
+     * SIGTERM, then writes its PID to a file.
+     */
+    function launcher(exitCode?: number): string {
+      const second = `process.on("SIGTERM", () => {}); require("fs").writeFileSync(${JSON.stringify(join(dir, "pid"))}, String(process.pid)); process.stdout.write("ready"); setInterval(() => {}, 1000);`;
+      return `
+        const child = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(second)}], { stdio: ["ignore", "pipe", "inherit"] });
+        child.stdout.once("data", () => { ${exitCode === undefined ? "" : `process.exit(${exitCode});`} });
+        for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
+        child.on("exit", (code, signal) => process.exit(code ?? 1));`;
+    }
+
+    /** The second process's PID, once it has written it. */
+    async function secondPid(): Promise<number> {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        try {
+          const pid = Number(readFileSync(join(dir, "pid"), "utf8"));
+          pids.push(pid);
+          return pid;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      }
+      throw new Error("the second process did not start");
+    }
+
+    it("kills every process of a command that outlives the timeout", async () => {
+      const result = runNode(launcher(), { timeoutMs: 1500, graceMs: 300 });
+      const pid = await secondPid();
+      expect(await result).toEqual({ ok: false, reason: "timed out after 1.5 s" });
+      expect(await exited(pid)).toBe(true);
+    });
+
+    it("passes the signal it was stopped with to every process", async () => {
+      const controller = new AbortController();
+      const result = runNode(launcher(), { graceMs: 5000, signal: controller.signal });
+      const pid = await secondPid();
+      const stopped = Date.now();
+      controller.abort("SIGINT");
+      expect(await result).toEqual({ ok: false, reason: "was stopped" });
+      // The second process ignores SIGTERM: it ended on the SIGINT, well before SIGKILL.
+      expect(Date.now() - stopped).toBeLessThan(2500);
+      expect(await exited(pid)).toBe(true);
+    });
+
+    it("reports the command's exit status and stops the processes it left", async () => {
+      const result = runNode(launcher(3), { graceMs: 300 });
+      const pid = await secondPid();
+      expect(await result).toEqual({ ok: false, reason: "exited with code 3" });
+      expect(await exited(pid)).toBe(true);
+    });
   });
 
   it("stops a command when the signal aborts, and starts none after", async () => {

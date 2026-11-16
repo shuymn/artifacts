@@ -28,7 +28,10 @@ import {
 } from "./deploy-config.ts";
 
 export type RunResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
-/** Runs wrangler with `args` in the Worker's directory until it exits or `signal` stops it. */
+/**
+ * Runs wrangler with `args` in the Worker's directory until it exits or `signal` stops it; a termination signal as the
+ * abort reason is passed on to wrangler.
+ */
 export type Runner = (args: readonly string[], signal: AbortSignal) => Promise<RunResult>;
 
 export const TERMINATION_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -143,7 +146,8 @@ async function run(io: DeployIo, merged: Json): Promise<number> {
   let stoppedBy: TerminationSignal | undefined;
   const unsubscribe = io.onSignal((signal) => {
     stoppedBy ??= signal;
-    controller.abort();
+    // The runner passes the signal on to the running command.
+    controller.abort(signal);
   });
   let written = false;
   try {
@@ -181,10 +185,20 @@ export type RunnerOptions = {
   readonly graceMs: number;
 };
 
+/** How often a run checks whether the processes a command left behind have exited. */
+const POLL_MS = 50;
+
+function isTerminationSignal(value: unknown): value is TerminationSignal {
+  return TERMINATION_SIGNALS.some((signal) => signal === value);
+}
+
 /**
- * Runs each command as a child process with its output on this process's output and no terminal on its input. A
- * command that outlives `timeoutMs`, or whose signal aborts, gets SIGTERM and then SIGKILL after `graceMs`; the result
- * comes when the child has exited, and every timer and listener is cleared then.
+ * Runs each command as the leader of a process group of its own, with its output on this process's output and no
+ * terminal on its input. wrangler's launcher runs wrangler in a second Node process and forwards only SIGINT and SIGTERM
+ * to it, so every signal goes to the whole group: SIGTERM to a command that outlives `timeoutMs`, the signal `signal`
+ * was aborted with (the one this process received, else SIGTERM), and SIGKILL after `graceMs` to a group still running.
+ * Processes left when the command exits are stopped the same way. The result is the command's own and comes once no
+ * process of the group is left, or once SIGKILL was sent; every timer and listener is cleared then.
  */
 export function createRunner(options: RunnerOptions): Runner {
   return (args, signal) =>
@@ -196,38 +210,71 @@ export function createRunner(options: RunnerOptions): Runner {
       const child = spawn(options.command, [...(options.prefix ?? []), ...args], {
         cwd: options.cwd,
         stdio: ["ignore", "inherit", "inherit"],
+        detached: true,
       });
+      /** Sends `name` to every process of the group; false when none is left. */
+      const signalGroup = (name: NodeJS.Signals | 0): boolean => {
+        if (child.pid === undefined) return false;
+        try {
+          process.kill(-child.pid, name);
+          return true;
+        } catch {
+          return false;
+        }
+      };
       let timedOut = false;
+      let killed = false;
+      let exited: RunResult | undefined;
       let killTimer: ReturnType<typeof setTimeout> | undefined;
-      const stop = () => {
-        if (child.exitCode !== null || child.signalCode !== null) return;
-        child.kill("SIGTERM");
-        killTimer ??= setTimeout(() => child.kill("SIGKILL"), options.graceMs);
+      let pollTimer: ReturnType<typeof setInterval> | undefined;
+      const stop = (name: NodeJS.Signals) => {
+        if (killed || !signalGroup(name)) return;
+        killTimer ??= setTimeout(() => {
+          killed = true;
+          signalGroup("SIGKILL");
+          if (exited !== undefined) finish(exited);
+        }, options.graceMs);
       };
       const timer = setTimeout(() => {
         timedOut = true;
-        stop();
+        stop("SIGTERM");
       }, options.timeoutMs);
-      signal.addEventListener("abort", stop, { once: true });
+      const onAbort = () => stop(isTerminationSignal(signal.reason) ? signal.reason : "SIGTERM");
+      signal.addEventListener("abort", onAbort, { once: true });
       let settled = false;
       const finish = (result: RunResult) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         clearTimeout(killTimer);
-        signal.removeEventListener("abort", stop);
+        clearInterval(pollTimer);
+        signal.removeEventListener("abort", onAbort);
         resolve(result);
       };
       child.on("error", (error: NodeJS.ErrnoException) => {
         // Only a failed start ends the run here; any other error leaves the child running until it closes.
         if (child.pid === undefined) finish({ ok: false, reason: `could not start (${error.code ?? "error"})` });
       });
+      const outcome = (code: number | null, killedBy: NodeJS.Signals | null): RunResult => {
+        if (timedOut) return { ok: false, reason: `timed out after ${options.timeoutMs / 1000} s` };
+        if (signal.aborted) return { ok: false, reason: "was stopped" };
+        if (code === 0) return { ok: true };
+        if (code !== null) return { ok: false, reason: `exited with code ${code}` };
+        return { ok: false, reason: `was stopped by ${killedBy ?? "a signal"}` };
+      };
       child.on("close", (code, killedBy) => {
-        if (timedOut) finish({ ok: false, reason: `timed out after ${options.timeoutMs / 1000} s` });
-        else if (signal.aborted) finish({ ok: false, reason: "was stopped" });
-        else if (code === 0) finish({ ok: true });
-        else if (code !== null) finish({ ok: false, reason: `exited with code ${code}` });
-        else finish({ ok: false, reason: `was stopped by ${killedBy ?? "a signal"}` });
+        clearTimeout(timer);
+        const result = outcome(code, killedBy);
+        exited = result;
+        // A process the command left behind could still read the configuration the run removes next.
+        if (killed || !signalGroup(0)) {
+          finish(result);
+          return;
+        }
+        stop("SIGTERM");
+        pollTimer = setInterval(() => {
+          if (!signalGroup(0)) finish(result);
+        }, POLL_MS);
       });
     });
 }

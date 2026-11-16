@@ -176,8 +176,10 @@ Cloudflare's documentation for Deploy to Cloudflare buttons tells a project to a
 3. `wrangler deploy`.
 
 Each wrangler command may run for 10 minutes (a build may run for 20,
-[limits](https://developers.cloudflare.com/workers/ci-cd/builds/limits-and-pricing/)); SIGINT, SIGTERM and SIGHUP stop
-the running command and start no other.
+[limits](https://developers.cloudflare.com/workers/ci-cd/builds/limits-and-pricing/)). It runs in a process group of its
+own, since Wrangler runs in a second process that a signal to the first does not always reach: SIGINT, SIGTERM and
+SIGHUP (Ctrl-C included) are passed on to the whole group, a timeout sends it SIGTERM, SIGKILL follows 10 seconds
+later, and no other command starts. The merged configuration is removed once no process of the group is left.
 
 A release deploys when its PR is merged: the build appears under the Worker's **Deployments → View build history**
 ([builds](https://developers.cloudflare.com/workers/ci-cd/builds/#view-build-and-preview-url)).
