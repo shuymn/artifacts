@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.1](https://github.com/shuymn/artifacts/compare/v0.2.0...v0.2.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **gallery:** serve stale asset paths, revalidated ([846f9c8](https://github.com/shuymn/artifacts/commit/846f9c888171fb540561e17ac048dc966b42d2bf))
+* **gallery:** stop the font flash on reload ([fa6a312](https://github.com/shuymn/artifacts/commit/fa6a3123f983b922e66c5acbb40729e61a8f8fa6))
+* **gallery:** stop the font flash on reload ([a0fe73b](https://github.com/shuymn/artifacts/commit/a0fe73bdfdc635b311950c99a08dbfae818b484b))
+
 ## [0.2.0](https://github.com/shuymn/artifacts/compare/v0.1.2...v0.2.0) (2026-11-16)
 
 
