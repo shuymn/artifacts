@@ -19,10 +19,11 @@ describe("decodeBase64", () => {
   it.each([
     ["missing padding", "QQ"],
     ["missing one pad", "QUI"],
-    ["a space", "QU I="],
-    ["a line break", "QUJD\nQUJD"],
-    ["a trailing line break", "QUJD\n"],
-    ["a tab", "\tQUJD"],
+    // Each of these is a multiple of 4 long and decodes once its whitespace is skipped, as `atob` would.
+    ["a space", "QU I"],
+    ["a line break", "QUJD\nQUI"],
+    ["a trailing line break", "QUJ\n"],
+    ["a tab", "\tQUJ"],
     ["padding inside", "QQ==QUJD"],
     ["three pads", "Q==="],
     ["base64url characters", "-_8A"],
@@ -30,6 +31,10 @@ describe("decodeBase64", () => {
     ["non-ASCII", "QUJé"],
   ])("refuses %s", (_name, text) => {
     expect(decodeBase64(text)).toBeUndefined();
+  });
+
+  it("uses whitespace cases that atob alone would accept", () => {
+    expect(atob("QU I")).toBe("AB");
   });
 });
 

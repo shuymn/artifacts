@@ -557,7 +557,7 @@ describe("schema refusals through MCP", () => {
   it.each<[string, Record<string, unknown>, string]>([
     ["a title with a line break", { title: "a\nb", files: [index()] }, "title: a text has a character"],
     ["an empty title", { title: "", files: [index()] }, "title: a field is empty"],
-    ["base64 with whitespace", file({ content: "AAAA AAAA", encoding: "base64" }), "files.1.content"],
+    ["base64 with whitespace", file({ content: "AAAA AAA", encoding: "base64" }), "files.1.content"],
     ["base64 without padding", file({ content: "AAA", encoding: "base64" }), "files.1.content"],
     ["base64url characters", file({ content: "-_-_", encoding: "base64" }), "files.1.content"],
     ["text that is not well-formed", file({ content: "\ud800" }), "files.1.content"],
