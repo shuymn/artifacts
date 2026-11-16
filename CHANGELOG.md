@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0](https://github.com/shuymn/artifacts/compare/v0.6.0...v0.7.0) (2026-11-16)
+
+
+### Features
+
+* **worker:** add the OAuth consent page ([6853cc4](https://github.com/shuymn/artifacts/commit/6853cc432d6071ff8fe2fdf639457f3a75f55679))
+* **worker:** add the OAuth consent page ([2eaf9d1](https://github.com/shuymn/artifacts/commit/2eaf9d1d65411883e007de539f04dee690830455))
+* **worker:** list and revoke OAuth grants ([7f51325](https://github.com/shuymn/artifacts/commit/7f51325a4f2b6a48d2fd63795e526fc0c730fcf7))
+* **worker:** list and revoke OAuth grants ([715c605](https://github.com/shuymn/artifacts/commit/715c605b360baea9980744f53d3c8d27ba615942))
+
+
+### Bug Fixes
+
+* **worker:** allow a grant without a client name ([ab2a77a](https://github.com/shuymn/artifacts/commit/ab2a77aac19521bcf6d5e618b45500ced2e55eec))
+* **worker:** clear a used consent cookie on failure ([2ae331f](https://github.com/shuymn/artifacts/commit/2ae331f5b45e3cee842fff031ea8da051c92e979))
+* **worker:** send consent headers on every answer ([7d488f5](https://github.com/shuymn/artifacts/commit/7d488f5b910bec989f4cd8489398e2b55e60b036))
+
 ## [0.6.0](https://github.com/shuymn/artifacts/compare/v0.5.0...v0.6.0) (2026-11-16)
 
 
