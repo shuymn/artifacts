@@ -14,12 +14,15 @@ import { OWNER } from "./grants.ts";
 import { newArtifactId } from "./id.ts";
 import { createWorker } from "./index.ts";
 import {
+  AUTHORIZE,
+  Browser,
   challengeOf,
   faulty,
-  FORM,
+  handleOf,
   helpers,
   oauthKv,
   REDIRECT,
+  redirectQuery,
   refresh,
   REGISTER_URL,
   tokenRequest,
@@ -51,7 +54,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const AUTHORIZE = `https://${APP_HOST}/oauth/authorize`;
 const MCP = `${API}/mcp`;
 const V1 = `${API}/v1`;
 const ID = "abcdefghijklmnopqrstuvwxyz";
@@ -122,66 +124,8 @@ async function params(clientId: string, overrides: Record<string, string | null>
   return search;
 }
 
-/**
- * The owner's browser: it carries the app audience's Access JWT (as Access adds it) and keeps the cookies the endpoint
- * sets, as a browser does for its host.
- */
-class Browser {
-  readonly cookies = new Map<string, string>();
-  constructor(readonly world: World) {}
-
-  private remember(response: Response): void {
-    for (const cookie of response.headers.getSetCookie()) {
-      const [pair = ""] = cookie.split(";");
-      const separator = pair.indexOf("=");
-      const name = pair.slice(0, separator);
-      if (/;\s*Max-Age=0\b/i.test(cookie)) this.cookies.delete(name);
-      else this.cookies.set(name, pair.slice(separator + 1));
-    }
-  }
-
-  async headers(jwt: string | null | undefined): Promise<Headers> {
-    const headers = new Headers();
-    const token = jwt === undefined ? await this.world.jwt({ aud: APP_AUD }) : jwt;
-    if (token !== null) headers.set("Cf-Access-Jwt-Assertion", token);
-    if (this.cookies.size > 0) {
-      headers.set("Cookie", [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; "));
-    }
-    return headers;
-  }
-
-  async open(search: URLSearchParams, options: { jwt?: string | null } = {}): Promise<Response> {
-    const response = await this.world.fetch(`${AUTHORIZE}?${search.toString()}`, {
-      headers: await this.headers(options.jwt),
-    });
-    this.remember(response);
-    return response;
-  }
-
-  async post(form: Record<string, string> | string, options: { jwt?: string | null } = {}): Promise<Response> {
-    const headers = await this.headers(options.jwt);
-    headers.set("Content-Type", FORM["Content-Type"]);
-    const response = await this.world.fetch(AUTHORIZE, {
-      method: "POST",
-      headers,
-      body: typeof form === "string" ? form : new URLSearchParams(form).toString(),
-    });
-    this.remember(response);
-    return response;
-  }
-}
-
 async function documentOf(response: Response): Promise<HtmlNode> {
   return parseHtml(await response.text());
-}
-
-/** The consent page's handle; fails the test when the answer is not the page. */
-async function handleOf(response: Response): Promise<string> {
-  if (response.status !== 200) throw new Error(`the endpoint answered ${response.status}: ${await response.text()}`);
-  const input = elements(await documentOf(response)).find((node) => node.attributes.get("name") === "handle");
-  const handle = input?.attributes.get("value");
-  if (handle === undefined) throw new Error("no handle on the page");
-  return handle;
 }
 
 /** The heading and status of an error page. */
@@ -189,14 +133,6 @@ async function errorPageOf(response: Response): Promise<{ status: number; headin
   const document = await documentOf(response);
   const heading = elements(document).find((node) => node.tag === "h1");
   return { status: response.status, heading: heading === undefined ? "" : textOf(heading) };
-}
-
-/** The query of a redirect to the client. */
-function redirectQuery(response: Response): Record<string, string> {
-  const location = response.headers.get("Location");
-  if (location === null) throw new Error(`no redirect: ${response.status}`);
-  const url = new URL(location);
-  return { target: `${url.origin}${url.pathname}`, ...Object.fromEntries(url.searchParams) };
 }
 
 /** Opens the page and allows it as `publisher`; returns the code the client receives. */

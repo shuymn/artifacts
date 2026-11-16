@@ -1,13 +1,14 @@
-// OAuth helpers for the Worker's tests: a registered client, an approval through the library's helper standing in for
-// the consent page where a test is not about it, the token requests, and a KV namespace with failures, holds and
-// barriers.
+// OAuth helpers for the Worker's tests: a registered client, the owner's browser on the consent page, an approval
+// through the library's helper standing in for the consent page where a test is not about it, the token requests, and
+// a KV namespace with failures, holds and barriers.
 import { OAuthAuthorizationServer } from "@cloudflare/workers-oauth-provider";
 import { env } from "cloudflare:workers";
 
 import { parseConfig } from "./config.ts";
+import { elements, parseHtml } from "./gallery/test-html.ts";
 import { authorizationServer, type OAuthEnv } from "./oauth.ts";
 import { recordingKv } from "./revocation.ts";
-import { API, never, stringAt, type World } from "./test-support.ts";
+import { API, APP_AUD, APP_HOST, never, stringAt, type World } from "./test-support.ts";
 
 export const METADATA_PATH = "/.well-known/oauth-authorization-server";
 export const TOKEN_URL = `${API}/oauth/token`;
@@ -15,6 +16,7 @@ export const REGISTER_URL = `${API}/oauth/register`;
 export const REDIRECT = "http://127.0.0.1:33418/callback";
 export const FORM = { "Content-Type": "application/x-www-form-urlencoded" };
 export const VERIFIER = "verifier-0123456789-0123456789-0123456789-0123456789";
+export const AUTHORIZE = `https://${APP_HOST}/oauth/authorize`;
 
 export function oauthKv(): KVNamespace {
   if (env.OAUTH_KV === undefined) throw new Error("the test configuration binds OAUTH_KV");
@@ -56,6 +58,74 @@ export async function register(world: World, metadata: Record<string, unknown> =
   });
   if (response.status !== 201) throw new Error(`registration answered ${response.status}: ${await response.text()}`);
   return stringAt(await response.json(), "client_id");
+}
+
+/**
+ * The owner's browser: it carries the app audience's Access JWT (as Access adds it) and keeps the cookies the endpoint
+ * sets, as a browser does for its host.
+ */
+export class Browser {
+  readonly cookies = new Map<string, string>();
+  constructor(readonly world: World) {}
+
+  private remember(response: Response): void {
+    for (const cookie of response.headers.getSetCookie()) {
+      const [pair = ""] = cookie.split(";");
+      const separator = pair.indexOf("=");
+      const name = pair.slice(0, separator);
+      if (/;\s*Max-Age=0\b/i.test(cookie)) this.cookies.delete(name);
+      else this.cookies.set(name, pair.slice(separator + 1));
+    }
+  }
+
+  async headers(jwt: string | null | undefined): Promise<Headers> {
+    const headers = new Headers();
+    const token = jwt === undefined ? await this.world.jwt({ aud: APP_AUD }) : jwt;
+    if (token !== null) headers.set("Cf-Access-Jwt-Assertion", token);
+    if (this.cookies.size > 0) {
+      headers.set("Cookie", [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; "));
+    }
+    return headers;
+  }
+
+  async open(search: URLSearchParams, options: { jwt?: string | null } = {}): Promise<Response> {
+    const response = await this.world.fetch(`${AUTHORIZE}?${search.toString()}`, {
+      headers: await this.headers(options.jwt),
+    });
+    this.remember(response);
+    return response;
+  }
+
+  async post(form: Record<string, string> | string, options: { jwt?: string | null } = {}): Promise<Response> {
+    const headers = await this.headers(options.jwt);
+    headers.set("Content-Type", FORM["Content-Type"]);
+    const response = await this.world.fetch(AUTHORIZE, {
+      method: "POST",
+      headers,
+      body: typeof form === "string" ? form : new URLSearchParams(form).toString(),
+    });
+    this.remember(response);
+    return response;
+  }
+}
+
+/** The consent page's handle; fails the test when the answer is not the page. */
+export async function handleOf(response: Response): Promise<string> {
+  if (response.status !== 200) throw new Error(`the endpoint answered ${response.status}: ${await response.text()}`);
+  const input = elements(await parseHtml(await response.text())).find(
+    (node) => node.attributes.get("name") === "handle",
+  );
+  const handle = input?.attributes.get("value");
+  if (handle === undefined) throw new Error("no handle on the page");
+  return handle;
+}
+
+/** The query of a redirect to the client. */
+export function redirectQuery(response: Response): Record<string, string> {
+  const location = response.headers.get("Location");
+  if (location === null) throw new Error(`no redirect: ${response.status}`);
+  const url = new URL(location);
+  return { target: `${url.origin}${url.pathname}`, ...Object.fromEntries(url.searchParams) };
 }
 
 /**
