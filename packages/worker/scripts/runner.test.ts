@@ -25,6 +25,9 @@ const runNode = (
     options.captureBytes === undefined ? {} : { captureBytes: options.captureBytes },
   );
 
+/** Whether `value` can name one process: a positive safe integer. */
+const isPid = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
+
 /** Whether the process has exited, allowing the system a moment to reap it. */
 async function exited(pid: number): Promise<boolean> {
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -89,6 +92,8 @@ describe("createRunner", () => {
 
     afterEach(() => {
       for (const pid of pids) {
+        // Never 0 or a negative number, which would signal this process's group or every process it may signal.
+        if (!isPid(pid)) continue;
         try {
           process.kill(pid, "SIGKILL");
         } catch {
@@ -99,12 +104,21 @@ describe("createRunner", () => {
     });
 
     /**
+     * Code for a second process that publishes its PID to the file `pid`: written beside it, then renamed into place, so
+     * the file never holds part of a PID.
+     */
+    function publishPid(): string {
+      const file = JSON.stringify(join(dir, "pid"));
+      return `const fs = require("fs"); fs.writeFileSync(${file} + ".new", String(process.pid)); fs.renameSync(${file} + ".new", ${file});`;
+    }
+
+    /**
      * Like wrangler's launcher, starts a second Node process, forwards SIGINT and SIGTERM to it, and exits with its
      * status; with `exitCode`, exits with it as soon as the second process runs instead. The second process ignores
-     * SIGTERM, then writes its PID to a file.
+     * SIGTERM, then publishes its PID.
      */
     function launcher(exitCode?: number): string {
-      const second = `process.on("SIGTERM", () => {}); require("fs").writeFileSync(${JSON.stringify(join(dir, "pid"))}, String(process.pid)); process.stdout.write("ready"); setInterval(() => {}, 1000);`;
+      const second = `process.on("SIGTERM", () => {}); ${publishPid()} process.stdout.write("ready"); setInterval(() => {}, 1000);`;
       return `
         const child = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(second)}], { stdio: ["ignore", "pipe", "inherit"] });
         child.stdout.once("data", () => { ${exitCode === undefined ? "" : `process.exit(${exitCode});`} });
@@ -112,18 +126,26 @@ describe("createRunner", () => {
         child.on("exit", (code, signal) => process.exit(code ?? 1));`;
     }
 
-    /** The second process's PID, once it has written it. */
+    /**
+     * The second process's PID, once the file holds one. Anything but a positive integer is neither recorded nor
+     * returned: `Number("")` is 0, and `process.kill(0)` signals this process's own group.
+     */
     async function secondPid(): Promise<number> {
       for (let attempt = 0; attempt < 100; attempt++) {
+        let text: string | undefined;
         try {
-          const pid = Number(readFileSync(join(dir, "pid"), "utf8"));
+          text = readFileSync(join(dir, "pid"), "utf8");
+        } catch {
+          text = undefined;
+        }
+        const pid = text !== undefined && /^[1-9][0-9]*$/.test(text) ? Number(text) : undefined;
+        if (pid !== undefined && isPid(pid)) {
           pids.push(pid);
           return pid;
-        } catch {
-          await new Promise((resolve) => setTimeout(resolve, 20));
         }
+        await new Promise((resolve) => setTimeout(resolve, 20));
       }
-      throw new Error("the second process did not start");
+      throw new Error("the second process published no PID");
     }
 
     it("kills every process of a command that outlives the timeout", async () => {
@@ -159,8 +181,7 @@ describe("createRunner", () => {
      */
     function holder(options: { ownGroup: boolean; ignoreTerm: boolean }): string {
       const file = JSON.stringify(join(dir, "pid"));
-      // Renamed into place, so the PID is never read half-written.
-      const second = `${options.ignoreTerm ? 'process.on("SIGTERM", () => {});' : ""} const fs = require("fs"); fs.writeFileSync(${file} + ".new", String(process.pid)); fs.renameSync(${file} + ".new", ${file}); setInterval(() => {}, 1000);`;
+      const second = `${options.ignoreTerm ? 'process.on("SIGTERM", () => {});' : ""} ${publishPid()} setInterval(() => {}, 1000);`;
       return `
         require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(second)}], { stdio: ["ignore", "inherit", "inherit"], detached: ${options.ownGroup} });
         const wait = setInterval(() => {
