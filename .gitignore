@@ -21,6 +21,9 @@ wrangler.deploy.jsonc
 # Test and coverage output
 coverage/
 
+# Local scratch files
+.tmp/
+
 # Logs
 npm-debug.log*
 
