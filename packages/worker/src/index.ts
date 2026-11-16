@@ -79,7 +79,7 @@ async function api(
   if (!config.oauth && isApiOAuthPath(url.pathname)) return noSuchRoute();
   // The authorization server takes no bearer token; `fetch` refused a configuration with OAuth and without OAUTH_KV.
   if (config.oauth && env.OAUTH_KV !== undefined && LIBRARY_PATHS.has(url.pathname)) {
-    return serveOAuth(request, url, env, env.OAUTH_KV, config, {
+    return serveOAuth(request, url, env.OAUTH_KV, config, {
       now: deps.now,
       kvReadMs: deps.timeouts.kvReadMs,
       ctx,

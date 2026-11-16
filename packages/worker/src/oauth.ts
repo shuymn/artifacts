@@ -92,17 +92,20 @@ function closed<T extends string>(values: readonly T[], value: string): T | "oth
   return values.find((known) => known === value) ?? "other";
 }
 
-let server: { readonly key: string; readonly instance: OAuthAuthorizationServer<Env> } | undefined;
+/** All the library sees of the Worker's environment: its storage, which the router passes through `recordingKv`. */
+export type OAuthEnv = { readonly OAUTH_KV: KVNamespace };
+
+let server: { readonly key: string; readonly instance: OAuthAuthorizationServer<OAuthEnv> } | undefined;
 
 /**
  * The authorization server for `config`, built once per isolate while the hosts stay the same, since the library checks
  * every option as it builds one.
  */
-export function authorizationServer(config: Config): OAuthAuthorizationServer<Env> {
+export function authorizationServer(config: Config): OAuthAuthorizationServer<OAuthEnv> {
   const key = `${config.apiHost} ${config.appHost}`;
   if (server?.key === key) return server.instance;
   const origin = apiOrigin(config);
-  const instance = new OAuthAuthorizationServer<Env>({
+  const instance = new OAuthAuthorizationServer<OAuthEnv>({
     issuer: origin,
     // Every grant and token is bound to one of them (OAUTH-3).
     resources: [`${origin}/mcp`, `${origin}/v1`],
@@ -226,7 +229,6 @@ export type OAuthDeps = {
 export async function serveOAuth(
   request: Request,
   url: URL,
-  env: Env,
   kv: KVNamespace,
   config: Config,
   deps: OAuthDeps,
@@ -252,7 +254,7 @@ export async function serveOAuth(
   }
   const recording = recordingKv(kv, deps.now);
   try {
-    const response = await authorizationServer(config).fetch(forwarded, { ...env, OAUTH_KV: recording.kv }, deps.ctx);
+    const response = await authorizationServer(config).fetch(forwarded, { OAUTH_KV: recording.kv }, deps.ctx);
     return withoutCors(response);
   } catch (error) {
     // DATA-1: the class of the error only, never its message.

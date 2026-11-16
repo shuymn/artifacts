@@ -6,7 +6,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseConfig } from "./config.ts";
-import { authorizationServer, OAUTH_ERROR_CATEGORIES, OAUTH_ERROR_CODES } from "./oauth.ts";
+import { authorizationServer, OAUTH_ERROR_CATEGORIES, OAUTH_ERROR_CODES, type OAuthEnv } from "./oauth.ts";
 import { recordingKv, revocationKey } from "./revocation.ts";
 import {
   API,
@@ -48,7 +48,7 @@ function oauthKv(): KVNamespace {
   return env.OAUTH_KV;
 }
 
-function serverOf(world: World): OAuthAuthorizationServer<Env> {
+function serverOf(world: World): OAuthAuthorizationServer<OAuthEnv> {
   const parsed = parseConfig(world.env);
   if (!parsed.ok) throw new Error("invalid test configuration");
   return authorizationServer(parsed.config);
@@ -56,7 +56,7 @@ function serverOf(world: World): OAuthAuthorizationServer<Env> {
 
 /** The library's helpers over `OAUTH_KV` through the recording wrapper, as the Worker's own callers get them. */
 function helpers(world: World) {
-  return serverOf(world).getOAuthApi({ ...world.env, OAUTH_KV: recordingKv(oauthKv(), () => Date.now()).kv });
+  return serverOf(world).getOAuthApi({ OAUTH_KV: recordingKv(oauthKv(), () => Date.now()).kv });
 }
 
 function base64url(bytes: Uint8Array): string {
@@ -221,6 +221,14 @@ describe("PL-43: the library at the boundary", () => {
     ]);
     expect(helperSpy).not.toHaveBeenCalled();
     expect(validateSpy).not.toHaveBeenCalled();
+  });
+
+  it("passes the library no binding but its storage", async () => {
+    const world = new World();
+    const fetchSpy = vi.spyOn(OAuthAuthorizationServer.prototype, "fetch");
+    await world.fetch(`${API}${METADATA_PATH}`);
+    await tokenRequest(world, "grant_type=refresh_token");
+    expect(fetchSpy.mock.calls.map(([, passed]) => Object.keys(passed))).toEqual([["OAUTH_KV"], ["OAUTH_KV"]]);
   });
 
   it("answers the app host's OAuth paths of the API host with 404", async () => {
