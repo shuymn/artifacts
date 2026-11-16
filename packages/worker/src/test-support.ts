@@ -366,9 +366,10 @@ export class BucketProbe {
   }
 }
 
-/** An R2 error as the binding throws it, with its code at the end of the message. */
-export function r2Error(code: number): Error {
-  return Object.assign(new Error(`put: We encountered an error. (${code})`), { code });
+/** An R2 error as the binding throws it: its code in a `code` property, at the end of the message, or both. */
+export function r2Error(code: number, carrier: "both" | "property" | "message" = "both"): Error {
+  const message = carrier === "property" ? "put: We encountered an error." : `put: We encountered an error. (${code})`;
+  return carrier === "message" ? new Error(message) : Object.assign(new Error(message), { code });
 }
 
 /** Never settles: a call that hangs until the timeout. */

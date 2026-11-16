@@ -222,10 +222,14 @@ describe("section 3: deduplicated uploads", () => {
     expect(bucket.count("put")).toBe(0);
   });
 
-  it("retries a rate-limited put after a second", async () => {
+  it.each([
+    ["its code property only", "property"],
+    ["its message only", "message"],
+  ] as const)("retries a put rate-limited by %s after a second", async (_, carrier) => {
     const world = new World();
     const bucket = withBucket(world);
-    bucket.behave = (op, _key, count) => (op === "put" && count === 1 ? Promise.reject(r2Error(10058)) : undefined);
+    bucket.behave = (op, _key, count) =>
+      op === "put" && count === 1 ? Promise.reject(r2Error(10058, carrier)) : undefined;
     const response = await world.create({ title: "t", files: { "index.html": "i" } });
     expect(response.status).toBe(201);
     expect(bucket.count("put")).toBe(2);
