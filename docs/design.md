@@ -472,7 +472,7 @@ days. The library has no absolute maximum for a sliding grant.
 
 - **One grant:** `DELETE /v1/grants/{id}` (`artifacts revoke <grant>`, section 9) deletes the grant and its tokens
   through the library's `revokeGrant`, whose deletion of the grant writes its revocation record first (below). A
-  failure answers 503 `unavailable` and logs `grant.revoke_failed`, and a repeated call completes it.
+  failed write answers 503 `unavailable` and logs `grant.revoke_failed`, and a repeated call completes it.
   `artifacts grants` lists the grants, with the publisher name, the client and the redirect host of each.
 - **By signing in again:** a new approval replaces the client's grants for that resource the same way (above). A
   client that picks a new loopback port per sign-in, as Claude Code and Codex do by default, or that registers anew,
@@ -651,6 +651,8 @@ under `/.well-known/oauth-protected-resource` answer 404. The router does not us
 | Read a file     | `GET /v1/artifacts/{id}/versions/{n}/files/{path}` (raw bytes) | `read_file`                 | `{ path, content_type, size, encoding, content }` |
 | Public, archive | `PATCH /v1/artifacts/{id}` with `public` and/or `archive`      | `set_public`, `set_archive` | `{ artifact }`                                    |
 | Delete          | `DELETE /v1/artifacts/{id}`                                    | `delete_artifact`           | 204, or `{ deleted: id }`                         |
+| List grants     | `GET /v1/grants`                                               | none                        | `{ grants }`                                      |
+| Revoke a grant  | `DELETE /v1/grants/{id}`                                       | none                        | 204                                               |
 
 - Create takes `title`, `description?`, `files`; update takes `id`, `base_version`, `title?`, `description?`,
   `files?`, `remove?`. Pages published through REST follow the authoring rule of section 4, and a lost create response
@@ -667,10 +669,14 @@ under `/.well-known/oauth-protected-resource` answer 404. The router does not us
   `updated_at` never decreases, none appears twice. New versions appear before the cursor and are not repeated.
 - **Grants**, REST only and only where OAuth is on (section 7; elsewhere 404): `GET /v1/grants` answers
   `{ grants: [{ id, publisher, client_id, client_name, redirect_host, resource, created_at, expires_at }] }`, every
-  grant in one answer, newest first, read under the KV-read timeout (RES-2). It leaves out a grant that has a
-  revocation record, since a refresh in flight can write a revoked grant back (section 7). `DELETE /v1/grants/{id}`
-  revokes one as section 7 describes and answers 204, 404 `not_found` for an ID the library's listing does not hold,
-  or 503 `unavailable` when a write fails. It has no timeout, since a write that timed out could still apply, and a
+  grant in one answer, newest first, each page of the library's listing and each revocation record read under the
+  KV-read timeout (RES-2); a failed or timed-out read answers 503 `unavailable`. It leaves out a grant that has a
+  revocation record, since a refresh in flight can write a revoked grant back (section 7). `publisher`, `client_name`
+  and `redirect_host` come from the metadata the consent page stores with the grant (`publisher`, `clientName`,
+  `redirectHost`), and are null on a grant without it; `expires_at` is null until the code is exchanged.
+  `DELETE /v1/grants/{id}` revokes one as section 7 describes and answers 204, 404 `not_found` for an ID the library's
+  listing does not hold (one of another form than the library's IDs reads nothing), or 503 `unavailable` when the
+  listing or a write fails. The revocation has no timeout, since a write that timed out could still apply, and a
   repeated call completes it. Any credential the API accepts may call them. They are not MCP tools: an agent has no
   reason to manage the owner's sign-ins.
 
@@ -713,7 +719,7 @@ same object.
 | Code               | HTTP | When                                                                                                           |
 | ------------------ | ---- | -------------------------------------------------------------------------------------------------------------- |
 | `invalid_request`  | 400  | input fails validation; `issues` lists `{ field, reason }`, reasons from a closed set                          |
-| `not_found`        | 404  | no live artifact, version or file                                                                              |
+| `not_found`        | 404  | no live artifact, version, file or grant                                                                       |
 | `version_conflict` | 409  | `base_version` is not the latest; carries `latest_version`                                                     |
 | `unavailable`      | 503  | invalid configuration, an unreachable key set, or a failed or timed-out read or upload, OAuth storage included |
 | `internal`         | 500  | anything else; the message carries no detail                                                                   |

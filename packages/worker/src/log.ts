@@ -26,6 +26,7 @@ export const LOG_EVENTS = [
   "request.failed",
   "oauth.refused",
   "grant.revoked",
+  "grant.revoke_failed",
 ] as const;
 export type LogEvent = (typeof LOG_EVENTS)[number];
 
@@ -44,6 +45,7 @@ const LEVEL: Record<LogEvent, "log" | "error"> = {
   "request.failed": "error",
   "oauth.refused": "log",
   "grant.revoked": "log",
+  "grant.revoke_failed": "error",
 };
 
 /** Error classes logged by name. Any other value, a custom error class included, is logged as `other`. */

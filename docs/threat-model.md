@@ -292,8 +292,10 @@ and the threats are the three adversaries below, not untrusted users.
   a token request waits 10 s and answers 503: _Enforced (main)_ in `src/revocation.ts`, `src/oauth.ts`, pinned by
   behavior (`src/oauth.test.ts`, `src/revocation.test.ts`: a read that fails or never answers). The library's KV calls
   on the token, registration and authorize paths, and a revocation's writes, have no timeout of ours, since a write
-  that timed out could still apply; the library bounds a client document fetch at 10 s (OAUTH-6). The KV reads of a
-  credential check and the grant listing wait 10 s and answer 503: _Planned (OAuth)_ (PL-40).
+  that timed out could still apply; the library bounds a client document fetch at 10 s (OAUTH-6). The grant
+  listing's KV reads wait 10 s and answer 503: _Enforced (main)_ in `src/grants.ts`, pinned by behavior
+  (`src/grants.test.ts`: a listing page and a record read that never answer, and a revocation whose slow writes still
+  complete). The KV reads of a credential check: _Planned (OAuth)_ (PL-40).
 
 ### Data (DATA)
 
@@ -309,15 +311,15 @@ and the threats are the three adversaries below, not untrusted users.
   identifier, a password in its userinfo included, reaches the logs. Neither carries another party's secret or
   private content: the library fetches the document without a credential from a public address, where a private host
   answers with Access's sign-in. Invocation logs are off. _Enforced (main)_ in
-  `src/log.ts`, and for the authorization server's paths in `src/oauth.ts`; _Planned (OAuth)_ for the consent page
-  and OAuth credentials on `/mcp` and `/v1/`. Pinned by log redaction (`src/log-redaction.test.ts`: every route and
+  `src/log.ts`, for the authorization server's paths in `src/oauth.ts`, and for the grants routes in `src/grants.ts`;
+  _Planned (OAuth)_ for the consent page and OAuth credentials on `/mcp` and `/v1/`. Pinned by log redaction (`src/log-redaction.test.ts`: every route and
   failure path, `/mcp` and its SDK refusals included; `src/oauth.test.ts`: the metadata, registration and token
   endpoints, their refusals, a revocation and KV and fetch failures, every `console` method captured, with markers in
   codes, tokens, verifiers, client names, client-ID paths, queries and userinfo, a client document's fields and
   thrown errors, each appearing only where those two lines put it, and the `onError` hook logging `oauth.refused` only
-  (PL-45);
-  planned: consent handles) and source check (`src/source.test.ts`: `console` only in the logging module;
-  `wrangler.jsonc`). **Gap:** the gallery's routes are not among the redaction
+  (PL-45); `src/grants.test.ts`: the listing, a revocation and their failures, with markers in a grant's metadata, a
+  client's name and a KV error; planned: consent handles) and source check (`src/source.test.ts`: `console` only in
+  the logging module; `wrangler.jsonc`). **Gap:** the gallery's routes are not among the redaction
   markers yet. **Changed for OAuth:** "only `logEvent`" covers the Worker's own sources, since the dependency's two
   lines are bounded here rather than suppressed by patching it, and the first can quote a public artifact's values
   when a client ID names it or redirects to it. What DATA-1 protected holds: no credential or private content reaches
@@ -333,7 +335,7 @@ and the threats are the three adversaries below, not untrusted users.
 ### OAuth (OAUTH)
 
 All _Planned (OAuth)_, decided in [design.md](design.md#7-auth) section 7, except OAUTH-6's compatibility flag and
-OAUTH-5's revocation record at the token endpoint.
+OAUTH-5's revocation record at the token endpoint and through `/v1/grants`.
 
 - **OAUTH-1: only the owner creates a grant.** A grant is created only by `POST /oauth/authorize` on the app host,
   after ACC-1 with the app audience, with the handle of a consent transaction that the same browser opened (its
@@ -371,10 +373,15 @@ OAUTH-5's revocation record at the token endpoint.
   wrapper and the token endpoint in `src/revocation.ts`, `src/oauth.ts`, pinned by behavior (`src/revocation.test.ts`:
   the record before the deletion, a failed write failing it; `src/oauth.test.ts`: a revoked grant's code and refresh
   token refused, to a client that authenticated, as a grant that is gone, a refresh's and a code exchange's write-back
-  after the revocation, RFC 7009 with each token, injected failures of the record's write and of the deletion);
-  _Planned (OAuth)_ for `/v1/grants`, approval and access tokens. Pinned by behavior (PL-41: for each path, barriers
-  between a refresh's and a code exchange's read and write of the grant; injected failures of the record's write and
-  of the deletion) and deployed check (AC-20, the delay measured).
+  after the revocation, RFC 7009 with each token, injected failures of the record's write and of the deletion); and
+  for `/v1/grants` in `src/grants.ts`, pinned by behavior (`src/grants.test.ts`, PL-41 at the token endpoint: the
+  listing before and after, an unknown and a repeated `DELETE` (404), barriers between a refresh's and a code
+  exchange's read and write of the grant with the grant revoked through `DELETE` between them, its tokens then refused
+  and the grant kept out of the listing, injected failures of the record's write (503, the grant kept, a retry revokes
+  it) and of the deletion after it (503, the grant refused at once, a retry deletes it)); _Planned (OAuth)_ for
+  approval and access tokens. Pinned by behavior (PL-41: for each path, barriers between a refresh's and a code
+  exchange's read and write of the grant; injected failures of the record's write and of the deletion) and deployed
+  check (AC-20, the delay measured).
 - **OAUTH-6: client documents are fetched only from public addresses and bounded, and a client on this deployment's
   hosts gets no consent page.** The compatibility flag `global_fetch_strictly_public` keeps the library's CIMD fetches
   on public addresses, the library bounds a document at 5 KB and 10 s, and the authorize endpoint refuses a client ID
