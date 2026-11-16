@@ -1,7 +1,9 @@
 /**
  * Helpers for the Worker's tests: a Worker built with a test clock, ID queue, key endpoint and short timeouts; requests
- * to each host class; Access JWTs from a local key; and probes that wrap the D1 and R2 bindings to inject failures.
+ * to each host class; Access JWTs from a local key; an MCP client of the SDK; and probes that wrap the D1 and R2
+ * bindings to inject failures.
  */
+import { Client, StreamableHTTPClientTransport, type CallToolResult } from "@modelcontextprotocol/client";
 import { env } from "cloudflare:workers";
 import { exportJWK, generateKeyPair, SignJWT, type JWK, type JWTPayload } from "jose";
 import { vi } from "vitest";
@@ -271,6 +273,59 @@ export function multipart(input: PublishInput): { meta: Record<string, unknown>;
   };
 }
 
+/** The MCP revisions `/mcp` serves (PL-27): the 2025-era ones through `initialize`, the modern one through discovery. */
+export const MCP_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"] as const;
+export type McpVersion = (typeof MCP_VERSIONS)[number];
+const MODERN: McpVersion = "2026-07-28";
+
+/** What an MCP client needs of the Worker: a World, or a stand-in that calls the MCP adapter directly. */
+export type Fetcher = { fetch(request: Request): Promise<Response> };
+
+/** An SDK client connected to the Worker's `/mcp` with a bearer token (`codex` by default), speaking `version`. */
+export async function mcpClient(
+  world: Fetcher,
+  options: { token?: string; version?: McpVersion; headers?: Record<string, string> } = {},
+): Promise<Client> {
+  const token = options.token ?? TOKENS.codex;
+  const version = options.version ?? "2025-11-25";
+  const transport = new StreamableHTTPClientTransport(new URL(`${API}/mcp`), {
+    fetch: (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set("Authorization", `Bearer ${token}`);
+      for (const [name, value] of Object.entries(options.headers ?? {})) headers.set(name, value);
+      return world.fetch(new Request(input, { ...init, headers }));
+    },
+  });
+  const client = new Client(
+    { name: "artifacts-test", version: "0.0.0" },
+    version === MODERN ? { versionNegotiation: { mode: { pin: MODERN } } } : { supportedProtocolVersions: [version] },
+  );
+  await client.connect(transport);
+  return client;
+}
+
+/** A tool call's outcome: its structured content, or the object of an `isError` result. */
+export type ToolOutcome = { ok: boolean; value: unknown };
+
+export function toolOutcome(result: CallToolResult): ToolOutcome {
+  const [first] = result.content;
+  const text = first?.type === "text" ? first.text : "";
+  if (result.isError === true) {
+    let value: unknown = text;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      // A refusal the SDK formed is plain text.
+    }
+    return { ok: false, value };
+  }
+  return { ok: true, value: result.structuredContent };
+}
+
+export async function callTool(client: Client, name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
+  return toolOutcome(await client.callTool({ name, arguments: args }));
+}
+
 /** The keys under an artifact's prefix in the real bucket. */
 export async function objectKeys(id: string): Promise<string[]> {
   const listed = await env.FILES.list({ prefix: `a/${id}/` });
@@ -425,6 +480,24 @@ export function captureLogs(): { lines: string[]; text: () => string } {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The value at `path` in a JSON value, or undefined when the path does not exist. */
+export function at(value: unknown, ...path: (string | number)[]): unknown {
+  let current = value;
+  for (const key of path) {
+    if (typeof key === "number" && Array.isArray(current)) current = current[key];
+    else if (typeof key === "string" && isRecord(current)) current = current[key];
+    else return undefined;
+  }
+  return current;
+}
+
+/** The string at `path`; fails the test when there is none. */
+export function stringAt(value: unknown, ...path: (string | number)[]): string {
+  const found = at(value, ...path);
+  if (typeof found !== "string") throw new Error(`no string at ${path.join(".")}`);
+  return found;
 }
 
 /** The parsed log lines (each the JSON object logEvent wrote). */

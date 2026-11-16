@@ -42,7 +42,15 @@ import { fail, invalid, succeed, type Issue, type Result } from "./errors.ts";
 import { appOrigin, contentOrigin, publicOrigin } from "./hosts.ts";
 import { isArtifactId, type ArtifactId } from "./id.ts";
 import { errorName, logEvent } from "./log.ts";
-import { deletePrefix, getObject, sha256Hex, StorageError, uploadObjects, type ObjectStore } from "./objects.ts";
+import {
+  deletePrefix,
+  getObject,
+  readBody,
+  sha256Hex,
+  StorageError,
+  uploadObjects,
+  type ObjectStore,
+} from "./objects.ts";
 import { ENTRY_FILE, parseVersionNumber, type ResolvedPath } from "./paths.ts";
 import { LIMITS, type ArchivedFilter, type ArchiveSetting } from "./schemas.ts";
 import type { Timeouts } from "./timeout.ts";
@@ -495,6 +503,14 @@ export async function lookupFile(deps: OperationDeps, input: LookupInput): Promi
 /** A looked-up file's bytes, under the R2 timeout. */
 export async function openFile(deps: OperationDeps, id: ArtifactId, file: FileJson): Promise<Result<R2ObjectBody>> {
   return guarded(id, async () => succeed(await getObject(objectStore(deps), id, file.sha256)));
+}
+
+/** A looked-up file's bytes, fetched and read whole under the R2 timeout (MCP's `read_file`, after its size bound). */
+export async function readFile(deps: OperationDeps, id: ArtifactId, file: FileJson): Promise<Result<Uint8Array>> {
+  return guarded(id, async () => {
+    const store = objectStore(deps);
+    return succeed(await readBody(store, await getObject(store, id, file.sha256), file.size));
+  });
 }
 
 export type SettingsInput = {

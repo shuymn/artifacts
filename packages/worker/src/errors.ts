@@ -36,11 +36,13 @@ export const ISSUE_REASONS = [
   "duplicate_part",
   "count_mismatch",
   "not_a_file",
+  "too_large",
 ] as const;
 export type IssueReason = (typeof ISSUE_REASONS)[number];
 export type Issue = { readonly field: string; readonly reason: IssueReason };
 
-const ISSUE_MESSAGES: Record<IssueReason, string> = {
+/** One sentence per reason; MCP schema rejections carry it too, since the SDK forms their message from the issue's. */
+export const ISSUE_MESSAGES: Record<IssueReason, string> = {
   required: "a required field is missing",
   invalid_type: "a field has the wrong type",
   unknown_field: "the input has a field this operation does not take",
@@ -65,6 +67,7 @@ const ISSUE_MESSAGES: Record<IssueReason, string> = {
   duplicate_part: 'the "meta" part is given twice',
   count_mismatch: 'the number of "file" parts differs from meta.files',
   not_a_file: 'a "file" part has no file name, so its bytes would arrive decoded as text',
+  too_large: "the file is larger than read_file returns (1 MiB); read its bytes at rest_url",
 };
 
 export type OperationError =

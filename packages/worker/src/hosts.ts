@@ -40,3 +40,7 @@ export function publicOrigin(config: Config, id: ArtifactId): string {
 export function appOrigin(config: Config): string {
   return `${config.scheme}://${config.appHost}`;
 }
+
+export function apiOrigin(config: Config): string {
+  return `${config.scheme}://${config.apiHost}`;
+}

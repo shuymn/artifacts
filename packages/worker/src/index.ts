@@ -9,6 +9,7 @@ import { serveGallery, withGalleryPolicy } from "./gallery/route.ts";
 import { classifyHost } from "./hosts.ts";
 import { newArtifactId, type ArtifactId } from "./id.ts";
 import { errorName, logEvent, type HostKind } from "./log.ts";
+import { handleMcp } from "./mcp.ts";
 import type { OperationDeps } from "./operations.ts";
 import { handleRest, jsonResponse, transportError } from "./rest.ts";
 import { methodAllowed, methodNotAllowed, plainResponse, serveArtifact, type BrowserClass } from "./serve.ts";
@@ -61,7 +62,7 @@ async function api(request: Request, url: URL, env: Env, config: Config, deps: W
     logEvent("token.refused", { reason: auth.reason });
     return transportError("unauthorized", { "WWW-Authenticate": "Bearer" });
   }
-  // `/mcp` (design.md section 8) is served by the MCP adapter; until then it answers like any unknown route.
+  if (url.pathname === "/mcp") return handleMcp(request, operationDeps(env, config, deps), auth.name);
   if (url.pathname.startsWith("/v1/")) return handleRest(request, url, operationDeps(env, config, deps), auth.name);
   return jsonResponse(404, { error: { code: "not_found", message: "no such route" } });
 }
