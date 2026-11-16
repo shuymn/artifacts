@@ -50,9 +50,9 @@ save git shows the file changed by that one line; Pencil opens the file with or 
 ## Icon
 
 The gallery has one icon: the `a` of the monospace wordmark in `color.accent`, on a tile of `color.bg` with
-`radius.sm`. It is drawn by hand, not in Pencil; its source is
-[`icon.svg`](../../packages/worker/src/gallery/icon.svg), on a 32-unit grid with every edge on an even coordinate so
-it stays sharp at 16 px.
+`radius.sm`. It is drawn by hand; its source is [`icon.svg`](../../packages/worker/src/gallery/icon.svg), on a
+32-unit grid with every edge on an even coordinate so it stays sharp at 16 px. The `site-header` component in
+`gallery.pen` repeats its shapes at 16 px.
 
 - **Light and dark chrome.** The icon looks the same in both: the tile carries the gallery's own background, so the
   glyph keeps its contrast whatever the tab strip's color, and the ICO, which cannot switch, matches the SVG. A
@@ -62,6 +62,10 @@ it stays sharp at 16 px.
   [`favicon.ico`](../../packages/worker/src/gallery/favicon.ico) is `icon.svg` rendered at 16 and 32 px and stored as
   PNG images; after a change to the SVG, `uv run packages/worker/scripts/favicon.py` writes it again. Artifact hosts
   answer `/favicon.ico` with the same file when the artifact has none ([design.md](../design.md), section 6).
+- **In the header.** The icon comes before the wordmark, inside the brand's link, as an `img` of `icon.svg` at its
+  fingerprinted path. It is the wordmark's font size, `1em`, which is 16 px at the default text size, where the grid
+  falls on whole pixels; `width` and `height` of 16 hold its place until it loads, and its `alt` is empty because the
+  link's text names it. The tile is the header's own color, so only the glyph shows, `space.1` before the wordmark.
 
 ## Tokens
 
@@ -111,7 +115,7 @@ reference pages show each in place.
 
 | Component         | Variant                                         | Markup                                                                                                          |
 | ----------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `site-header`     |                                                 | `header.site-header` > `a.brand` + `nav.site-nav`                                                               |
+| `site-header`     |                                                 | `header.site-header` > `div.brand` + `nav.site-nav`                                                             |
 | `nav-tab`         | `state=default`                                 | `a.nav-tab` > text + `span.nav-tab__count`                                                                      |
 |                   | `state=current`                                 | the same with `aria-current`: `"page"` on the list it links to, `"true"` on an artifact page in that section    |
 | `artifact-row`    |                                                 | `li.artifact-row` in `ul.artifact-list[role=list]`; see `reference/index.html`                                  |
@@ -123,6 +127,8 @@ reference pages show each in place.
 |                   | `value=link`                                    | the same with `dd.info-row__link` > `a`                                                                         |
 | `table-cell`      | `style=head`                                    | `thead th[scope=col]`                                                                                           |
 |                   | `style=text` / `mono` / `muted` / `link`        | `td` / `td.cell--mono` / `td.cell--muted` / `td.cell--link` > `a`; every `td` has `data-label`, its column name |
+
+In `site-header`, `div.brand` is `a.brand__link` (`img.brand__icon` and the wordmark) then `span.brand__version`.
 
 Screens also use `main.page` (`.page--detail` on an artifact page), `hgroup.page-heading`, `header.artifact-heading`,
 `section.section` and `div.data-table[role=region][tabindex=0][aria-labelledby]` around each `table`; `.cell--grow`
@@ -140,6 +146,9 @@ the frame clips them, so the artifact list and the tables, whose rows reach thei
 
 ## Behavior the static design does not show
 
+- **Version.** The header shows the root `package.json`'s version (`v0.3.0` in the design), which the build inlines
+  into the Worker as it does into the CLI. The Worker is deployed from the release branch, so the version is the
+  release's.
 - **Current section.** `/` and an artifact that is not archived mark Active; `/archived` and an archived artifact mark
   Archived.
 - **A row's description** stays on one line and ends with an ellipsis; the artifact page shows it whole, and the row's

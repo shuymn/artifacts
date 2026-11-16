@@ -112,6 +112,7 @@ body,
 }
 
 /* type.meta */
+.brand__version,
 .nav-tab__count,
 .artifact-row__meta,
 .section-heading__count {
@@ -126,7 +127,7 @@ body,
 }
 
 /* type.brand */
-.brand {
+.brand__link {
   font: var(--font-weight-semibold) var(--font-size-lg) / 1.25 var(--font-family-mono);
 }
 
@@ -177,8 +178,31 @@ a:focus-visible,
   background: var(--color-bg);
 }
 
+/*
+ * The brand: the icon and the wordmark in one link, then the version. Pencil has no baseline alignment, so the
+ * version's line box ends where the wordmark's does, which sets the two on one baseline to a fraction of a pixel.
+ */
 .brand {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.brand__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   color: var(--color-text);
+}
+
+/* The icon is the wordmark's font size: 16 px at the default text size, where icon.svg's grid is whole pixels. */
+.brand__icon {
+  inline-size: 1em;
+  block-size: 1em;
+}
+
+.brand__version {
+  color: var(--color-text-muted);
 }
 
 .site-nav {
