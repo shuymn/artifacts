@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import designText from "../../../docs/design.md?raw";
 import { parseConfig } from "./config.ts";
 import { decodeContent, encodeBase64, ENCODINGS } from "./encoding.ts";
-import { ERROR_STATUS, OPERATION_ERRORS } from "./errors.ts";
+import { ERROR_STATUS, errorBody, OPERATION_ERRORS } from "./errors.ts";
 import { newArtifactId } from "./id.ts";
 import { handleMcp, INSTRUCTIONS, type McpHandlerFactory } from "./mcp.ts";
 import type { OperationDeps } from "./operations.ts";
@@ -294,7 +294,13 @@ describe("TOK-3: the token name through MCP", () => {
 // PL-26, PL-23 (the MCP side), P5: one table of cases through both adapters gives the same results and errors.
 type Op = "create" | "update" | "list" | "get" | "versions" | "read" | "public" | "archive" | "delete";
 type Args = Record<string, unknown>;
-type Step = { name: string; op: Op; args: Args | ((previous: ToolOutcome[]) => Args) };
+type Step = {
+  name: string;
+  op: Op;
+  args: Args | ((previous: ToolOutcome[]) => Args);
+  /** A difference design.md section 8 states, pinned as each adapter's outcome. */
+  differs?: { rest: ToolOutcome; mcp: ToolOutcome };
+};
 
 const TOOL_OF: Record<Op, string> = {
   create: "create_artifact",
@@ -329,6 +335,7 @@ const STEPS: Step[] = [
         { path: "style.css", content: "p { color: red }", content_type: "text/css; charset=utf-8" },
         { path: "img/logo.png", content: encodeBase64(PNG), encoding: "base64" },
         { path: NFD, content: "café" },
+        { path: "docs/index.html", content: "<p>docs</p>" },
       ],
     },
   },
@@ -391,6 +398,16 @@ const STEPS: Step[] = [
   { name: "read an NFD path", op: "read", args: { id: A, version: 1, path: NFD } },
   { name: "read a removed path", op: "read", args: { id: A, version: 2, path: "img/logo.png" } },
   { name: "read a directory name", op: "read", args: { id: A, version: 1, path: "img" } },
+  {
+    name: "read a directory path: REST follows it to index.html, read_file reads exact paths only",
+    op: "read",
+    args: { id: A, version: 1, path: "docs" },
+    differs: {
+      rest: { ok: true, value: { status: 308, location: `/v1/artifacts/${A}/versions/1/files/docs/` } },
+      mcp: { ok: false, value: errorBody({ code: "not_found" }) },
+    },
+  },
+  { name: "read the directory's index.html", op: "read", args: { id: A, version: 1, path: "docs/index.html" } },
   { name: "read a missing version", op: "read", args: { id: A, version: 9, path: "index.html" } },
   { name: "make public", op: "public", args: { id: A, public: true } },
   { name: "keep out of the archive", op: "archive", args: { id: A, archive: "kept" } },
@@ -460,6 +477,9 @@ async function viaRest(world: World, op: Op, args: Args): Promise<ToolOutcome> {
       const path = stringAt(args, "path");
       const encoded = path.split("/").map(encodeURIComponent).join("/");
       response = await world.api("GET", `/v1/artifacts/${id}/versions/${version}/files/${encoded}`);
+      if (response.status === 308) {
+        return { ok: true, value: { status: 308, location: response.headers.get("Location") } };
+      }
       if (response.status !== 200) break;
       const bytes = new Uint8Array(await response.arrayBuffer());
       const contentType = response.headers.get("Content-Type");
@@ -523,7 +543,8 @@ describe("PL-26: REST and MCP give the same results and operation errors", () =>
       return (op, args) => viaMcp(client, op, args);
     });
     STEPS.forEach((step, i) => {
-      expect({ step: step.name, ...mcp[i] }).toEqual({ step: step.name, ...rest[i] });
+      const expected = step.differs ?? { rest: rest[i], mcp: rest[i] };
+      expect({ step: step.name, rest: rest[i], mcp: mcp[i] }).toEqual({ step: step.name, ...expected });
     });
     // The table reaches what it names: the error codes an input that passes both schemas can meet.
     const codes = rest.flatMap((outcome) => (outcome.ok ? [] : [stringAt(outcome.value, "error", "code")]));
