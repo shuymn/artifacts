@@ -1,0 +1,34 @@
+// The deployment values (design.md section 11). Copy this file to wrangler.deploy.jsonc (gitignored) to deploy from your
+// machine, or paste its content into the build variable ARTIFACTS_DEPLOY_JSONC on Workers Builds. scripts/deploy.ts
+// checks the values, merges them into wrangler.jsonc and deploys; they may set only these keys. Fill every empty value
+// and replace the example hosts; docs/operations.md says where each value comes from. API_TOKENS is a secret and never
+// goes here.
+{
+  // Optional: the account to deploy to, when the credentials reach more than one account. Otherwise leave the key out.
+  "account_id": "",
+  // The hosts of design.md section 1, here for the layout on one domain the owner already uses: Custom Domains for the
+  // app and API hosts, a route for each artifact suffix. For content on its own registrable domain, the two artifact
+  // routes become one route on that domain:
+  //   { "pattern": "*.example-content.net/*", "zone_name": "example-content.net" }
+  "routes": [
+    { "pattern": "artifacts.example.com", "custom_domain": true },
+    { "pattern": "artifacts-api.example.com", "custom_domain": true },
+    { "pattern": "*-art.example.com/*", "zone_name": "example.com" },
+    { "pattern": "*-pub.example.com/*", "zone_name": "example.com" },
+  ],
+  // The D1 database and the private R2 bucket, created before the first deployment.
+  "d1_databases": [{ "binding": "DB", "database_name": "", "database_id": "" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "" }],
+  "vars": {
+    "APP_HOST": "artifacts.example.com",
+    "API_HOST": "artifacts-api.example.com",
+    // For content on its own registrable domain: "-p.example-content.net" and "-s.example-content.net".
+    "CONTENT_HOST_SUFFIX": "-art.example.com",
+    "PUBLIC_HOST_SUFFIX": "-pub.example.com",
+    "ARCHIVE_AFTER_DAYS": "30",
+    // The Zero Trust team domain, such as team.cloudflareaccess.com, and the AUD tag of each Access application.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_APP_AUD": "",
+    "ACCESS_CONTENT_AUD": "",
+  },
+}

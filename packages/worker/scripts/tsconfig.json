@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // Node runs the deployment script and the Worker modules it imports, and strips their types, so only erasable
+    // syntax is allowed in them.
+    "erasableSyntaxOnly": true,
+    "types": ["@cloudflare/workers-types", "node"]
+  },
+  "include": ["."]
+}
