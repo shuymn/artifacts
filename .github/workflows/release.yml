@@ -11,6 +11,8 @@ on:
   push:
     branches:
       - main
+  # A manual run on main, for when the push run could not start (for example, before the action was allowed).
+  workflow_dispatch:
 
 permissions: {}
 
