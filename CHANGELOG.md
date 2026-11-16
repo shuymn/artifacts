@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/shuymn/artifacts/compare/v0.1.0...v0.1.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* take build tool versions from the commit ([5453c93](https://github.com/shuymn/artifacts/commit/5453c93cdb9998be52f25e40a7d3e712648e37a7))
+* **worker:** install with the pnpm of mise.lock ([2007cae](https://github.com/shuymn/artifacts/commit/2007cae78e34de7ccecbd8425d31558d75231c3a))
+
 ## 0.1.0 (2026-11-16)
 
 
