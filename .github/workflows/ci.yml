@@ -31,7 +31,7 @@ jobs:
       - name: Set up mise
         uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
-          install_args: node pnpm
+          install_args: node pnpm bun
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -47,3 +47,50 @@ jobs:
 
       - name: Run tests
         run: pnpm run test
+
+  changes:
+    name: Changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      cli: ${{ steps.files.outputs.cli }}
+    steps:
+      - name: Find whether the pull request can change a CLI binary
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -eu
+          # The files API lists at most 3000 files; a larger pull request is taken to change the binaries.
+          if [ "$CHANGED_FILES" -ge 3000 ]; then
+            echo "cli=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' >"$RUNNER_TEMP/files"
+          cli=false
+          while IFS= read -r file; do
+            case "$file" in
+              packages/cli/* | .github/workflows/cli-binaries.yml | package.json | pnpm-lock.yaml | mise.toml | mise.lock)
+                cli=true
+                ;;
+            esac
+          done <"$RUNNER_TEMP/files"
+          echo "cli=$cli" >>"$GITHUB_OUTPUT"
+
+  # Every release platform, on its own runner; not a required check. A manual run builds them whatever changed.
+  binaries:
+    name: CLI binaries
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.cli == 'true') }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cli-binaries.yml
+    with:
+      ref: ${{ github.sha }}

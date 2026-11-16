@@ -4,6 +4,8 @@
 # Workers Builds reads too, so the deployment builds with the same major.
 [tools]
 pnpm = "12"
+# Runs the CLI, its tests, and builds its release binaries (packages/cli).
+bun = "1"
 # Linters the shared security and gha workflows also run; the git hooks use
 # these so local checks match CI.
 actionlint = "1"
@@ -12,7 +14,7 @@ ghalint = "1"
 
 [settings]
 lockfile = true
-lockfile_platforms = ["macos-arm64", "linux-x64"]
+lockfile_platforms = ["macos-arm64", "linux-x64", "linux-arm64", "windows-x64"]
 locked = true
 # Read Node.js's version from .node-version; mise.lock still pins it.
 idiomatic_version_file_enable_tools = ["node"]

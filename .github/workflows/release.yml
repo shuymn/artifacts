@@ -1,18 +1,25 @@
 name: Release
 
 # Releases go through release-please: it keeps a release PR open from the Conventional Commits on main, and merging
-# that PR tags the release and creates its GitHub release. This workflow then fast-forwards the `release` branch to the
-# latest release, and Workers Builds deploys from `release` only (docs/operations.md). main itself is never deployed.
+# that PR tags the release and creates it as a draft (release-please-config.json). This workflow then builds the CLI's
+# binaries for the draft, uploads them with SHA256SUMS and publishes it, and fast-forwards the `release` branch to the
+# latest published release; Workers Builds deploys from `release` only (docs/operations.md). main itself is never
+# deployed. A release is immutable once published, so its assets go up while it is a draft.
 #
-# Both steps use the repository's GitHub App token (scripts/github-app.mjs): a pull request opened with GITHUB_TOKEN
-# starts no workflow, so the release PR would never run the required checks.
+# Every job that writes uses the repository's GitHub App token (scripts/github-app.mjs): a pull request opened with
+# GITHUB_TOKEN starts no workflow, so the release PR would never run the required checks.
 
 on:
   push:
     branches:
       - main
-  # A manual run on main, for when the push run could not start (for example, before the action was allowed).
+  # A manual run on main: for when the push run could not start, or to finish the draft of `tag` after a failed run.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Finish the draft release of this tag (vX.Y.Z); empty for a run like a push's
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -21,11 +28,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  prepare:
+    name: Release PR and draft
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: {}
+    outputs:
+      tag: ${{ steps.draft.outputs.tag }}
+      sha: ${{ steps.draft.outputs.sha }}
+      release-id: ${{ steps.draft.outputs.id }}
     steps:
       - name: Create App token
         id: app-token
@@ -37,14 +49,252 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - name: Update the release PR or create the release
+      - name: Update the release PR or create the draft release
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Runs on every push, so a failed run is repaired by running it again or by the next push.
+      # The draft this run finishes: the one release-please just created, the one of the tag a manual run names, or,
+      # when the run is run again, the one at this run's commit (release-please has tagged its PR and creates nothing).
+      - name: Find the draft release to finish
+        id: draft
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CREATED_TAG: ${{ steps.release.outputs.release_created && steps.release.outputs.tag_name || '' }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          repo="repos/$GITHUB_REPOSITORY"
+          tag=${REQUESTED_TAG:-$CREATED_TAG}
+          if [ -z "$tag" ]; then
+            # Draft releases are listed to those who can push, as the App can.
+            tag=$(gh api --paginate "$repo/releases" \
+              --jq ".[] | select(.draft and .target_commitish == \"$GITHUB_SHA\") | .tag_name")
+            if [ "$(printf '%s' "$tag" | grep -c .)" -gt 1 ]; then
+              echo "::error::several draft releases are at $GITHUB_SHA: $(echo "$tag" | tr '\n' ' ')"
+              exit 1
+            fi
+          fi
+          if [ -z "$tag" ]; then
+            echo "no draft release to finish"
+            exit 0
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::$tag is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+          release=$(gh api --paginate "$repo/releases" --jq ".[] | select(.tag_name == \"$tag\") | [.id, .draft, .target_commitish] | @tsv")
+          if [ "$(printf '%s' "$release" | grep -c .)" -ne 1 ]; then
+            echo "::error::expected one release of $tag, found $(printf '%s' "$release" | grep -c .)"
+            exit 1
+          fi
+          IFS="$(printf '\t')" read -r id draft target <<EOF
+          $release
+          EOF
+          if [ "$draft" != true ]; then
+            if [ -n "$CREATED_TAG" ]; then
+              echo "::error::release-please published $tag instead of creating a draft (release-please-config.json)"
+              exit 1
+            fi
+            echo "$tag is published already; nothing to finish"
+            exit 0
+          fi
+          # release-please creates the tag at the release's commit (force-tag-creation) and skips a tag that exists,
+          # so a tag made earlier could point elsewhere.
+          ref=$(gh api "$repo/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha')
+          sha=${ref#* }
+          if [ "${ref%% *}" = tag ]; then
+            sha=$(gh api "$repo/git/tags/$sha" --jq .object.sha)
+          fi
+          if [ "$sha" != "$target" ]; then
+            echo "::error::the tag $tag is at $sha, but its draft release is at $target"
+            exit 1
+          fi
+          # The release must be a commit of main: main's head is the same commit or ahead of it.
+          status=$(gh api "$repo/compare/$sha...$GITHUB_SHA" --jq .status)
+          case "$status" in
+            ahead | identical) ;;
+            *)
+              echo "::error::$tag is not a commit of main ($status)"
+              exit 1
+              ;;
+          esac
+          {
+            echo "tag=$tag"
+            echo "sha=$sha"
+            echo "id=$id"
+          } >>"$GITHUB_OUTPUT"
+          echo "finishing the draft release of $tag ($sha)" >>"$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: CLI binaries
+    needs: prepare
+    if: github.ref == 'refs/heads/main' && needs.prepare.outputs.tag != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cli-binaries.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      tag: ${{ needs.prepare.outputs.tag }}
+      upload: true
+
+  # Runs only when every platform built and passed its smoke tests: a failed build leaves the release a draft.
+  publish:
+    name: Publish the release
+    needs: [prepare, build]
+    if: github.ref == 'refs/heads/main' && needs.prepare.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      SHA: ${{ needs.prepare.outputs.sha }}
+      RELEASE_ID: ${{ needs.prepare.outputs.release-id }}
+    steps:
+      - name: Download the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: artifacts-${{ needs.prepare.outputs.tag }}-*
+          merge-multiple: true
+
+      - name: Check the archives and write SHA256SUMS
+        working-directory: dist
+        run: |
+          set -eu
+          expected="artifacts-$TAG-darwin-arm64.tar.gz
+          artifacts-$TAG-linux-arm64-gnu.tar.gz
+          artifacts-$TAG-linux-x64-gnu.tar.gz
+          artifacts-$TAG-windows-x64-msvc.zip"
+          found=$(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          if [ "$found" != "$expected" ]; then
+            printf '::error::the archives are not those of %s:\n%s\n' "$TAG" "$found"
+            exit 1
+          fi
+          # Each archive holds the binary alone, at its root.
+          for archive in *.tar.gz; do
+            [ "$(tar -tzf "$archive")" = artifacts ] || { echo "::error::$archive does not hold artifacts alone"; exit 1; }
+          done
+          for archive in *.zip; do
+            [ "$(unzip -Z1 "$archive")" = artifacts.exe ] || { echo "::error::$archive does not hold artifacts.exe alone"; exit 1; }
+          done
+          # shellcheck disable=SC2086 # the names have no spaces
+          sha256sum $expected >SHA256SUMS
+          cat SHA256SUMS >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Create App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Upload the assets to the draft and publish it
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -eu
+          repo="repos/$GITHUB_REPOSITORY"
+          release=$(gh api "$repo/releases/$RELEASE_ID" --jq '[.draft, .tag_name, .upload_url] | @tsv')
+          IFS="$(printf '\t')" read -r draft tag upload_url <<EOF
+          $release
+          EOF
+          if [ "$tag" != "$TAG" ]; then
+            echo "::error::release $RELEASE_ID is not the release of $TAG (tag: $tag)"
+            exit 1
+          fi
+          tag_sha() {
+            ref=$(gh api "$repo/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha')
+            if [ "${ref%% *}" = tag ]; then
+              gh api "$repo/git/tags/${ref#* }" --jq .object.sha
+            else
+              echo "${ref#* }"
+            fi
+          }
+          if [ "$(tag_sha)" != "$SHA" ]; then
+            echo "::error::the tag $TAG moved from $SHA"
+            exit 1
+          fi
+          files=$(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          # Whether the release holds exactly these files, each uploaded whole: its size and its digest. GitHub gives a
+          # SHA-256 digest for each uploaded asset, so an asset without one is not taken as this run's.
+          holds_files() {
+            gh api --paginate "$repo/releases/$RELEASE_ID/assets" \
+              --jq '.[] | [.name, .state, .size, (.digest // "")] | @tsv' >"$RUNNER_TEMP/listed" || return 1
+            LC_ALL=C sort "$RUNNER_TEMP/listed" >"$RUNNER_TEMP/uploaded"
+            if [ "$(cut -f1 "$RUNNER_TEMP/uploaded")" != "$files" ]; then
+              printf '::error::release %s holds other assets than the files of this run:\n%s\n' \
+                "$TAG" "$(cut -f1 "$RUNNER_TEMP/uploaded")"
+              return 1
+            fi
+            while IFS="$(printf '\t')" read -r name state size digest; do
+              if [ "$state" != uploaded ] || [ "$size" != "$(stat -c %s "$name")" ] ||
+                [ "$digest" != "sha256:$(sha256sum "$name" | cut -d' ' -f1)" ]; then
+                echo "::error::the asset $name is not the file of this run ($state, $size bytes, ${digest:-no digest})"
+                return 1
+              fi
+            done <"$RUNNER_TEMP/uploaded"
+          }
+          # Published already: an earlier attempt of this job published it and then failed (its answer was lost, or the
+          # check after it). A published release is immutable, so it is accepted as it is only if it is this run's.
+          if [ "$draft" != true ]; then
+            if holds_files; then
+              echo "$TAG is published already, at $SHA with the files of this run" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::error::$TAG is published, but not with the files of this run; the next release replaces it"
+            exit 1
+          fi
+          # An asset the earlier attempt left is replaced; any other asset is not this workflow's to remove.
+          gh api --paginate "$repo/releases/$RELEASE_ID/assets" --jq '.[] | [.id, .name] | @tsv' >"$RUNNER_TEMP/assets"
+          while IFS="$(printf '\t')" read -r asset name; do
+            if ! printf '%s\n' "$files" | grep -Fqx "$name"; then
+              echo "::error::the draft has an asset this release does not make: $name"
+              exit 1
+            fi
+            gh api -X DELETE "$repo/releases/assets/$asset"
+          done <"$RUNNER_TEMP/assets"
+          for name in $files; do
+            curl --fail-with-body --silent --show-error --max-time 600 \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" \
+              --data-binary "@$name" "${upload_url%%\{*}?name=$name" >/dev/null
+          done
+          holds_files || exit 1
+          # legacy: GitHub marks the release with the highest version as latest, so finishing an older draft later does
+          # not take latest from a newer release. If the answer is lost or the check below fails, running the job again
+          # finds the release published and checks it as above.
+          gh api -X PATCH "$repo/releases/$RELEASE_ID" -F draft=false -f make_latest=legacy >/dev/null
+          if [ "$(gh api "$repo/releases/$RELEASE_ID" --jq .draft)" != false ] || [ "$(tag_sha)" != "$SHA" ]; then
+            echo "::error::the release of $TAG did not publish at $SHA"
+            exit 1
+          fi
+          echo "published $TAG ($SHA)" >>"$GITHUB_STEP_SUMMARY"
+
+  # Runs on every push to main and after a release publishes, and reads only the latest published release, so running
+  # the job again, a manual run or the next push repairs a run that failed. A draft never moves `release`.
+  fast-forward:
+    name: Fast-forward the release branch
+    needs: [prepare, publish]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && needs.prepare.result == 'success' &&
+      (needs.prepare.outputs.tag == '' || needs.publish.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Create App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+
       - name: Fast-forward the release branch to the latest release
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
