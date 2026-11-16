@@ -3,8 +3,9 @@
  * and HEAD only (ISO-3), set no cookie (ISO-4) and no `Access-Control-Allow-*` header (ISO-2). Every response of a
  * private content host and of the app host carries `Cross-Origin-Resource-Policy: same-origin` (ISO-2).
  */
+import { assetTag, FAVICON, type Asset } from "./gallery/assets.ts";
 import type { ArtifactId } from "./id.ts";
-import { lookupFile, openFile, type FileJson, type OperationDeps } from "./operations.ts";
+import { lookupFile, lookupServedFile, openFile, type FileJson, type OperationDeps } from "./operations.ts";
 import { resolveRequestPath } from "./paths.ts";
 
 /** `private`: the app host and private content hosts, behind Access. `public`: public hosts. */
@@ -66,8 +67,32 @@ export function matchesETag(header: string | null, etag: string): boolean {
 }
 
 /**
+ * A file bundled with the Worker, with its host class's headers. It revalidates like a stored file (`no-cache` with an
+ * ETag), and HEAD answers GET's headers without the body.
+ */
+export async function serveAsset(request: Request, asset: Asset, kind: BrowserClass): Promise<Response> {
+  const etag = await assetTag(asset);
+  if (matchesETag(request.headers.get("If-None-Match"), etag)) {
+    return new Response(null, { status: 304, headers: { ETag: etag, ...browserHeaders(kind) } });
+  }
+  const body = typeof asset.body === "string" ? new TextEncoder().encode(asset.body) : asset.body.slice(0);
+  const headers = {
+    "Content-Type": asset.contentType,
+    "Content-Length": String(body.byteLength),
+    ETag: etag,
+    ...browserHeaders(kind),
+  };
+  return new Response(request.method === "HEAD" ? null : body, { headers });
+}
+
+/** The path browsers request an icon from on their own, which an artifact without that file answers with FAVICON. */
+const FAVICON_PATH = "favicon.ico";
+
+/**
  * One artifact's files on its content or public host: the latest version at `/`, version `n` at `/_v/<n>/` (SRV-2).
- * Access (checked by the caller), the public flag and existence are checked before `If-None-Match` (SRV-3).
+ * Access (checked by the caller), the public flag and existence are checked before `If-None-Match` (SRV-3). The latest
+ * version's `favicon.ico`, when the artifact has none, is the gallery's icon (design.md section 6); a pinned path has no
+ * fallback, since browsers request the icon only at the root.
  */
 export async function serveArtifact(
   request: Request,
@@ -78,11 +103,14 @@ export async function serveArtifact(
 ): Promise<Response> {
   const path = resolveRequestPath(url.pathname);
   if (path === undefined) return plainResponse(kind, 404);
-  const lookup = await lookupFile(deps, { id, path, publicOnly: kind === "public" });
+  const input = { id, path, publicOnly: kind === "public" };
+  const fallback = path.version === null && path.file === FAVICON_PATH;
+  const lookup = fallback ? await lookupServedFile(deps, input) : await lookupFile(deps, input);
   if (!lookup.ok) {
     const code = lookup.error.code;
     return plainResponse(kind, code === "not_found" ? 404 : code === "unavailable" ? 503 : 500);
   }
+  if (lookup.value.kind === "absent") return serveAsset(request, FAVICON, kind);
   if (lookup.value.kind === "directory") {
     return new Response(null, {
       status: 308,

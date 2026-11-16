@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import favicon from "./gallery/favicon.ico";
 import { APP_HOST, CONTENT_SUFFIX, objectKeys, PUBLIC_SUFFIX, World } from "./test-support.ts";
 
 const PRIVATE_HEADERS = {
@@ -361,5 +362,128 @@ describe("PUB-1: public hosts", () => {
     await world.patch(created.artifact.id, { public: true });
     expect((await world.public(created.artifact.id, "/v1/artifacts")).status).toBe(404);
     expect((await world.public(created.artifact.id, "/a/x")).status).toBe(404);
+  });
+});
+
+/** A response's status, headers and body, to compare answers whole. */
+async function whole(response: Response) {
+  return { status: response.status, headers: [...response.headers], body: await response.text() };
+}
+
+// PL-33, section 6: `/favicon.ico` of an artifact without the file is the gallery's icon, after the checks of any file.
+describe("section 6: the fallback icon", () => {
+  const ICO = "image/vnd.microsoft.icon";
+  const icon = new Uint8Array(favicon);
+
+  it("answers /favicon.ico of an artifact without the file with the icon and the host class's headers", async () => {
+    const world = new World();
+    const id = await threeVersions(world);
+    await world.patch(id, { public: true });
+    for (const [response, classHeaders] of [
+      [await world.content(id, "/favicon.ico"), PRIVATE_HEADERS],
+      [await world.public(id, "/favicon.ico"), PUBLIC_HEADERS],
+    ] as const) {
+      expect(response.status).toBe(200);
+      expect(Object.fromEntries(response.headers)).toEqual({
+        ...classHeaders,
+        "content-type": ICO,
+        "content-length": String(icon.byteLength),
+        etag: expect.stringMatching(/^"[0-9a-f]{32}"$/),
+      });
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(icon);
+      noCors(response);
+    }
+    const head = await world.content(id, "/favicon.ico", { method: "HEAD" });
+    expect([...head.headers]).toEqual([...(await world.content(id, "/favicon.ico")).headers]);
+    expect(await head.text()).toBe("");
+  });
+
+  it("revalidates the icon by its ETag, with CORP on the 304 of a content host", async () => {
+    const world = new World();
+    const id = await threeVersions(world);
+    const etag = (await world.content(id, "/favicon.ico")).headers.get("ETag") ?? "";
+    const again = await world.content(id, "/favicon.ico", { headers: { "If-None-Match": etag } });
+    expect(again.status).toBe(304);
+    expect(again.headers.get("ETag")).toBe(etag);
+    expect(again.headers.get("Cache-Control")).toBe("private, no-cache");
+    expect(again.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
+  });
+
+  it("serves the artifact's own favicon.ico instead, and the icon again once a version removes it", async () => {
+    const world = new World();
+    const created = await world.created({ title: "f", files: { "index.html": "x" } });
+    const id = created.artifact.id;
+    const fallback = (await world.content(id, "/favicon.ico")).headers.get("ETag") ?? "";
+
+    await world.updated(id, { base_version: 1, files: { "favicon.ico": { body: "own", type: ICO } } });
+    // A cache holding the icon revalidates and gets the artifact's file, not a 304.
+    const own = await world.content(id, "/favicon.ico", { headers: { "If-None-Match": fallback } });
+    expect(own.status).toBe(200);
+    expect(own.headers.get("ETag")).not.toBe(fallback);
+    expect(await own.text()).toBe("own");
+
+    await world.updated(id, { base_version: 2, remove: ["favicon.ico"] });
+    const again = await world.content(id, "/favicon.ico");
+    expect(again.headers.get("ETag")).toBe(fallback);
+    expect(new Uint8Array(await again.arrayBuffer())).toEqual(icon);
+  });
+
+  it("answers a favicon.ico directory with its 308, as any other path", async () => {
+    const world = new World();
+    const created = await world.created({ title: "d", files: { "index.html": "x", "favicon.ico/index.html": "d" } });
+    const response = await world.content(created.artifact.id, "/favicon.ico");
+    expect(response.status).toBe(308);
+    expect(response.headers.get("Location")).toBe("/favicon.ico/");
+  });
+
+  it("has no fallback on a pinned path, which serves exactly the version's files", async () => {
+    const world = new World();
+    const created = await world.created({ title: "p", files: { "index.html": "x" } });
+    const id = created.artifact.id;
+    await world.updated(id, { base_version: 1, files: { "favicon.ico": "v2 icon" } });
+    expect(await whole(await world.content(id, "/_v/1/favicon.ico"))).toEqual(
+      await whole(await world.content(id, "/_v/1/missing.txt")),
+    );
+    expect(await (await world.content(id, "/_v/2/favicon.ico")).text()).toBe("v2 icon");
+    expect(await (await world.content(id, "/favicon.ico")).text()).toBe("v2 icon");
+  });
+
+  it("answers an unknown host, an unknown or deleted artifact and a private one on its public host as before", async () => {
+    const world = new World();
+    const unknown = "abcdefghijklmnopqrstuvwxyz";
+    const isPrivate = (await world.created({ title: "p", files: { "index.html": "x" } })).artifact.id;
+    const deleted = (await world.created({ title: "d", files: { "index.html": "x" } })).artifact.id;
+    await world.patch(deleted, { public: true });
+    expect((await world.api("DELETE", `/v1/artifacts/${deleted}`)).status).toBe(204);
+
+    const host = (path: string) => world.fetch(`https://nothing.example.org${path}`);
+    expect(await whole(await host("/favicon.ico"))).toEqual(await whole(await host("/missing.txt")));
+    const contentMiss = await whole(await world.content(unknown, "/missing.txt"));
+    expect(contentMiss.status).toBe(404);
+    expect(await whole(await world.content(unknown, "/favicon.ico"))).toEqual(contentMiss);
+    expect(await whole(await world.content(deleted, "/favicon.ico"))).toEqual(contentMiss);
+    const publicMiss = await whole(await world.public(unknown, "/missing.txt"));
+    expect(publicMiss.status).toBe(404);
+    for (const id of [unknown, deleted, isPrivate]) {
+      expect(await whole(await world.public(id, "/favicon.ico"))).toEqual(publicMiss);
+    }
+  });
+
+  // SRV-3 for the icon: Access, the public flag and existence come before the icon and its 304.
+  it("checks Access, the public flag and existence before the icon or its 304", async () => {
+    const world = new World();
+    const id = (await world.created({ title: "c", files: { "index.html": "x" } })).artifact.id;
+    await world.patch(id, { public: true });
+    const etag = (await world.public(id, "/favicon.ico")).headers.get("ETag") ?? "";
+    const conditional = { "If-None-Match": etag };
+    expect((await world.public(id, "/favicon.ico", { headers: conditional })).status).toBe(304);
+    expect((await world.content(id, "/favicon.ico", { jwt: null })).status).toBe(403);
+    expect((await world.content(id, "/favicon.ico", { jwt: null, headers: conditional })).status).toBe(403);
+
+    await world.patch(id, { public: false });
+    expect((await world.public(id, "/favicon.ico", { headers: conditional })).status).toBe(404);
+    expect((await world.content(id, "/favicon.ico", { headers: conditional })).status).toBe(304);
+    expect((await world.api("DELETE", `/v1/artifacts/${id}`)).status).toBe(204);
+    expect((await world.content(id, "/favicon.ico", { headers: conditional })).status).toBe(404);
   });
 });

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!--
+    The gallery's icon (docs/gallery/design.md, "Icon"): the "a" of the monospace wordmark in color.accent on a tile of
+    color.bg with radius.sm. The tile carries its own background, so the icon reads the same in light and dark browser
+    chrome. Every edge lies on an even coordinate, so the glyph stays sharp at 16 px; favicon.ico is this drawing
+    rendered at 16 and 32 px.
+  -->
+  <rect width="32" height="32" rx="6" fill="#111317" />
+  <path fill="#8fa8ff" d="M10 6h10v4H10zm10 4h4v16h-4zm-10 4h10v4H10zm-2 2h4v8H8zm2 6h10v4H10z" />
+</svg>

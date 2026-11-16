@@ -13,12 +13,13 @@
   "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
   // File bytes, one object per distinct file per artifact (design.md section 3).
   "r2_buckets": [{ "binding": "FILES" }],
-  // The gallery's stylesheets and fonts are bundled with the Worker: stylesheets as text, fonts as bytes.
-  // fallthrough: true keeps wrangler's default rules (.txt, .html, .sql as text; .bin as data) after these; nothing here
-  // imports such files, so false says the defaults are not needed and silences the warning about them.
+  // The gallery's stylesheets, fonts and icon are bundled with the Worker: stylesheets and the SVG icon as text, fonts
+  // and the ICO icon as bytes. fallthrough: true keeps wrangler's default rules (.txt, .html, .sql as text; .bin as
+  // data) after these; nothing here imports such files, so false says the defaults are not needed and silences the
+  // warning about them.
   "rules": [
-    { "type": "Text", "globs": ["**/*.css"], "fallthrough": false },
-    { "type": "Data", "globs": ["**/*.woff2"], "fallthrough": false },
+    { "type": "Text", "globs": ["**/*.css", "**/*.svg"], "fallthrough": false },
+    { "type": "Data", "globs": ["**/*.woff2", "**/*.ico"], "fallthrough": false },
   ],
   // Console output is kept. Invocation logs are off: they record the request, and API requests carry bearer tokens in
   // their Authorization header.

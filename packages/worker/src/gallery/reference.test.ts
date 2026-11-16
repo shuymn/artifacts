@@ -1,7 +1,7 @@
 // The templates produce the reference pages' markup (docs/gallery/design.md: the reference pages are "the markup the
 // Worker's templates must produce"). Each page is rendered from the data its reference page shows and compared element
 // by element: tag, every attribute (links and times included) and the element's own text. Only the differences that
-// are on purpose are rewritten first: the stylesheet links and the placeholder cursors.
+// are on purpose are rewritten first: the stylesheet and icon links and the placeholder cursors.
 import { describe, expect, it } from "vitest";
 
 import archivedHtml from "../../../../docs/gallery/reference/archived.html?raw";
@@ -202,13 +202,17 @@ const ARTIFACT: GalleryArtifact = {
   },
 };
 
-/** The reference pages load Google Fonts and the repository's gallery.css; the Worker serves both itself. */
-const STYLESHEETS = new Map([
+/**
+ * The reference pages load Google Fonts and the repository's gallery.css and icons; the Worker serves them itself.
+ */
+const ASSET_LINKS = new Map([
   [
     "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
     "/assets/fonts.css",
   ],
   ["../../../packages/worker/src/gallery/gallery.css", "/assets/gallery.css"],
+  ["../../../packages/worker/src/gallery/favicon.ico", "/favicon.ico"],
+  ["../../../packages/worker/src/gallery/icon.svg", "/assets/icon.svg"],
 ]);
 
 /**
@@ -269,10 +273,10 @@ describe("templates and reference pages", () => {
   it.each(PAGES)("renders the elements, attributes and text of %s", async (_name, reference, render, cursors) => {
     const [want, got] = await Promise.all([parseHtml(reference), parseHtml(render().text)]);
     // The parse keeps nesting: the document is one `html` element with `head` and `body`, not a flat list.
-    expect(shape(want, STYLESHEETS).children.map((html) => html.children.map((child) => child.tag))).toEqual([
+    expect(shape(want, ASSET_LINKS).children.map((html) => html.children.map((child) => child.tag))).toEqual([
       ["head", "body"],
     ]);
-    expect(shape(got, new Map(cursors))).toEqual(shape(want, STYLESHEETS));
+    expect(shape(got, new Map(cursors))).toEqual(shape(want, ASSET_LINKS));
   });
 
   it.each(PAGES)(

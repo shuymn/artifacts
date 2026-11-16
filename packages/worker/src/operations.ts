@@ -21,6 +21,7 @@ import {
   selectArtifactPage,
   selectFiles,
   selectServedFiles,
+  selectVisibleArtifact,
   selectState,
   selectVersion,
   selectVersionPage,
@@ -28,6 +29,7 @@ import {
   STATE_ROW,
   updateStatements,
   VERSION_ROW,
+  VISIBLE_ROW,
   write,
   type AdvancedRow,
   type ArtifactCursor,
@@ -487,17 +489,42 @@ export type LookupInput = {
 export async function lookupFile(deps: OperationDeps, input: LookupInput): Promise<Result<FileLookup>> {
   const { id, path } = input;
   return guarded(id, async (): Promise<Result<FileLookup>> => {
-    const [result] = await read(database(deps), [
-      selectServedFiles(deps.db, id, path.version, input.publicOnly, [path.file, path.directory]),
-    ]);
-    const found = rows(result, FILE_ROW);
-    const file = found.find((row) => row.path === path.file);
-    if (file !== undefined) return succeed({ kind: "file", id, file: fileJson(file) });
-    if (path.directory !== null && found.some((row) => row.path === path.directory)) {
-      return succeed({ kind: "directory" });
-    }
-    return NOT_FOUND;
+    const [result] = await read(database(deps), [servedFiles(deps, input)]);
+    const found = matchFile(id, path, rows(result, FILE_ROW));
+    return found === undefined ? NOT_FOUND : succeed(found);
   });
+}
+
+/** `lookupFile`'s answer, or `absent`: the artifact is live and visible to the request, but the path selects nothing. */
+export type ServedLookup = FileLookup | { readonly kind: "absent" };
+
+/**
+ * `lookupFile` for a path a browser host answers with a fallback when the artifact lacks it (design.md section 6):
+ * `absent` only when the artifact is live and, with `publicOnly`, public, read in the same batch as its files, so a
+ * private, deleted or unknown artifact stays `not_found`.
+ */
+export async function lookupServedFile(deps: OperationDeps, input: LookupInput): Promise<Result<ServedLookup>> {
+  const { id, path } = input;
+  return guarded(id, async (): Promise<Result<ServedLookup>> => {
+    const [files, visible] = await read(database(deps), [
+      servedFiles(deps, input),
+      selectVisibleArtifact(deps.db, id, input.publicOnly),
+    ]);
+    const found = matchFile(id, path, rows(files, FILE_ROW));
+    if (found !== undefined) return succeed(found);
+    return rows(visible, VISIBLE_ROW).length > 0 ? succeed({ kind: "absent" }) : NOT_FOUND;
+  });
+}
+
+const servedFiles = (deps: OperationDeps, input: LookupInput): D1PreparedStatement =>
+  selectServedFiles(deps.db, input.id, input.path.version, input.publicOnly, [input.path.file, input.path.directory]);
+
+/** The file the path names, else `directory` when only its `index.html` exists, among the rows found for both. */
+function matchFile(id: ArtifactId, path: ResolvedPath, found: readonly FileRow[]): FileLookup | undefined {
+  const file = found.find((row) => row.path === path.file);
+  if (file !== undefined) return { kind: "file", id, file: fileJson(file) };
+  if (path.directory !== null && found.some((row) => row.path === path.directory)) return { kind: "directory" };
+  return undefined;
 }
 
 /** A looked-up file's bytes, under the R2 timeout. */

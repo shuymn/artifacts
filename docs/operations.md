@@ -413,8 +413,9 @@ Logs below are the Worker's Workers Logs in the dashboard, kept 7 days on Worker
    after `off`, `404`.
 
 7. **Gallery CSP** (ISO-5). In the signed-in browser's developer tools, the responses of `/` and of `/no-such-page`
-   (404) carry `Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none';
-   form-action 'none'; frame-ancestors 'none'`, and the page loads its stylesheet and fonts without a CSP error.
+   (404) carry `Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self';
+   base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, and the page loads its stylesheet, fonts and icon
+   without a CSP error.
 
 8. **Logs** (DATA-1). In the logs: the probe's `artifact.created` and `artifact.changed` lines carry `"token":"check"`;
    a search for `art_` (the token prefix) and for `Bearer` finds nothing; filtering on `$cloudflare.$metadata.type =
