@@ -98,6 +98,15 @@ describe("grants", () => {
     expect(ran.stdout.split("\n")).toHaveLength(5);
   });
 
+  it("escapes C1 controls and line separators in --json, which JSON.stringify leaves raw", async () => {
+    const named = { ...OLDER, client_name: "Agent\u009b2K\u2028" };
+    const { fetch } = answering(async () => json(200, { grants: [named] }));
+    const ran = await cli(["grants", "--json"], { env: ENV, fetch });
+    expect(ran.status).toBe(0);
+    expect(ran.stdout).toContain('"client_name": "Agent\\u009b2K\\u2028"');
+    expect(JSON.parse(ran.stdout)).toEqual({ grants: [named] });
+  });
+
   it("prints nothing for an empty listing, and an empty list with --json", async () => {
     const { fetch } = answering(async () => json(200, { grants: [] }));
     expect(await cli(["grants"], { env: ENV, fetch })).toEqual({ status: 0, stdout: "", stderr: "" });
@@ -171,6 +180,18 @@ describe("revoke", () => {
       status: 1,
       stdout: "",
       stderr: `artifacts: ${message}\n`,
+    });
+  });
+});
+
+describe("revoke of an ID that starts with -", () => {
+  it("names -- in the advice to run it again", async () => {
+    const id = "-jHGD70yQ2ze0Ad6";
+    const { fetch } = answering(async () => json(503, { error: { code: "unavailable", message: "try again" } }));
+    expect(await cli(["revoke", "--", id], { env: ENV, fetch })).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: `artifacts: unavailable: the revocation may not have completed; run artifacts revoke -- ${id} again\n`,
     });
   });
 });

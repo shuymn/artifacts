@@ -436,7 +436,10 @@ const COMMANDS: Readonly<Record<string, Command>> = {
           );
         }
         if (error.status === 503) {
-          throw new CliError(`${error.code}: the revocation may not have completed; run artifacts revoke ${id} again`);
+          // An ID can start with "-", which the command line reads as an option unless "--" comes first.
+          throw new CliError(
+            `${error.code}: the revocation may not have completed; run artifacts revoke ${id.startsWith("-") ? "-- " : ""}${id} again`,
+          );
         }
         throw error;
       }
@@ -579,7 +582,12 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitStatus> 
       };
     },
     print: io.stdout,
-    json: (value) => io.stdout(`${JSON.stringify(value, null, 2)}\n`),
+    // JSON.stringify leaves C1 controls and line separators raw; as escapes the JSON means the same and a terminal
+    // shows them as text.
+    json: (value) =>
+      io.stdout(
+        `${JSON.stringify(value, null, 2).replaceAll(/[\u007f-\u009f\u2028\u2029]/gu, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)}\n`,
+      ),
   };
   try {
     await command.run(context);
