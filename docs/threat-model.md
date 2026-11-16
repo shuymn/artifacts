@@ -237,8 +237,7 @@ adversaries below, not untrusted users.
   token, an `Authorization` header, an Access JWT or cookie, file bytes, a title, a description or a path. Invocation
   logs are off. _Enforced (main)_ in `src/log.ts`. Pinned by log redaction (`src/log-redaction.test.ts`: every route and
   failure path, `/mcp` and its SDK refusals included) and source check (`src/source.test.ts`: `console` only in the
-  logging module; `wrangler.jsonc`). **Gap:** the gallery routes do not exist yet; their paths join the redaction
-  markers when they land.
+  logging module; `wrangler.jsonc`). **Gap:** the gallery's routes are not among the redaction markers yet.
 - **DATA-2: deployment values stay out of the repository.** `wrangler.jsonc` sets no variable, route or identifier;
   the deployment file is gitignored, and `API_TOKENS` is a secret. _Enforced (main)_ for `wrangler.jsonc`. Pinned by
   source check (`src/source.test.ts`) of `wrangler.jsonc` and the deployment example. **Gap:** the deployment example
