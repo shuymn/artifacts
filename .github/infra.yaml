@@ -113,6 +113,8 @@ spec:
         - actions/cache@*
         - actions/checkout@*
         - actions/create-github-app-token@*
+        - actions/download-artifact@*
+        - actions/upload-artifact@*
         - googleapis/release-please-action@*
         - jdx/mise-action@*
         - oven-sh/setup-bun@*
