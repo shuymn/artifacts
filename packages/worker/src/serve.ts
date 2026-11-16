@@ -59,6 +59,13 @@ export async function entityTag(file: FileJson): Promise<string> {
   return `"${hex}"`;
 }
 
+/**
+ * On every response with a body or a validator (design.md section 6): the runtime and Cloudflare compress by the
+ * request's `Accept-Encoding`, and the runtime adds no `Vary` of its own, so a cache would otherwise hand one client
+ * the encoding another asked for. Refusals, redirects and errors carry neither and go without it.
+ */
+const VARY = { Vary: "Accept-Encoding" } as const;
+
 /** RFC 9110 section 13.1.2: weak comparison against any listed tag, or `*`. */
 export function matchesETag(header: string | null, etag: string): boolean {
   if (header === null) return false;
@@ -67,20 +74,27 @@ export function matchesETag(header: string | null, etag: string): boolean {
 }
 
 /**
- * A file bundled with the Worker, with its host class's headers. It revalidates like a stored file (`no-cache` with an
- * ETag), and HEAD answers GET's headers without the body.
+ * Bytes the Worker holds (a file bundled with it, or a rendered gallery page), with an `ETag` over them and the headers
+ * given: its host class's, under which it revalidates like a stored file (`no-cache` with an ETag), or the app host's
+ * immutable ones for a fingerprinted gallery asset. A matching `If-None-Match` answers 304; HEAD answers GET's headers
+ * without the body.
  */
-export async function serveAsset(request: Request, asset: Asset, kind: BrowserClass): Promise<Response> {
+export async function serveAsset(
+  request: Request,
+  asset: Asset,
+  hostHeaders: Record<string, string>,
+): Promise<Response> {
   const etag = await assetTag(asset);
   if (matchesETag(request.headers.get("If-None-Match"), etag)) {
-    return new Response(null, { status: 304, headers: { ETag: etag, ...browserHeaders(kind) } });
+    return new Response(null, { status: 304, headers: { ETag: etag, ...VARY, ...hostHeaders } });
   }
   const body = typeof asset.body === "string" ? new TextEncoder().encode(asset.body) : asset.body.slice(0);
   const headers = {
     "Content-Type": asset.contentType,
     "Content-Length": String(body.byteLength),
     ETag: etag,
-    ...browserHeaders(kind),
+    ...VARY,
+    ...hostHeaders,
   };
   return new Response(request.method === "HEAD" ? null : body, { headers });
 }
@@ -110,7 +124,7 @@ export async function serveArtifact(
     const code = lookup.error.code;
     return plainResponse(kind, code === "not_found" ? 404 : code === "unavailable" ? 503 : 500);
   }
-  if (lookup.value.kind === "absent") return serveAsset(request, FAVICON, kind);
+  if (lookup.value.kind === "absent") return serveAsset(request, FAVICON, browserHeaders(kind));
   if (lookup.value.kind === "directory") {
     return new Response(null, {
       status: 308,
@@ -120,12 +134,13 @@ export async function serveArtifact(
   const file = lookup.value.file;
   const etag = await entityTag(file);
   if (matchesETag(request.headers.get("If-None-Match"), etag)) {
-    return new Response(null, { status: 304, headers: { ETag: etag, ...browserHeaders(kind) } });
+    return new Response(null, { status: 304, headers: { ETag: etag, ...VARY, ...browserHeaders(kind) } });
   }
   const headers = {
     "Content-Type": file.content_type,
     "Content-Length": String(file.size),
     ETag: etag,
+    ...VARY,
     ...browserHeaders(kind),
   };
   // A HEAD has the GET's headers and no body, so the object is not read.

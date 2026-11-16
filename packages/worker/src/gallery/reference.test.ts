@@ -1,13 +1,14 @@
 // The templates produce the reference pages' markup (docs/gallery/design.md: the reference pages are "the markup the
 // Worker's templates must produce"). Each page is rendered from the data its reference page shows and compared element
 // by element: tag, every attribute (links and times included) and the element's own text. Only the differences that
-// are on purpose are rewritten first: the stylesheet and icon links and the placeholder cursors.
+// are on purpose are rewritten first: the stylesheet and icon links, the font preloads and the placeholder cursors.
 import { describe, expect, it } from "vitest";
 
 import archivedHtml from "../../../../docs/gallery/reference/archived.html?raw";
 import artifactHtml from "../../../../docs/gallery/reference/artifact.html?raw";
 import indexHtml from "../../../../docs/gallery/reference/index.html?raw";
 import type { ArtifactJson, GalleryArtifact, GalleryList, ListedArtifact, VersionJson } from "../operations.ts";
+import { assetPath } from "./assets.ts";
 import { artifactPage, listPage, type Chrome } from "./pages.ts";
 import { decodeEntities, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
 
@@ -203,17 +204,25 @@ const ARTIFACT: GalleryArtifact = {
 };
 
 /**
- * The reference pages load Google Fonts and the repository's gallery.css and icons; the Worker serves them itself.
+ * The reference pages load Google Fonts and the repository's gallery.css and icons; the Worker serves them itself, at
+ * their fingerprinted paths.
  */
 const ASSET_LINKS = new Map([
   [
     "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
-    "/assets/fonts.css",
+    assetPath("fonts.css"),
   ],
-  ["../../../packages/worker/src/gallery/gallery.css", "/assets/gallery.css"],
+  ["../../../packages/worker/src/gallery/gallery.css", assetPath("gallery.css")],
   ["../../../packages/worker/src/gallery/favicon.ico", "/favicon.ico"],
-  ["../../../packages/worker/src/gallery/icon.svg", "/assets/icon.svg"],
+  ["../../../packages/worker/src/gallery/icon.svg", assetPath("icon.svg")],
 ]);
+
+const isPreload = (node: HtmlNode) => node.tag === "link" && node.attributes.get("rel") === "preload";
+
+/** The Worker preloads the fonts it serves; the reference pages, which load Google Fonts, preload none. */
+function withoutPreloads(node: HtmlNode): HtmlNode {
+  return { ...node, children: node.children.filter((child) => !isPreload(child)).map(withoutPreloads) };
+}
 
 /**
  * What the comparison sees of an element: its tag, its attributes (classes sorted), its own text runs (whitespace
@@ -276,7 +285,7 @@ describe("templates and reference pages", () => {
     expect(shape(want, ASSET_LINKS).children.map((html) => html.children.map((child) => child.tag))).toEqual([
       ["head", "body"],
     ]);
-    expect(shape(got, new Map(cursors))).toEqual(shape(want, ASSET_LINKS));
+    expect(shape(withoutPreloads(got), new Map(cursors))).toEqual(shape(want, ASSET_LINKS));
   });
 
   it.each(PAGES)(
