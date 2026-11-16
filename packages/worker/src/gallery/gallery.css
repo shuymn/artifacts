@@ -357,6 +357,7 @@ a:focus-visible,
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+  container-type: inline-size;
 }
 
 .info-row {
@@ -378,6 +379,22 @@ a:focus-visible,
 
 .info-row__link a {
   color: var(--color-accent);
+}
+
+/*
+ * Under 24rem of the list's width the value would get less than about twice the label's width beside it, down to none
+ * at the largest text sizes, so each label moves above its value.
+ */
+@container (width < 24rem) {
+  .info-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-1);
+  }
+
+  .info-row dt {
+    inline-size: auto;
+  }
 }
 
 /* Sections */
