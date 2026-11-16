@@ -409,9 +409,10 @@ every value, all of which the client chose (ISO-5). It shows:
   artifact;
 - a field for the publisher name, filled from the client's name (lowercased, runs of other characters turned into `-`,
   cut to 32 characters, `client` if empty), with its rule as persistent help above the input (`required`,
-  `pattern="[a-z0-9-]{1,32}"`, `maxlength="32"`, no autocorrection) and a message that `:user-invalid` reveals; the
+  `pattern="[a-z0-9\-]{1,32}"`, `maxlength="32"`, no autocorrection) and a message that `:user-invalid` reveals; the
   hidden handle; **Allow**, and **Deny** with `formnovalidate`. Without script, the browser's own validation names a
-  bad value on submit, and the persistent help is the field's description.
+  bad value on submit, and the persistent help is the field's description. The pattern escapes its `-`: browsers
+  compile `pattern` with the `v` flag, under which `[a-z0-9-]` is invalid and the browser skips the check.
 
 `POST /oauth/authorize` takes a form of at most 4 KiB (RES-1):
 
