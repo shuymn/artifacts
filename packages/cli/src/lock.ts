@@ -6,7 +6,7 @@
  * gone, and only after linking that lock to a name made of the holder's token, which exactly one waiter can do.
  */
 import { randomBytes } from "node:crypto";
-import { link, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, link, readFile, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 
 import { CliError, codeOf } from "./errors.ts";
@@ -118,6 +118,8 @@ export async function withLock<T>(path: string, options: LockOptions, body: () =
   const staged = `${path}.${token}.tmp`;
   await writeFile(staged, `${JSON.stringify({ token, pid: process.pid, host })}\n`, { flag: "wx", mode: 0o600 });
   try {
+    // The umask narrows the mode given at creation; a lock its holder cannot read is one it cannot release.
+    await chmod(staged, 0o600);
     const deadline = Date.now() + options.waitMs;
     for (;;) {
       try {

@@ -126,6 +126,17 @@ describe("PL-50: refreshes at once", () => {
   });
 });
 
+describe("the lock's file", () => {
+  it("is readable by its holder, which releases it, under a umask without the owner's read bit", async () => {
+    const { standIn, env, lock } = await expired();
+    const previous = process.umask(0o477);
+    const ran = await list(env).finally(() => process.umask(previous));
+    expect(ran.status).toBe(0);
+    expect(standIn.count("POST /oauth/token refresh_token")).toBe(1);
+    expect(await exists(lock)).toBe(false);
+  });
+});
+
 describe("PL-50: a holder that may be alive", () => {
   it("keeps the lock while stopped before its rename: the waiter fails naming it, and the holder then writes", async () => {
     const { standIn, credentials, env, lock } = await expired();
