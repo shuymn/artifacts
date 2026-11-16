@@ -1,11 +1,12 @@
 name: Update mise tools
 
-# Re-resolve the major-version ranges in mise.toml and propose the new
-# mise.lock. Renovate cannot update these ranges: it reads a range such as "1"
-# as version 1.0.0 and drops the update as a downgrade. `mise lock --bump` only
-# reads release metadata and writes the lockfile; it never installs or runs the
-# tools, so the App token is created in the same job after it. Only tools whose
-# version changes are re-locked, so checksums of unchanged versions stay pinned.
+# Re-resolve the major-version ranges in mise.toml and .node-version and propose
+# the new mise.lock. Renovate cannot update these ranges: it reads a range such
+# as "1" as version 1.0.0 and drops the update as a downgrade. `mise lock
+# --bump` only reads release metadata and writes the lockfile; it never installs
+# or runs the tools, so the App token is created in the same job after it. Only
+# tools whose version changes are re-locked, so checksums of unchanged versions
+# stay pinned.
 
 on:
   schedule:

@@ -1,7 +1,8 @@
 # Each tool tracks its major version; mise.lock pins the exact versions and
-# checksums, and .github/workflows/mise-update.yml advances it.
+# checksums, and .github/workflows/mise-update.yml advances it. Node.js's major
+# is in .node-version (see idiomatic_version_file_enable_tools below), which
+# Workers Builds reads too, so the deployment builds with the same major.
 [tools]
-node = "24"
 pnpm = "12"
 # Linters the shared security and gha workflows also run; the git hooks use
 # these so local checks match CI.
@@ -13,5 +14,7 @@ ghalint = "1"
 lockfile = true
 lockfile_platforms = ["macos-arm64", "linux-x64"]
 locked = true
+# Read Node.js's version from .node-version; mise.lock still pins it.
+idiomatic_version_file_enable_tools = ["node"]
 # Matches pnpm-workspace.yaml's minimumReleaseAge and the shared Renovate preset's.
 minimum_release_age = "3d"
