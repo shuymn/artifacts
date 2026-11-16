@@ -10,16 +10,16 @@ Values in angle brackets are placeholders, and the hosts below are the examples 
 and `-s.example-content.net` for content on its own registrable domain. `<team>` is the Zero Trust team name,
 `<DATABASE_NAME>` the D1 database, `<BUCKET_NAME>` the R2 bucket. None of them is written in this repository (P7).
 
-Commands run from `packages/worker`, with the tools of `mise.toml`: there `pnpm exec wrangler` is the Wrangler of the
-lockfile and `wrangler.jsonc` names the Worker. A block that starts elsewhere says so. `artifacts` is the CLI, installed
-as in section 5. A claim about Cloudflare or another product links the page that states it; **Unconfirmed** marks one
-the documentation does not state.
+Commands run from `packages/worker`, with the tools mise installs from `mise.toml` and `.node-version`: there
+`pnpm exec wrangler` is the Wrangler of the lockfile and `wrangler.jsonc` names the Worker. A block that starts elsewhere
+says so. `artifacts` is the CLI, installed as in section 5. A claim about Cloudflare or another product links the page
+that states it; **Unconfirmed** marks one the documentation does not state.
 
 ## How a change reaches the deployment
 
 ```text
 main ──(release-please keeps a release PR open)──> merge the release PR ──> tag vX.Y.Z and GitHub release
-     ──(.github/workflows/release.yml fast-forwards)──> release ──(Workers Builds)──> pnpm run deploy
+     ──(.github/workflows/release.yml fast-forwards)──> release ──(Workers Builds)──> scripts/deploy.ts
 ```
 
 - `main` takes every change, dependency updates included, and is never deployed.
@@ -132,11 +132,11 @@ limited to 5 KB and a Worker to 64 of them
 the values is a credential, so a plain build variable, which the dashboard shows again, is enough; a build secret works
 the same.
 
-`pnpm run deploy` refuses to start, naming each problem, when the values are missing, set in both places, not JSONC, or
-leave a value empty, and when a variable fails the Worker's own configuration check (HOST-2), a host is a `localhost`
-name or has a port (ACC-2), a key belongs in `wrangler.jsonc`, `API_TOKENS` appears, a route would serve hosts that are
-not the deployment's, or a route repeats another, is outside its `zone_name`, or sets both `zone_name` and `zone_id`.
-The committed example is refused for its empty values.
+`node scripts/deploy.ts` refuses to start, naming each problem, when the values are missing, set in both places, not
+JSONC, or leave a value empty, and when a variable fails the Worker's own configuration check (HOST-2), a host is a
+`localhost` name or has a port (ACC-2), a key belongs in `wrangler.jsonc`, `API_TOKENS` appears, a route would serve
+hosts that are not the deployment's, or a route repeats another, is outside its `zone_name`, or sets both `zone_name`
+and `zone_id`. The committed example is refused for its empty values.
 
 ## 3. Deploying
 
@@ -146,18 +146,26 @@ Connect the repository after the first release exists (section 6), from **Worker
 the GitHub repository ([Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)), or later from the Worker's
 **Settings → Builds → Connect**. The GitHub App that Cloudflare installs needs access to this repository only.
 
-| Setting                                  | Value                                                      | Why                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Worker name                              | `artifacts`                                                | the build fails unless it is the `name` in the root directory's `wrangler.jsonc` ([name requirement](https://developers.cloudflare.com/workers/ci-cd/builds/troubleshoot/#workers-name-requirement))                                                                                                                                                                                                               |
-| Branch control                           | production branch `release`; **Enable Preview Builds** off | only releases deploy; a preview build would run `wrangler preview` for every other branch ([build branches](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/))                                                                                                                                                                                                                               |
-| Root directory                           | `packages/worker`                                          | where `wrangler.jsonc` is and the commands run ([monorepos](https://developers.cloudflare.com/workers/ci-cd/builds/advanced-setups/#monorepos))                                                                                                                                                                                                                                                                    |
-| Build command                            | `pnpm install --frozen-lockfile`                           | with `SKIP_DEPENDENCY_INSTALL`, the install is explicit ([build image](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/#skip-dependency-install)). **Unconfirmed:** how the automatic install treats a pnpm workspace whose lockfile is above the root directory; pnpm run inside a workspace package installs the whole workspace from the root's lockfile                                     |
-| Deploy command                           | `pnpm run deploy`                                          | the deploy script below; Builds uses the Wrangler of `package.json` ([configuration](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/))                                                                                                                                                                                                                                                       |
-| Build variable `ARTIFACTS_DEPLOY_JSONC`  | the deployment values (section 2)                          | build variables reach the build, not the Worker at run time (configuration page). **Unconfirmed:** that the page's "build" includes the deploy command; the script names the variable if it is missing                                                                                                                                                                                                             |
-| Build variable `SKIP_DEPENDENCY_INSTALL` | `1`                                                        | see the build command                                                                                                                                                                                                                                                                                                                                                                                              |
-| Build variable `PNPM_VERSION`            | the pnpm version in `mise.lock`                            | Builds runs pnpm through Corepack and defaults to pnpm 9, older than the pnpm this repository pins, whose workspace settings (`allowBuilds`, `minimumReleaseAge`) it may not honor; with no `packageManager` field, `PNPM_VERSION` chooses ([pnpm version selection](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/#pnpm-version-selection)). Update it when `mise.lock` moves to a new major |
-| Build variable `NODE_VERSION`            | `24`                                                       | the deploy script runs as TypeScript with Node 24's type stripping; 24 is the image's default today ([build image](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/))                                                                                                                                                                                                                           |
-| API token                                | a token of your own, see below                             | the token Builds creates has Workers Scripts, KV and R2 edit, Workers Routes edit and account read, but no D1 permission ([API token](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/#api-token)), and the deploy applies D1 migrations                                                                                                                                                      |
+| Setting                                  | Value                                                      | Why                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Worker name                              | `artifacts`                                                | the build fails unless it is the `name` in the root directory's `wrangler.jsonc` ([name requirement](https://developers.cloudflare.com/workers/ci-cd/builds/troubleshoot/#workers-name-requirement))                                                                                                                                                                                                                                                                                                                           |
+| Branch control                           | production branch `release`; **Enable Preview Builds** off | only releases deploy; a preview build would run `wrangler preview` for every other branch ([build branches](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/))                                                                                                                                                                                                                                                                                                                                           |
+| Root directory                           | `packages/worker`                                          | where `wrangler.jsonc` is and the commands run ([monorepos](https://developers.cloudflare.com/workers/ci-cd/builds/advanced-setups/#monorepos))                                                                                                                                                                                                                                                                                                                                                                                |
+| Build command                            | `node scripts/install.ts`                                  | installs the workspace with the pnpm version of `mise.lock`: `npx --yes pnpm@<version> install --frozen-lockfile` at the repository root, so the image's pnpm (Corepack's default, 9.x) never runs the install. It first checks that Node is the version of `.node-version`, and refuses to start, naming the problem, when either version cannot be read or Node differs                                                                                                                                                      |
+| Deploy command                           | `node scripts/deploy.ts`                                   | the deploy script below; it runs the Wrangler of the lockfile from `node_modules/.bin` and needs no pnpm                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Build variable `ARTIFACTS_DEPLOY_JSONC`  | the deployment values (section 2)                          | build variables reach the build, not the Worker at run time (configuration page). **Unconfirmed:** that the page's "build" includes the deploy command; the script names the variable if it is missing                                                                                                                                                                                                                                                                                                                         |
+| Build variable `SKIP_DEPENDENCY_INSTALL` | `1`                                                        | without it, Builds installs the whole workspace with its own pnpm before the build command, even with a root directory set (a build log in [workers-sdk#10941](https://github.com/cloudflare/workers-sdk/issues/10941) shows `Installing project dependencies: pnpm install --frozen-lockfile` and `Scope: all 26 workspace projects`); the variable turns that off ([build image](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)). The build command refuses to run in Builds (`WORKERS_CI`) without it |
+| API token                                | a token of your own, see below                             | the token Builds creates has Workers Scripts, KV and R2 edit, Workers Routes edit and account read, but no D1 permission ([API token](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/#api-token)), and the deploy applies D1 migrations                                                                                                                                                                                                                                                                  |
+
+The dashboard holds no tool version; each build uses those of the commit it builds:
+
+- **Node.js:** Builds reads `.node-version` from the root directory
+  ([build image](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)). `packages/worker/.node-version`
+  is a symbolic link to the repository's `.node-version`, which mise reads too. It holds the major only: the mise update
+  workflow advances `mise.lock` within it, and Builds picks the release of that major. **Unconfirmed:** that the
+  checkout of Builds keeps the link. If it does not, Builds uses its default Node, and the build command refuses once
+  that is not the major of `.node-version`.
+- **pnpm:** the version of `mise.lock`, which the build command reads and the mise update workflow advances.
 
 The API token is a user token with the permissions of the generated one plus **D1 edit** on the account.
 **Unconfirmed:** the exact permission names in the token form, and whether creating the Custom Domains needs more than
@@ -168,7 +176,7 @@ Cloudflare's documentation for Deploy to Cloudflare buttons tells a project to a
 ([deploy buttons](https://developers.cloudflare.com/workers/platform/deploy-buttons/)), which is what this one does.
 **Unconfirmed:** a statement in the Builds documentation that it does not apply them.
 
-### What `pnpm run deploy` does
+### What `node scripts/deploy.ts` does
 
 `scripts/deploy.ts` reads the deployment values, checks them (section 2) and merges them into `wrangler.jsonc` as
 `.wrangler-deploy-<random>.json` next to it, removed on every exit. Then, each step stopping the rest when it fails:
@@ -201,9 +209,9 @@ Builds is unavailable. Deploy what `release` holds, so the next build does not r
 
 ```sh
 git fetch origin && git switch --detach origin/release
-pnpm install --frozen-lockfile                      # the whole workspace, from the lockfile at the root
+node scripts/install.ts                             # the whole workspace, with the pnpm of mise.lock
 pnpm exec wrangler login
-pnpm run deploy
+node scripts/deploy.ts
 git switch -                                        # back to the branch you were on
 ```
 
@@ -298,7 +306,9 @@ export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<toke
    action. Until then the release workflow fails on every push to `main`, since the action is not allowed; the next
    push after the apply runs it.
 4. Merge the first release PR; the release workflow creates `release` at its tag.
-5. Connect Workers Builds (section 3); its first build deploys.
+5. Connect Workers Builds (section 3); its first build deploys. Its log shows Node of the major in `.node-version`
+   among the tools Builds detected, no `Installing project dependencies` before the build command, and
+   `install: pnpm <version> from mise.lock` followed by pnpm's `Done in … using pnpm v<version>`.
 6. Generate a token per agent and put `API_TOKENS` (section 4); configure the clients (section 5).
 7. Run the checklist (section 7).
 

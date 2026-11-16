@@ -35,8 +35,8 @@ export default defineConfig({
         },
       },
       {
-        // The deployment script, in Node as it runs.
-        test: { name: "deploy", include: ["scripts/**/*.test.ts"], environment: "node" },
+        // The build and deployment scripts, in Node as they run.
+        test: { name: "scripts", include: ["scripts/**/*.test.ts"], environment: "node" },
       },
     ],
   },

@@ -12,7 +12,10 @@ Status: under construction.
 
 ## Development
 
-Tool versions come from `mise.toml`, with exact versions pinned in `mise.lock`.
+Tool versions come from `mise.toml` and, for Node.js, `.node-version` (which Workers Builds reads too), with exact
+versions pinned in `mise.lock`; the daily mise update workflow advances them within each major. A new Node.js major
+moves by hand: change `.node-version` and `engines.node` in `package.json` and `packages/cli/package.json`, then run
+`mise lock`.
 
 ```sh
 mise install                # Node.js, pnpm and the workflow linters

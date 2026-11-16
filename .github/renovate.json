@@ -4,6 +4,10 @@
   "mise": {
     "enabled": false
   },
+  "nodenv": {
+    "description": "Node.js's major in .node-version moves by hand, with engines.node and `mise lock` (README); the mise update workflow advances mise.lock within it",
+    "enabled": false
+  },
   "separateMultipleMinor": false,
   "separateMinorPatch": false,
   "packageRules": [
