@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Deploys the Worker with the deployment values that stay out of the repository (design.md section 11; DATA-2). Node
-// runs this file and strips its types. Workers Builds runs it as the deploy command, `pnpm run deploy`, with the values
-// in the build variable ARTIFACTS_DEPLOY_JSONC; on the owner's machine, the same command reads the gitignored
+// runs this file and strips its types. Workers Builds runs it as the deploy command, `node scripts/deploy.ts`, with the
+// values in the build variable ARTIFACTS_DEPLOY_JSONC; on the owner's machine, the same command reads the gitignored
 // wrangler.deploy.jsonc instead. It takes no arguments. See deploy-run.ts for the steps and docs/operations.md for use.
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
