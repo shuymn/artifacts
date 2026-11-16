@@ -409,9 +409,10 @@ every value, all of which the client chose (ISO-5). It shows:
   artifact;
 - a field for the publisher name, filled from the client's name (lowercased, runs of other characters turned into `-`,
   cut to 32 characters, `client` if empty), with its rule as persistent help above the input (`required`,
-  `pattern="[a-z0-9-]{1,32}"`, `maxlength="32"`, no autocorrection) and a message that `:user-invalid` reveals; the
+  `pattern="[a-z0-9\-]{1,32}"`, `maxlength="32"`, no autocorrection) and a message that `:user-invalid` reveals; the
   hidden handle; **Allow**, and **Deny** with `formnovalidate`. Without script, the browser's own validation names a
-  bad value on submit, and the persistent help is the field's description.
+  bad value on submit, and the persistent help is the field's description. The pattern escapes its `-`: browsers
+  compile `pattern` with the `v` flag, under which `[a-z0-9-]` is invalid and the browser skips the check.
 
 `POST /oauth/authorize` takes a form of at most 4 KiB (RES-1):
 
@@ -890,13 +891,13 @@ documents taking SVG at that path. The SVG is cached as immutable like the other
 
 **The consent page** (section 7) is the app host's one form and a new screen of the design system. Its text field,
 buttons and notice are new components, so it goes through [gallery/design.md](gallery/design.md)'s change rule: the
-design file (`gallery/gallery.pen`) first, then the tokens, the stylesheet and a reference page,
-`reference/consent.html`, with the ground rule
-"no forms" naming this form as its one exception. The other ground rules hold: dark only, text that scales with the
-user's setting, no script. The header carries the brand alone, since the gallery's tabs show counts from D1. The page
-shows the client and the request as an `info` list, the publisher name with its label, help and message, then
-**Allow** and **Deny**; the field and the buttons take the focus ring links take. Its error page has the same frame,
-and every value on both is escaped by the gallery's template (ISO-5).
+design file (`gallery/gallery.pen`) first, then the tokens, the stylesheet and the reference pages,
+`reference/consent.html` and `reference/consent-error.html`, with the ground rule "no forms" naming this form as its
+one exception. The other ground rules hold: dark only, text that scales with the user's setting, no script. The header
+carries the brand alone, since the gallery's tabs show counts from D1. The page shows the client and the request as an
+`info` list, the publisher name with its label, help and message, then **Allow** and **Deny**; the field and the
+buttons take the focus ring links take. Its error page has the same frame, and every value on both is escaped by the
+gallery's template (ISO-5).
 
 The consent page is the one page of the app host without the pages' caching: it, its error pages and the redirects
 that end it are `Cache-Control: no-store` without `ETag` or `Vary`, as the library's consent helpers make theirs. Each
