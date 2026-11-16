@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { afterEach } from "vitest";
 
 import type { Fetch, Timeouts } from "./api.ts";
-import { run } from "./cli.ts";
+import { run, type SignInOptions } from "./cli.ts";
 
 const created: string[] = [];
 const servers: Server[] = [];
@@ -53,6 +53,10 @@ export type RunOptions = {
   readonly fetch?: Fetch;
   readonly timeouts?: Timeouts;
   readonly pageSize?: number;
+  readonly platform?: NodeJS.Platform;
+  /** Plays the browser; by default nothing opens, so a test never starts the system's opener. */
+  readonly openBrowser?: (url: string) => void;
+  readonly signIn?: Partial<SignInOptions>;
 };
 
 const noNetwork: Fetch = () => Promise.reject(new Error("no fetch in this test"));
@@ -72,6 +76,9 @@ export async function cli(argv: readonly string[], options: RunOptions = {}): Pr
     fetch: options.fetch ?? noNetwork,
     ...(options.timeouts === undefined ? {} : { timeouts: options.timeouts }),
     ...(options.pageSize === undefined ? {} : { pageSize: options.pageSize }),
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
+    openBrowser: options.openBrowser ?? (() => undefined),
+    ...(options.signIn === undefined ? {} : { signIn: options.signIn }),
   });
   return { status, stdout, stderr };
 }

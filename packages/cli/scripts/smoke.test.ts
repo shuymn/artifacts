@@ -1,12 +1,13 @@
 // Smoke tests of the release binary: the archive scripts/build.ts made for this host is unpacked, and the binary in it
-// runs as a user runs it, against a local server standing in for the API. `pnpm --filter @artifacts/cli run build`
-// makes the archive first; CI runs these on each platform's own runner (.github/workflows/cli-binaries.yml).
+// runs as a user runs it, against a local server standing in for the API and, for `login`, its OAuth side, with a
+// stand-in for the system's opener on PATH playing the browser. `pnpm --filter @artifacts/cli run build` makes the
+// archive first; CI runs these on each platform's own runner (.github/workflows/cli-binaries.yml).
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -14,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import rootPackage from "../../../package.json" with { type: "json" };
 import { encodePath } from "../src/api.ts";
 import { HELP } from "../src/cli.ts";
+import { exists, StandIn } from "../src/login-test-support.ts";
 import { artifact, ID, local, tempDir, TOKEN, version, writeTree, type Ran } from "../src/test-support.ts";
 import { archiveName, binaryName, tarCommand, target } from "./release.ts";
 
@@ -179,5 +181,105 @@ describe("the binary", () => {
       `GET /v1/artifacts/${ID}`,
       ...[...stored.keys()].map((path) => `GET /v1/artifacts/${ID}/versions/1/files/${encodePath(path)}`),
     ]);
+  });
+});
+
+/** A configuration directory holding a credentials file the CLI must not read: garbage, readable by anyone. */
+async function unreadableLogin(): Promise<string> {
+  const home = await tempDir();
+  await mkdir(join(home, "artifacts"), { recursive: true });
+  const file = join(home, "artifacts", "credentials.json");
+  await writeFile(file, "not a stored login");
+  await chmod(file, 0o644);
+  return home;
+}
+
+describe("the credential", () => {
+  it("is ARTIFACTS_TOKEN when it is set, and a credentials file placed beforehand is not read", async () => {
+    const seen: (string | undefined)[] = [];
+    const env = await local((request, response) => {
+      seen.push(request.headers.authorization);
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ artifacts: [], next_cursor: null }));
+    });
+    const ran = await artifacts(["list"], { env: { ...env, XDG_CONFIG_HOME: await unreadableLogin() } });
+    expect(ran).toEqual({ status: 0, stdout: "", stderr: "" });
+    expect(seen).toEqual([`Bearer ${TOKEN}`]);
+  });
+});
+
+describe.runIf(process.platform === "win32")("on Windows", () => {
+  it("refuses login and logout, naming ARTIFACTS_TOKEN", async () => {
+    const env = { ARTIFACTS_API_URL: "https://artifacts-api.example.com", XDG_CONFIG_HOME: await tempDir() };
+    for (const command of ["login", "logout"]) {
+      const ran = await artifacts([command], { env });
+      expect(ran.status).toBe(1);
+      expect(ran.stderr).toContain(`${command} is not offered on Windows`);
+      expect(ran.stderr).toContain("set ARTIFACTS_TOKEN to an API token");
+    }
+  });
+
+  it("without ARTIFACTS_TOKEN names only it, without reading a credentials file", async () => {
+    const env = { ARTIFACTS_API_URL: "https://artifacts-api.example.com", XDG_CONFIG_HOME: await unreadableLogin() };
+    expect(await artifacts(["list"], { env })).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: set ARTIFACTS_TOKEN to an API token\n",
+    });
+  });
+});
+
+/** The URL the opener stand-in was given, once it has written all of it (the last parameter is `resource`). */
+async function openedUrl(path: string): Promise<string> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const text = (await exists(path)) ? await readFile(path, "utf8") : "";
+    if (text.includes("&resource=")) return text;
+    if (Date.now() > deadline) throw new Error("the opener was not run");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+describe.runIf(process.platform !== "win32")("login", () => {
+  it("signs in through the system's opener, refreshes for a command and signs out", async () => {
+    const standIn = await StandIn.start();
+    // Tokens that expire within a minute: the next command refreshes them first.
+    standIn.expiresIn = 30;
+    const home = await tempDir();
+    const bin = await tempDir();
+    const opened = join(bin, "opened");
+    const opener = join(bin, process.platform === "darwin" ? "open" : "xdg-open");
+    await writeFile(opener, `#!/bin/sh\nprintf '%s' "$1" > "${opened}"\n`);
+    await chmod(opener, 0o755);
+    const env = {
+      ARTIFACTS_API_URL: standIn.origin,
+      XDG_CONFIG_HOME: home,
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+    };
+
+    const signingIn = artifacts(["login"], { env });
+    const url = await openedUrl(opened);
+    standIn.approve(url);
+    const signedIn = await signingIn;
+    expect(signedIn).toMatchObject({ status: 0, stdout: `signed in to ${standIn.origin}\n` });
+    expect(signedIn.stderr).toContain(url);
+    const file = join(home, "artifacts", "credentials.json");
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect((await stat(join(home, "artifacts"))).mode & 0o777).toBe(0o700);
+
+    expect(await artifacts(["list"], { env })).toEqual({ status: 0, stdout: "", stderr: "" });
+    expect(standIn.count("POST /oauth/token refresh_token")).toBe(1);
+
+    const grant = (await readFile(file, "utf8")).match(/"access_token": "owner:([^:]+):/)?.[1];
+    expect(await artifacts(["logout"], { env })).toEqual({
+      status: 0,
+      stdout: `signed out of ${standIn.origin}\n`,
+      stderr: "",
+    });
+    expect(standIn.requests.at(-1)).toBe(`DELETE /v1/grants/${grant}`);
+    expect(standIn.grants.size).toBe(0);
+    const list = await artifacts(["list"], { env });
+    expect(list.status).toBe(1);
+    expect(list.stderr).toContain("sign in with artifacts login");
   });
 });

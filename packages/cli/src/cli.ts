@@ -7,12 +7,42 @@ import { parseArgs } from "node:util";
 
 import rootPackage from "../../../package.json" with { type: "json" };
 import { Api, ApiError, TIMEOUTS, type ArtifactJson, type ArtifactVersion, type Fetch, type Timeouts } from "./api.ts";
-import { readConfig, type Environment } from "./config.ts";
+import { readConfig, readOrigin, SET_TOKEN_OR_SIGN_IN, storesLogin, type Config, type Environment } from "./config.ts";
 import { CliError, EXIT, UsageError, type ExitStatus } from "./errors.ts";
+import { LOCK_OPTIONS, type LockBarriers } from "./lock.ts";
+import { login, logout, systemOpener, type LoginContext } from "./login.ts";
+import { OAUTH_REQUEST_MS } from "./oauth.ts";
 import { create, listAll, update } from "./publish.ts";
 import { pull } from "./pull.ts";
+import {
+  StaticCredential,
+  StoredLogin,
+  type Credential,
+  type SessionBarriers,
+  type SessionContext,
+} from "./session.ts";
+import { Store, storeDirectory, type StoreBarriers } from "./store.ts";
 import { generateToken } from "./token.ts";
 import { localFiles } from "./tree.ts";
+
+/** The timing of `login`, `logout`, a refresh and the stored login's lock, and the barriers tests hold them at. */
+export type SignInOptions = {
+  /** Every request of `login`, `logout` and a refresh. */
+  readonly requestMs: number;
+  /** How long `login` waits for the browser's callback. */
+  readonly callbackMs: number;
+  readonly lockWaitMs: number;
+  readonly lockPollMs: number;
+  readonly barriers: LockBarriers & StoreBarriers & SessionBarriers;
+};
+
+export const SIGN_IN: SignInOptions = {
+  requestMs: OAUTH_REQUEST_MS,
+  callbackMs: 5 * 60_000,
+  lockWaitMs: LOCK_OPTIONS.waitMs,
+  lockPollMs: LOCK_OPTIONS.pollMs,
+  barriers: {},
+};
 
 export type Io = {
   readonly env: Environment;
@@ -22,6 +52,12 @@ export type Io = {
   readonly timeouts?: Timeouts;
   /** Artifacts per listing page; the API's largest by default. */
   readonly pageSize?: number;
+  /** The platform, which decides whether a login is stored; this process's by default. */
+  readonly platform?: NodeJS.Platform;
+  /** Opens the authorization URL in the browser; the system's opener by default. */
+  readonly openBrowser?: (url: string) => void;
+  readonly signIn?: Partial<SignInOptions>;
+  readonly now?: () => number;
 };
 
 /** The release version: the root package's, which `bun build --compile` inlines into the binary. */
@@ -33,7 +69,25 @@ const AUTHORING_RULE =
   "%5C). A root-relative or absolute link to the artifact's own host loads the latest version's file when an older\n" +
   "version is viewed.";
 
-export const HELP = `Usage: artifacts <command> [options]
+/** The commands and configuration of the stored login, which only a platform that stores one offers. */
+const LOGIN_COMMANDS = `
+  login                               Sign in through the browser with OAuth and store the login for
+                                      ARTIFACTS_API_URL's origin; commands use it while ARTIFACTS_TOKEN is unset.
+  logout                              Revoke the stored login's grant, then remove the login.`;
+
+const CREDENTIAL_LINES = {
+  login: `  ARTIFACTS_TOKEN     An API token. It is sent as a bearer token and never printed. While it is set, commands
+                      use it and do not read the stored login.
+  XDG_CONFIG_HOME     login stores its tokens in $XDG_CONFIG_HOME/artifacts/credentials.json
+                      (~/.config/artifacts/ when unset), readable by the owner only and never printed.`,
+  token: `  ARTIFACTS_TOKEN     An API token. It is sent as a bearer token and never printed. This platform keeps no
+                      stored login, so every command needs it.`,
+};
+
+/** The help text; on Windows, without `login` and `logout` (design.md section 9). */
+export function helpText(platform: NodeJS.Platform): string {
+  const logins = storesLogin(platform);
+  return `Usage: artifacts <command> [options]
 
 Publishes HTML pages ("artifacts") to an artifacts host through its REST API. Each artifact has its own origin;
 every version needs index.html at its root.
@@ -53,7 +107,9 @@ Commands:
   public <id> on|off                  Serve every version at the artifact's public URL without sign-in, or stop.
   archive <id> on|off|auto            Archive the artifact, keep it out of the archive, or archive it by age.
   delete <id>                         Delete the artifact: every URL answers 404.
-  token <name>                        Generate an API token. Prints the token once, then its API_TOKENS entry.
+  token <name>                        Generate an API token. Prints the token once, then its API_TOKENS entry.${
+    logins ? LOGIN_COMMANDS : ""
+  }
   help                                Print this text.
   --version                           Print the CLI's version.
 
@@ -62,7 +118,7 @@ Options:
 
 Configuration (environment):
   ARTIFACTS_API_URL   The API origin, such as https://artifacts-api.example.com (http only for localhost).
-  ARTIFACTS_TOKEN     An API token. It is sent as a bearer token and never printed.
+${logins ? CREDENTIAL_LINES.login : CREDENTIAL_LINES.token}
 
 Directories:
   - Every regular file below <dir> is published under its relative path, /-separated, in NFC.
@@ -81,6 +137,10 @@ secrets in an artifact.
 
 Exit status: 0 on success, 1 on an error, 2 on a usage error.
 `;
+}
+
+/** This process's help text. */
+export const HELP = helpText(process.platform);
 
 const OPTIONS = {
   id: { type: "string" },
@@ -99,6 +159,8 @@ type Context = {
   readonly args: readonly string[];
   readonly values: ReturnType<typeof parse>["values"];
   readonly api: () => Api;
+  /** What `login` and `logout` work with; refused where no login is stored. */
+  readonly signIn: (command: string) => LoginContext;
   readonly print: (text: string) => void;
   readonly json: (value: unknown) => void;
 };
@@ -295,13 +357,33 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       );
     },
   },
+  login: {
+    usage: "login",
+    args: 0,
+    options: [],
+    async run({ io, signIn }) {
+      const token = io.env.ARTIFACTS_TOKEN;
+      await login(signIn("login"), token !== undefined && token !== "");
+    },
+  },
+  logout: {
+    usage: "logout",
+    args: 0,
+    options: [],
+    async run({ signIn }) {
+      await logout(signIn("logout"));
+    },
+  },
 };
 
-/** The message for an error, without the configured token should any text ever carry it. */
-function errorText(error: unknown, token: string | undefined): string {
+/** The message for an error, without any token the command holds should any text ever carry one. */
+function errorText(error: unknown, platform: NodeJS.Platform, secrets: ReadonlySet<string>): string {
   let text: string;
   if (error instanceof ApiError) {
-    const hint = error.status === 401 ? " (check ARTIFACTS_TOKEN)" : "";
+    const where = storesLogin(platform)
+      ? "check ARTIFACTS_TOKEN, or sign in again with artifacts login"
+      : "check ARTIFACTS_TOKEN";
+    const hint = error.status === 401 ? ` (${where})` : "";
     text = `${error.code}: ${error.message}${hint}${issueLines(error)}`;
   } else if (error instanceof CliError) {
     text = error.message;
@@ -310,7 +392,9 @@ function errorText(error: unknown, token: string | undefined): string {
   } else {
     text = "unexpected error";
   }
-  return token === undefined || token === "" ? text : text.replaceAll(token, "[token]");
+  // Longest first, so a token that holds another is replaced whole.
+  for (const secret of [...secrets].toSorted((a, b) => b.length - a.length)) text = text.replaceAll(secret, "[token]");
+  return text;
 }
 
 function parse(argv: readonly string[]) {
@@ -318,8 +402,11 @@ function parse(argv: readonly string[]) {
 }
 
 export async function run(argv: readonly string[], io: Io): Promise<ExitStatus> {
+  const platform = io.platform ?? process.platform;
+  const secrets = new Set<string>();
+  if (io.env.ARTIFACTS_TOKEN !== undefined && io.env.ARTIFACTS_TOKEN !== "") secrets.add(io.env.ARTIFACTS_TOKEN);
   const fail = (error: unknown): ExitStatus => {
-    io.stderr(`artifacts: ${errorText(error, io.env.ARTIFACTS_TOKEN)}\n`);
+    io.stderr(`artifacts: ${errorText(error, platform, secrets)}\n`);
     return error instanceof CliError ? error.exitStatus : EXIT.failure;
   };
   // Only alone: `get` and `pull` take `--version <n>`.
@@ -335,7 +422,7 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitStatus> 
   }
   const [name, ...args] = parsed.positionals;
   if (parsed.values.help === true || name === undefined || name === "help") {
-    io.stdout(HELP);
+    io.stdout(helpText(platform));
     return EXIT.ok;
   }
   const command = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined;
@@ -346,12 +433,56 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitStatus> 
     const problem = extra === undefined ? "wrong number of arguments" : `${name} does not take --${extra}`;
     return fail(new UsageError(`${problem}; usage: artifacts ${command.usage}`));
   }
+  const options = { ...SIGN_IN, ...io.signIn };
+  /** The stored login of `origin`; undefined when the environment names no directory for it. */
+  const session = (origin: string): SessionContext | undefined => {
+    const directory = storeDirectory(io.env);
+    if (directory === undefined) return undefined;
+    const lock = { waitMs: options.lockWaitMs, pollMs: options.lockPollMs, barriers: options.barriers };
+    return {
+      origin,
+      store: new Store(directory, lock, options.barriers),
+      fetch: io.fetch,
+      requestMs: options.requestMs,
+      now: io.now ?? Date.now,
+      secrets,
+      barriers: options.barriers,
+    };
+  };
+  const credentialFor = (config: Config): Credential => {
+    if (config.credential.kind === "token") return new StaticCredential(config.credential.token);
+    const stored = session(config.apiOrigin);
+    if (stored === undefined) throw new CliError(SET_TOKEN_OR_SIGN_IN);
+    return new StoredLogin(stored);
+  };
   let api: Api | undefined;
   const context: Context = {
     io,
     args,
     values: parsed.values,
-    api: () => (api ??= new Api(readConfig(io.env), io.fetch, io.timeouts ?? TIMEOUTS)),
+    api: () => {
+      if (api !== undefined) return api;
+      const config = readConfig(io.env, platform);
+      api = new Api(config.apiOrigin, credentialFor(config), io.fetch, io.timeouts ?? TIMEOUTS);
+      return api;
+    },
+    signIn: (commandName) => {
+      if (!storesLogin(platform)) {
+        throw new CliError(
+          `${commandName} is not offered on Windows, which cannot keep a stored login private; ` +
+            "set ARTIFACTS_TOKEN to an API token instead",
+        );
+      }
+      const stored = session(readOrigin(io.env));
+      if (stored === undefined) throw new CliError("set HOME or XDG_CONFIG_HOME, below which the login is stored");
+      return {
+        ...stored,
+        callbackMs: options.callbackMs,
+        openBrowser: io.openBrowser ?? systemOpener(platform),
+        print: io.stdout,
+        note: io.stderr,
+      };
+    },
     print: io.stdout,
     json: (value) => io.stdout(`${JSON.stringify(value, null, 2)}\n`),
   };

@@ -10,10 +10,10 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
-          exclude: ["src/e2e.test.ts", "scripts/smoke.test.ts"],
+          exclude: ["src/e2e.test.ts", "src/login-e2e.test.ts", "scripts/smoke.test.ts"],
         },
       },
-      { test: { name: "e2e", include: ["src/e2e.test.ts"] } },
+      { test: { name: "e2e", include: ["src/e2e.test.ts", "src/login-e2e.test.ts"] } },
       // A first start of a 90 MB binary can be slow on a runner (Windows scans it).
       { test: { name: "smoke", include: ["scripts/smoke.test.ts"], testTimeout: 60_000, hookTimeout: 60_000 } },
     ],

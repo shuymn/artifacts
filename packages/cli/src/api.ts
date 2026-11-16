@@ -1,9 +1,11 @@
 /**
- * The REST client (design.md section 8). Every request carries the bearer token and a timeout that also bounds reading
- * its answer. A request that gets no answer fails with `LostResponse`: it may or may not have been applied.
+ * The REST client (design.md section 8). Every request carries the credential's bearer token and a timeout that also
+ * bounds reading its answer. A 401 to a stored login's token renews it once and sends the request once more, which is
+ * safe because a 401 changes nothing (AC-7). A request that gets no answer fails with `LostResponse`: it may or may not
+ * have been applied.
  */
-import type { Config } from "./config.ts";
-import { CliError } from "./errors.ts";
+import { CliError, codeOf } from "./errors.ts";
+import type { Credential } from "./session.ts";
 
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -175,16 +177,20 @@ async function answer(response: Response): Promise<unknown> {
   throw new ApiError(response.status, code, message, issuesOf(error?.issues), latest);
 }
 
-function isTimeout(error: unknown): boolean {
+export function isTimeout(error: unknown): boolean {
   return error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError");
+}
+
+/** ` (<code>)` for a failed request whose cause carries a system error code (`ECONNREFUSED`, …); otherwise empty. */
+export function causeCode(error: unknown): string {
+  const code = codeOf(error instanceof Error ? error.cause : undefined);
+  return code === undefined ? "" : ` (${code})`;
 }
 
 /** The failure of a request that got no answer. Only an error code is kept from the cause, never its text. */
 function lost(error: unknown, timeoutMs: number): LostResponse {
   if (isTimeout(error)) return new LostResponse(`the API did not answer within ${timeoutMs / 1000} s`);
-  const cause: unknown = error instanceof Error ? error.cause : undefined;
-  const code = isRecord(cause) && typeof cause.code === "string" ? ` (${cause.code})` : "";
-  return new LostResponse(`no answer from the API${code}`);
+  return new LostResponse(`no answer from the API${causeCode(error)}`);
 }
 
 const segment = encodeURIComponent;
@@ -201,17 +207,22 @@ export type ListQuery = {
 };
 
 export class Api {
-  readonly #config: Config;
+  readonly #origin: string;
+  readonly #credential: Credential;
   readonly #fetch: Fetch;
   readonly #timeouts: Timeouts;
 
-  constructor(config: Config, fetch: Fetch, timeouts: Timeouts = TIMEOUTS) {
-    this.#config = config;
+  constructor(origin: string, credential: Credential, fetch: Fetch, timeouts: Timeouts = TIMEOUTS) {
+    this.#origin = origin;
+    this.#credential = credential;
     this.#fetch = fetch;
     this.#timeouts = timeouts;
   }
 
-  /** Sends one request and reads its answer, both under `timeoutMs`. */
+  /**
+   * Sends one request and reads its answer, each attempt under `timeoutMs`; after a 401, at most once more with the
+   * credential's renewed token.
+   */
   async #call<T>(
     method: string,
     path: string,
@@ -219,12 +230,25 @@ export class Api {
     read: (response: Response) => Promise<T>,
     body?: { readonly content: Blob | string; readonly type: string },
   ): Promise<T> {
-    const headers: Record<string, string> = { Authorization: `Bearer ${this.#config.token}` };
-    if (body !== undefined) headers["Content-Type"] = body.type;
-    const init: RequestInit = { method, headers, signal: AbortSignal.timeout(timeoutMs), redirect: "manual" };
-    if (body !== undefined) init.body = body.content;
+    const send = (token: string) => {
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+      if (body !== undefined) headers["Content-Type"] = body.type;
+      const init: RequestInit = { method, headers, signal: AbortSignal.timeout(timeoutMs), redirect: "manual" };
+      if (body !== undefined) init.body = body.content;
+      return this.#fetch(`${this.#origin}${path}`, init);
+    };
+    // A failure of the credential (a refresh) is its own CliError, never a lost answer of this request.
+    const token = await this.#credential.token();
     try {
-      return await read(await this.#fetch(`${this.#config.apiOrigin}${path}`, init));
+      let response = await send(token);
+      if (response.status === 401) {
+        const renewed = await this.#credential.renew(token);
+        if (renewed !== undefined) {
+          await response.body?.cancel().catch(() => undefined);
+          response = await send(renewed);
+        }
+      }
+      return await read(response);
     } catch (error) {
       if (error instanceof CliError) throw error;
       throw lost(error, timeoutMs);
@@ -280,6 +304,17 @@ export class Api {
 
   async delete(id: string): Promise<void> {
     await this.#call("DELETE", `/v1/artifacts/${segment(id)}`, this.#timeouts.requestMs, answer);
+  }
+
+  /** `DELETE /v1/grants/{id}`, under `timeoutMs`. Only a 204 confirms the revocation; any other success fails. */
+  async revokeGrant(id: string, timeoutMs: number): Promise<void> {
+    await this.#call("DELETE", `/v1/grants/${segment(id)}`, timeoutMs, async (response) => {
+      if (!response.ok || response.status === 204) return answer(response);
+      await response.body?.cancel().catch(() => undefined);
+      throw new CliError(
+        `the API answered ${response.status} instead of 204, so the revocation is not confirmed; the login is kept`,
+      );
+    });
   }
 
   /**

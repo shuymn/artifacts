@@ -1,8 +1,8 @@
 # artifacts CLI
 
-A thin client over the REST API ([design](../../docs/design.md#9-cli)), without runtime dependencies. Each release
-carries it as a single binary per platform, built with `bun build --compile`; from a checkout, Bun runs the
-TypeScript source.
+A thin client over the REST API ([design](../../docs/design.md#9-cli)), whose one runtime dependency is `oauth4webapi`
+for signing in. Each release carries it as a single binary per platform, built with `bun build --compile` with the
+dependency bundled; from a checkout, Bun runs the TypeScript source after `pnpm install`.
 
 ## Install
 
@@ -40,10 +40,17 @@ tar -xzf "$archive" -C ~/.local/bin
 
 ```sh
 export ARTIFACTS_API_URL=https://artifacts-api.example.com
-export ARTIFACTS_TOKEN=art_...                     # from `artifacts token <name>`
+artifacts login                                    # signs in through the browser; or set ARTIFACTS_TOKEN
 artifacts help
 artifacts publish ./site --title "Quarterly chart"
+artifacts logout                                   # revokes the login's grant and removes the login
 ```
+
+`artifacts login` opens the API's consent page in the browser and stores the login in
+`$XDG_CONFIG_HOME/artifacts/credentials.json` (`~/.config/artifacts/` when unset), readable by the owner only; commands
+refresh it as needed. While `ARTIFACTS_TOKEN` (an API token from `artifacts token <name>`) is set, commands use it and
+do not read the stored login. On Windows, which cannot keep the file private, `login` and `logout` refuse and every
+command needs `ARTIFACTS_TOKEN`.
 
 `artifacts token <name>` needs no configuration: it prints a new token and the entry to add to the Worker's
 `API_TOKENS` secret. The binary reads its configuration from the environment only, never from a `.env` or
@@ -55,7 +62,7 @@ With the tools of `mise.toml` (Bun among them), from the repository root:
 
 ```sh
 ln -s "$PWD/packages/cli/src/main.ts" ~/.local/bin/artifacts   # Bun runs the source
-pnpm --filter @artifacts/cli run test    # unit tests on Bun; e2e against the Worker on Node
+pnpm --filter @artifacts/cli run test    # unit tests on Bun; e2e against the Worker on Node, login included
 pnpm --filter @artifacts/cli run build   # this platform's release archive, in packages/cli/dist
 pnpm --filter @artifacts/cli run smoke   # the smoke tests against the binary in that archive
 ```
