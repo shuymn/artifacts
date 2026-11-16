@@ -4,14 +4,18 @@
  * files, removes the paths the directory lacks, and sends the version it read as `base_version`; a conflict is
  * reported, not retried.
  */
+import { createHash } from "node:crypto";
 import { openAsBlob } from "node:fs";
 
 import { ApiError, LostResponse, type Api, type ArtifactJson, type ArtifactVersion } from "./api.ts";
 import { CliError } from "./errors.ts";
 import { hashFiles, LIMITS, type LocalFile } from "./tree.ts";
 
-/** A REST publish body (design.md section 6, "How bytes travel"), encoded once so its exact size is known. */
-export type Encoded = { readonly body: Blob; readonly type: string };
+/**
+ * A REST publish body (design.md section 6, "How bytes travel"), encoded once so its exact size is known and a retry
+ * sends the same bytes; `paths` names its `file` parts in order.
+ */
+export type Encoded = { readonly body: Blob; readonly type: string; readonly paths: readonly string[] };
 
 /**
  * The multipart body: a `meta` part with the JSON input, then one `file` part per `meta.files` entry, in order. The
@@ -29,7 +33,7 @@ export async function encodePublish(meta: Record<string, unknown>, files: readon
   if (type === null) throw new CliError("could not encode the request");
   const body = await encoded.blob();
   if (body.size > LIMITS.requestBytes) throw overBound(body.size);
-  return { body, type };
+  return { body, type, paths: files.map((file) => file.path) };
 }
 
 const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
@@ -73,7 +77,7 @@ export async function create(
   } catch (error) {
     if (!isLost(error)) throw error;
   }
-  const found = await findCreated(api, files, options, pageSize);
+  const found = await findCreated(api, encoded, options, pageSize);
   if (found !== undefined) return { ...found, recovered: true };
   try {
     return await api.create(encoded.body, encoded.type);
@@ -86,17 +90,38 @@ export async function create(
 }
 
 /**
+ * The SHA-256 of each file by path, read back from the encoded body: the bytes the request carried, whatever the local
+ * files hold since.
+ */
+async function sentHashes(encoded: Encoded): Promise<Map<string, string>> {
+  const form = await new Response(encoded.body, { headers: { "Content-Type": encoded.type } }).formData();
+  const parts = form.getAll("file");
+  const hashes = new Map<string, string>();
+  for (const [index, path] of encoded.paths.entries()) {
+    const part = parts[index];
+    if (!(part instanceof Blob)) throw new CliError("could not read back the request it sent");
+    hashes.set(
+      path,
+      createHash("sha256")
+        .update(new Uint8Array(await part.arrayBuffer()))
+        .digest("hex"),
+    );
+  }
+  return hashes;
+}
+
+/**
  * The artifact a create with a lost answer made, if the listing shows it: the same title and description, version 1
- * and the same files (path and SHA-256). Equal artifacts are interchangeable, so no clock is compared.
+ * and the files the request carried (path and SHA-256). Equal artifacts are interchangeable, so no clock is compared.
  */
 async function findCreated(
   api: Api,
-  files: readonly LocalFile[],
+  encoded: Encoded,
   options: CreateOptions,
   pageSize: number,
 ): Promise<ArtifactVersion | undefined> {
   const description = options.description ?? "";
-  const hashes = await hashFiles(files);
+  const hashes = await sentHashes(encoded);
   try {
     const candidates = (await listAll(api, "include", pageSize)).filter(
       (artifact) =>

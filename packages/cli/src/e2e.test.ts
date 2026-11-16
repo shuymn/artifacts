@@ -291,6 +291,38 @@ describe("a create whose answer is lost", () => {
     expect((await served(content(id, "/"))).text).toBe("<p>mine</p>");
   });
 
+  it("matches the bytes it sent, not the files as they are after the answer was lost", async () => {
+    const root = await tree({ "index.html": "<p>sent</p>" });
+    const ran = await run(["publish", root, "--title", "Lost, then edited"], {
+      around: async (request, forward) => {
+        const answer = lostAfterCommit(request, forward);
+        // The local file changes while the answer is lost, before the listing is compared.
+        if (request.method === "POST") await answer.catch(() => writeTree(root, { "index.html": "<p>edited</p>" }));
+        return answer;
+      },
+    });
+    expect(ran).toMatchObject({ status: 0 });
+    expect(ran.stderr).toContain("the listing shows the artifact it made");
+    expect(ran.sent.filter((request) => request.method === "POST")).toHaveLength(1);
+    expect(await titled("Lost, then edited")).toHaveLength(1);
+  });
+
+  it("sends the same bytes again when it creates once more", async () => {
+    const root = await tree({ "index.html": "<p>sent</p>" });
+    let posts = 0;
+    const ran = await run(["publish", root, "--title", "Lost, edited, sent again"], {
+      around: async (request, forward) => {
+        if (request.method !== "POST" || ++posts > 1) return forward();
+        await writeTree(root, { "index.html": "<p>edited</p>" });
+        throw new TypeError("fetch failed");
+      },
+    });
+    expect(ran).toMatchObject({ status: 0 });
+    expect(posts).toBe(2);
+    const [id = ""] = await titled("Lost, edited, sent again");
+    expect((await served(content(id, "/"))).text).toBe("<p>sent</p>");
+  });
+
   it("gives up after a second lost answer", async () => {
     const root = await tree({ "index.html": "<p>twice</p>" });
     const ran = await run(["publish", root, "--title", "Lost twice"], {
