@@ -2,10 +2,14 @@
 // headers of every response and the escaping of artifact text.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AccessVerifier, type AccessOutcome } from "../access.ts";
+import { newArtifactId } from "../id.ts";
+import { createWorker } from "../index.ts";
 import {
   APP_AUD,
   APP_HOST,
   BucketProbe,
+  captureLogs,
   clearStorage,
   CONTENT_SUFFIX,
   DatabaseProbe,
@@ -30,6 +34,13 @@ afterEach(() => {
 });
 
 const HOUR_MS = 3_600_000;
+
+/** An Access verifier that throws, so the request reaches the Worker's outer error handler. */
+class ThrowingVerifier extends AccessVerifier {
+  override verify(): Promise<AccessOutcome> {
+    return Promise.reject(new Error("verifier failed"));
+  }
+}
 const UNKNOWN_ID = "abcdefghijklmnopqrstuvwxyz";
 
 /** A request to the app host with a valid app JWT unless `jwt` is null. */
@@ -411,11 +422,39 @@ describe("ISO-5: escaping artifact text", () => {
     expect(titlesOf(archived)).toEqual([TITLE]);
   });
 
-  it("sends a CSP that forbids scripts, forms and framing on every response", async () => {
-    const world = new World();
+  it("sends a CSP that forbids scripts, forms and framing on every response, refusals and failures included", async () => {
+    const world = new World({ keyTimeoutMs: 50 });
     const id = await create(world, "Page");
-    for (const path of ["/", "/archived", `/a/${id}`, "/assets/gallery.css", "/nothing"]) {
-      const policy = (await app(world, path)).headers.get("Content-Security-Policy") ?? "";
+    const etag = (await app(world, "/assets/gallery.css")).headers.get("ETag") ?? "";
+    const responses = [
+      await app(world, "/"),
+      await app(world, "/archived"),
+      await app(world, `/a/${id}`),
+      await app(world, "/assets/gallery.css"),
+      await app(world, "/assets/gallery.css", { headers: { "If-None-Match": etag } }),
+      await app(world, "/", { method: "HEAD" }),
+      await app(world, "/nothing"),
+      await app(world, "/", { method: "POST" }),
+      await app(world, "/", { jwt: null }),
+    ];
+    // The outer handler's 500: Access verification itself throws.
+    const failing = createWorker({
+      now: () => START,
+      newId: newArtifactId,
+      sleep: async () => {},
+      timeouts: { r2Ms: 2_000, d1ReadMs: 2_000 },
+      access: new ThrowingVerifier({ fetch: world.keys.fetch, now: () => START }),
+    });
+    captureLogs();
+    responses.push(await failing.fetch(new Request(`https://${APP_HOST}/`), world.env));
+    const unreachable = new World({ keyTimeoutMs: 50 });
+    unreachable.keys.mode = "hang";
+    responses.push(await app(unreachable, "/"));
+    expect(responses.map((response) => response.status)).toEqual([
+      200, 200, 200, 200, 304, 200, 404, 405, 403, 500, 503,
+    ]);
+    for (const response of responses) {
+      const policy = response.headers.get("Content-Security-Policy") ?? "";
       const directives = policy.split(";").map((directive) => directive.trim());
       expect(directives).toEqual(
         expect.arrayContaining([

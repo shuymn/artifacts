@@ -160,10 +160,11 @@ adversaries below, not untrusted users.
   (`src/routing.test.ts`, `src/serve.test.ts`: no `Set-Cookie` on any route; `src/access.test.ts`: a valid Access JWT
   sent only as a cookie is refused, ACC-1).
 - **ISO-5: the gallery runs no artifact-supplied markup.** Titles, descriptions, paths and every other value are
-  escaped by the one template that builds the pages; every gallery response's `Content-Security-Policy` forbids
-  scripts, forms and framing. _Enforced (main)_ in `src/gallery/html.ts`, `src/gallery/route.ts`. Pinned by behavior
-  (`src/gallery/gallery.test.ts`: markup and attribute breakouts in titles, descriptions, paths and content types on
-  every page; the header on every response).
+  escaped by the one template that builds the pages; every app-host response's `Content-Security-Policy`, refusals
+  and failures included, forbids scripts, forms and framing. _Enforced (main)_ in `src/gallery/html.ts`,
+  `src/gallery/route.ts`, `src/index.ts`. Pinned by behavior (`src/gallery/gallery.test.ts`: markup and attribute
+  breakouts in titles, descriptions, paths and content types on every page; the header on every status the app host
+  answers).
 
 ### Serving (SRV)
 

@@ -1,8 +1,9 @@
 /**
  * The gallery on the app host (design.md section 10): `/`, `/archived` and `/a/<id>`, and the stylesheets and fonts
- * they load. index.ts has checked the method (ISO-3) and Access (ACC-1) before this runs. Every response carries the
- * app host's headers (`private, no-cache`, CORP, nosniff, no referrer; ISO-2) and a CSP that forbids scripts, forms and
- * framing (ISO-5). A deleted or unknown artifact, a malformed cursor and any other path answer 404.
+ * they load. index.ts has checked the method (ISO-3) and Access (ACC-1) before this runs, and adds the gallery's CSP to
+ * every app-host response, these included (`withGalleryPolicy`; ISO-5). Every response here carries the app host's
+ * headers (`private, no-cache`, CORP, nosniff, no referrer; ISO-2). A deleted or unknown artifact, a malformed cursor
+ * and any other path answer 404.
  */
 import type { OperationErrorCode } from "../errors.ts";
 import { getForGallery, listForGallery, type ArchiveCounts, type OperationDeps } from "../operations.ts";
@@ -19,7 +20,17 @@ const DAY_MS = 86_400_000;
 const CONTENT_SECURITY_POLICY =
   "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
-const HEADERS = { ...browserHeaders("private"), "Content-Security-Policy": CONTENT_SECURITY_POLICY };
+const HEADERS = browserHeaders("private");
+
+/**
+ * ISO-5: the app host's response with the gallery's CSP. index.ts applies it to every app-host response at its outer
+ * boundary, so refusals before the gallery (405, 403, 503) and failures (500) carry it as well as pages and assets.
+ */
+export function withGalleryPolicy(response: Response): Response {
+  const answer = new Response(response.body, response);
+  answer.headers.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+  return answer;
+}
 
 const LISTS: ReadonlyMap<string, Section> = new Map([
   ["/", "active"],
@@ -36,8 +47,7 @@ const STATUS: Readonly<Record<OperationErrorCode, number>> = {
   internal: 500,
 };
 
-const refusal = (status: number) =>
-  plainResponse("private", status, { "Content-Security-Policy": CONTENT_SECURITY_POLICY });
+const refusal = (status: number) => plainResponse("private", status);
 
 /** A body for GET, none for HEAD; the headers are the same, `Content-Length` included. */
 function respond(request: Request, body: Uint8Array | ArrayBuffer, headers: Record<string, string>): Response {

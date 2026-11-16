@@ -5,7 +5,7 @@
  */
 import { AccessVerifier, type AccessSettings } from "./access.ts";
 import { parseConfig, type Config } from "./config.ts";
-import { serveGallery } from "./gallery/route.ts";
+import { serveGallery, withGalleryPolicy } from "./gallery/route.ts";
 import { classifyHost } from "./hosts.ts";
 import { newArtifactId, type ArtifactId } from "./id.ts";
 import { errorName, logEvent, type HostKind } from "./log.ts";
@@ -111,7 +111,7 @@ export function createWorker(deps: WorkerDeps): Worker {
           case "api":
             return await api(request, url, env, config, deps);
           case "app":
-            return await browser(request, url, env, config, deps, "app", undefined);
+            return withGalleryPolicy(await browser(request, url, env, config, deps, "app", undefined));
           case "content":
             return await browser(request, url, env, config, deps, "content", route.id);
           case "public":
@@ -126,7 +126,8 @@ export function createWorker(deps: WorkerDeps): Worker {
           ...(route.kind === "unmatched" ? {} : { host: route.kind }),
         });
         if (route.kind === "api") return jsonResponse(500, { error: { code: "internal", message: "internal error" } });
-        return plainResponse(route.kind === "public" ? "public" : "private", 500);
+        const failure = plainResponse(route.kind === "public" ? "public" : "private", 500);
+        return route.kind === "app" ? withGalleryPolicy(failure) : failure;
       }
     },
   };
