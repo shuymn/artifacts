@@ -342,12 +342,18 @@ describe("PL-40: OAuth access tokens on /mcp and /v1/", () => {
     expect(logEvents(logs.lines)).toEqual([{ event: "request.failed", error: "TypeError", host: "api" }]);
   });
 
-  it("serves a refreshed token on the grant's resource, and refuses the rotated refresh token", async () => {
+  it("serves a refreshed token on the grant's resource only, and refuses the rotated refresh token once its successor is used", async () => {
     const world = new World();
     const { clientId, tokens } = await signedIn(world, `${API}/v1`);
     const refreshed = await tokensOf(await refresh(world, clientId, tokens.refresh_token));
     expect((await useToken(world, "v1", refreshed.access_token)).status).toBe(200);
     await expectRefused(await useToken(world, "mcp", refreshed.access_token), "mcp");
+    // Section 7: the previous refresh token stays valid until the new one is first used, and is refused after.
+    const next = await tokensOf(await refresh(world, clientId, refreshed.refresh_token));
+    expect((await useToken(world, "v1", next.access_token)).status).toBe(200);
+    const rotated = await refresh(world, clientId, tokens.refresh_token);
+    expect(rotated.status).toBe(400);
+    expect(await rotated.json()).toMatchObject({ error: "invalid_grant" });
   });
 });
 
