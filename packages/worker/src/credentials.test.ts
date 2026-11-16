@@ -6,10 +6,13 @@ import { OAuthAuthorizationServer } from "@cloudflare/workers-oauth-provider";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  authorize,
+  exchange,
   expire,
   faulty,
   oauthKv,
   refresh,
+  register,
   signedIn,
   tokenKey,
   tokensOf,
@@ -174,6 +177,27 @@ describe("PL-40: OAuth access tokens on /mcp and /v1/", () => {
     expect(logEvents(logs.lines)).toEqual(
       Array.from({ length: credentials.length * 2 }, () => ({ event: "token.refused", reason: "oauth" })),
     );
+  });
+
+  // Section 7: the props give the publisher name; a grant without a valid one has no name to publish as.
+  it.each<[string, Record<string, unknown>]>([
+    ["no publisher name", {}],
+    ["a publisher name that is not a string", { publisher: 42 }],
+    ["a malformed publisher name", { publisher: "Not Valid" }],
+  ])("refuses the token of a grant with %s, before D1 or R2 and writing nothing", async (_name, props) => {
+    const world = new World();
+    const clientId = await register(world);
+    const tokens = await tokensOf(
+      await exchange(world, clientId, await authorize(world, clientId, `${API}/v1`, {}, props)),
+    );
+    const before = await snapshot();
+    const { db, bucket } = untouchable(world);
+    const logs = captureLogs();
+    await expectRefused(await world.create({ title: "t", files: { "index.html": "i" } }, tokens.access_token), "v1");
+    expect(db.batches).toBe(0);
+    expect(bucket.calls).toEqual([]);
+    expect(await snapshot()).toEqual(before);
+    expect(logEvents(logs.lines)).toEqual([{ event: "token.refused", reason: "oauth" }]);
   });
 
   it("refuses a token once its grant has a revocation record, its own record still there", async () => {

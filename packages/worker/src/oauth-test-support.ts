@@ -130,14 +130,14 @@ export function redirectQuery(response: Response): Record<string, string> {
 
 /**
  * Stands in for the consent page: an approval by the owner, through the library's helper, of a request for `resource`
- * (none for a client that names none), storing `metadata` with the grant. Returns the code.
+ * (none for a client that names none), storing `metadata` and `props` with the grant. Returns the code.
  */
 export async function authorize(
   world: World,
   clientId: string,
   resource: string | null = `${API}/mcp`,
   metadata: Record<string, unknown> = {},
-  publisher = "test",
+  props: Record<string, unknown> = { publisher: "test" },
 ): Promise<string> {
   const { redirectTo } = await helpers(world).completeAuthorization({
     request: {
@@ -153,7 +153,7 @@ export async function authorize(
     userId: "owner",
     metadata,
     scope: [],
-    props: { publisher },
+    props,
     revokeExistingGrants: false,
   });
   const code = new URL(redirectTo).searchParams.get("code");
@@ -199,7 +199,7 @@ export async function signedIn(
   publisher = "test",
 ): Promise<{ clientId: string; grantId: string; tokens: Tokens }> {
   const clientId = await register(world);
-  const code = await authorize(world, clientId, resource, {}, publisher);
+  const code = await authorize(world, clientId, resource, {}, { publisher });
   const tokens = await tokensOf(await exchange(world, clientId, code));
   return { clientId, grantId: code.split(":")[1] ?? "", tokens };
 }
