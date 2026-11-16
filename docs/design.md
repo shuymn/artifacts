@@ -471,7 +471,7 @@ days. The library has no absolute maximum for a sliding grant.
 
 - **One grant:** `DELETE /v1/grants/{id}` (`artifacts revoke <grant>`, section 9) deletes the grant and its tokens
   through the library's `revokeGrant`, whose deletion of the grant writes its revocation record first (below). A
-  failure answers 503 `unavailable` and logs `grant.revoke_failed`, and a repeated call completes it.
+  failed write answers 503 `unavailable` and logs `grant.revoke_failed`, and a repeated call completes it.
   `artifacts grants` lists the grants, with the publisher name, the client and the redirect host of each.
 - **By signing in again:** a new approval replaces the client's grants for that resource the same way (above). A
   client that picks a new loopback port per sign-in, as Claude Code and Codex do by default, or that registers anew,
