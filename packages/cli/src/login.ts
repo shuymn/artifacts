@@ -126,7 +126,7 @@ export async function login(context: LoginContext, tokenSet: boolean): Promise<v
       tokens = await exchange(server, clientId, sent, callback.query, now);
       secrets.add(tokens.access_token).add(tokens.refresh_token);
     } catch (error) {
-      if (error instanceof OAuthRefusal && error.error === "invalid_client") await dropClient(context, clientId);
+      if (error instanceof OAuthRefusal && error.unknownClient) await dropClient(context, clientId);
       throw error;
     }
     await context.store.withLock(async ({ logins, write }) => {

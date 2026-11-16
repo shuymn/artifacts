@@ -112,13 +112,13 @@ export class StoredLogin implements Credential {
         next = await refresh(server, entry.client_id, entry.tokens, now);
       } catch (error) {
         if (!(error instanceof OAuthRefusal)) throw error;
-        if (error.error === "invalid_client") {
+        if (error.unknownClient) {
           // The server no longer knows the client: drop it, so the next login registers again.
           logins.delete(origin);
           await write();
           throw new LoginRefused(`the server no longer knows this CLI's client; sign in with artifacts login`);
         }
-        if (error.error === "invalid_grant") {
+        if (error.refusedGrant) {
           throw new LoginRefused(`the server no longer accepts the stored login; sign in with artifacts login`);
         }
         throw error;

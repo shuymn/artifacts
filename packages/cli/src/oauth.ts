@@ -27,14 +27,29 @@ const CLIENT_METADATA = {
   response_types: ["code"],
 };
 
-/** The token endpoint's refusal, by its RFC 6749 error code. */
+/**
+ * The token endpoint's refusal, by its HTTP status and RFC 6749 error code. Only the status the server gives each code
+ * counts as that code: another, such as an intermediary's 403 with the same body, is a failure that changes nothing.
+ */
 export class OAuthRefusal extends CliError {
   override readonly name: string = "OAuthRefusal";
   readonly error: string;
+  readonly status: number;
 
   constructor(what: string, error: string, status: number) {
     super(`${what} was refused (${status} ${error})`);
     this.error = error;
+    this.status = status;
+  }
+
+  /** The server does not know the client: 401 `invalid_client`. */
+  get unknownClient(): boolean {
+    return this.status === 401 && this.error === "invalid_client";
+  }
+
+  /** The server refuses the code or the refresh token: 400 `invalid_grant`. */
+  get refusedGrant(): boolean {
+    return this.status === 400 && this.error === "invalid_grant";
   }
 }
 
@@ -169,8 +184,8 @@ export async function register(server: Server): Promise<string> {
 /**
  * Whether the server still knows `clientId`, asked without any effect: a code exchange with a made-up code of the
  * library's form, `owner:<grant ID>:<secret>`, whose 16-character grant ID names no grant. The library looks the client
- * up before the code, so an unknown client answers `invalid_client` and a known one `invalid_grant`. Anything else
- * fails, so the caller keeps the client ID.
+ * up before the code, so an unknown client answers 401 `invalid_client` and a known one 400 `invalid_grant`. Anything
+ * else fails, so the caller keeps the client ID.
  */
 export async function knowsClient(server: Server, clientId: string): Promise<boolean> {
   const client = clientOf(clientId);
@@ -196,8 +211,8 @@ export async function knowsClient(server: Server, clientId: string): Promise<boo
       ),
     );
   } catch (error) {
-    if (error instanceof OAuthRefusal && error.error === "invalid_client") return false;
-    if (error instanceof OAuthRefusal && error.error === "invalid_grant") return true;
+    if (error instanceof OAuthRefusal && error.unknownClient) return false;
+    if (error instanceof OAuthRefusal && error.refusedGrant) return true;
     throw error;
   }
   throw new CliError(`${what} was answered with tokens for a made-up code`);

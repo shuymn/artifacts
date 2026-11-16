@@ -323,15 +323,27 @@ describe("login: the stored client ID", () => {
     expect(standIn.clients.has(kept ?? "")).toBe(true);
   });
 
-  it("fails, keeping the client ID, when the check gets another answer", async () => {
+  it.each<[string, Answer, string]>([
+    ["a 503", { status: 503, body: {} }, "the check of the stored client ID: "],
+    [
+      "a 403 invalid_client, as from an intermediary",
+      { status: 403, body: { error: "invalid_client" } },
+      "the check of the stored client ID was refused (403 invalid_client)",
+    ],
+    [
+      "a 401 invalid_grant",
+      { status: 401, body: { error: "invalid_grant" } },
+      "the check of the stored client ID was refused (401 invalid_grant)",
+    ],
+  ])("fails, keeping the client ID, when the check gets %s", async (_name, answer, message) => {
     const { standIn, credentials, env } = await setup();
     const client = standIn.register();
     await credentials.put(standIn.origin, { client, tokens: null });
-    standIn.override = ({ path }) => (path === "/oauth/token" ? { status: 503, body: {} } : undefined);
+    standIn.override = ({ path }) => (path === "/oauth/token" ? answer : undefined);
     let opened = false;
     const ran = await login(standIn, env, { openBrowser: () => (opened = true) });
     expect(ran.status).toBe(1);
-    expect(ran.stderr).toContain("the check of the stored client ID");
+    expect(ran.stderr).toContain(message);
     expect(opened).toBe(false);
     expect(standIn.requests).not.toContain("POST /oauth/register");
     expect((await credentials.read())[standIn.origin]?.client_id).toBe(client);
@@ -351,6 +363,20 @@ describe("login: the stored client ID", () => {
     expect((await credentials.read())[standIn.origin]).toBeUndefined();
   });
 
+  it("keeps the client ID when the code exchange answers 403 invalid_client", async () => {
+    const { standIn, credentials, env } = await setup();
+    const client = standIn.register();
+    await credentials.put(standIn.origin, { client, tokens: null });
+    standIn.override = ({ form }) =>
+      form.grant_type === "authorization_code" && standIn.codes.has(form.code ?? "")
+        ? { status: 403, body: { error: "invalid_client" } }
+        : undefined;
+    const ran = await login(standIn, env);
+    expect(ran.status).toBe(1);
+    expect(ran.stderr).toMatch(/\nartifacts: the code exchange was refused \(403 invalid_client\)\n$/);
+    expect((await credentials.read())[standIn.origin]).toEqual({ client_id: client, tokens: null });
+  });
+
   it("drops the client ID when a refresh answers invalid_client", async () => {
     const { standIn, credentials, env } = await setup();
     const { client, tokens } = standIn.issue();
@@ -361,6 +387,24 @@ describe("login: the stored client ID", () => {
     expect(ran.stderr).toContain("the server no longer knows this CLI's client; sign in with artifacts login");
     expect((await credentials.read())[standIn.origin]).toBeUndefined();
   });
+});
+
+describe("login: a refresh refused with another status", () => {
+  it.each(["403 invalid_client", "401 invalid_grant"])(
+    "%s keeps the client and the login, so logout fails and leaves them",
+    async (refusal) => {
+      const { standIn, credentials, env } = await setup();
+      const { client, tokens } = standIn.issue();
+      await credentials.put(standIn.origin, { client, tokens, expires: Date.now() });
+      const before = await readFile(credentials.file, "utf8");
+      const [status, error] = refusal.split(" ");
+      standIn.override = ({ path }) =>
+        path === "/oauth/token" ? { status: Number(status), body: { error } } : undefined;
+      const ran = await cli(["logout"], { env, fetch });
+      expect(ran).toEqual({ status: 1, stdout: "", stderr: `artifacts: the refresh was refused (${refusal})\n` });
+      expect(await readFile(credentials.file, "utf8")).toBe(before);
+    },
+  );
 });
 
 describe("PL-51: the credential precedence", () => {
