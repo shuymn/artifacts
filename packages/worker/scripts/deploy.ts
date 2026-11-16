@@ -6,7 +6,8 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createRunner, deploy, TERMINATION_SIGNALS } from "./deploy-run.ts";
+import { deploy } from "./deploy-run.ts";
+import { createRunner, onTerminationSignal } from "./runner.ts";
 
 const workerDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -22,10 +23,5 @@ process.exitCode = await deploy({
     graceMs: 10 * 1000,
   }),
   log: (line) => process.stderr.write(`${line}\n`),
-  onSignal: (listener) => {
-    for (const signal of TERMINATION_SIGNALS) process.on(signal, listener);
-    return () => {
-      for (const signal of TERMINATION_SIGNALS) process.off(signal, listener);
-    };
-  },
+  onSignal: onTerminationSignal,
 });
