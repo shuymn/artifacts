@@ -21,7 +21,7 @@ export const OWNER = "owner";
  */
 export type GrantMetadata = {
   readonly publisher: string;
-  readonly clientName: string;
+  readonly clientName: string | null;
   readonly redirectHost: string;
 };
 
