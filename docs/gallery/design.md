@@ -2,14 +2,15 @@
 
 The gallery's screens are designed in Pencil from tokens and components, and the code uses the same tokens and
 components by name. The design file is [`gallery.pen`](gallery.pen): the boards Typography and Components above one
-screen per page (`index`, `archived`, `artifact`), at the width `size.page` gives. Three files carry the design into
-the code, and the implementation follows them exactly:
+screen per page (`index`, `archived`, `artifact`, `consent`, `consent-error`), at the width `size.page` gives. Three
+files carry the design into the code, and the implementation follows them exactly:
 
 - [`tokens.json`](tokens.json): the token set, the one source of the tokens' names and values.
 - [`gallery.css`](../../packages/worker/src/gallery/gallery.css): the stylesheet the Worker serves. Every token is a
   custom property, every component a class.
-- [`reference/`](reference/): one static page per screen (`index.html`, `archived.html`, `artifact.html`) with the
-  markup the Worker's templates must produce. They load `gallery.css` and render like the Pencil screens.
+- [`reference/`](reference/): one static page per screen (`index.html`, `archived.html`, `artifact.html`,
+  `consent.html`, `consent-error.html`) with the markup the Worker's templates must produce. They load `gallery.css`
+  and render like the Pencil screens.
 
 A design change goes to all of them: the Pencil file first, then `tokens.json`, `gallery.css` and the reference pages,
 then the templates. Content and behavior of each page are in [design.md](../design.md), section 10.
@@ -24,7 +25,9 @@ save git shows the file changed by that one line; Pencil opens the file with or 
 
 - **Dark only.** The owner uses a dark color scheme, so the gallery has one theme (`color-scheme: dark`). A light theme
   would be a second token set with the same names.
-- **No script, forms or frames** (design.md, section 10). Every state is a link or plain markup.
+- **No script, forms or frames** (design.md, section 10). Every state is a link or plain markup. The one exception is
+  the consent page's form ([design.md](../design.md), section 7), which still runs no script: the browser's own
+  validation and `:user-invalid` give its feedback.
 - **Text scales with the user's setting.** Each page has `<meta name="text-scale" content="scale">`, no rule sets a
   root `font-size`, and text and the spacing around it are in `rem`.
 - **Fonts are served by the Worker**: IBM Plex Sans and IBM Plex Mono (Latin subsets, `woff2`) in a separate
@@ -104,7 +107,7 @@ The `.pen` format allows a variable for a width, but Pencil (1.2.23) drops it: a
 back as `fit_content(0)`, and a file that has one is saved with `fit_content(0)`. So the frames repeat `size.*` as
 numbers, and `tokens.test.ts` checks that each has its token's value: `size.page` on the screens and the `site-header`
 component, `size.content` on `page` and the `pager` and `artifact-row` components, `size.prose` on the artifact
-description, `size.label` on the term of `info-row`.
+description and on `page page--narrow`, `size.label` on the term of `info-row`.
 
 Values Pencil shows that are not tokens (a text's measured width or height, a frame's height, the width of a table
 column) are not part of the design.
@@ -117,7 +120,7 @@ reference pages show each in place.
 
 | Component         | Variant                                  | Markup                                                                                                          |
 | ----------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `site-header`     |                                          | `header.site-header` > `div.brand` + `nav.site-nav`                                                             |
+| `site-header`     |                                          | `header.site-header` > `div.brand` + `nav.site-nav`; `div.brand` alone on the consent pages                     |
 | `nav-tab`         | `state=default`                          | `a.nav-tab` > text + `span.nav-tab__count`                                                                      |
 |                   | `state=current`                          | the same with `aria-current`: `"page"` on the list it links to, `"true"` on an artifact page in that section    |
 | `artifact-row`    |                                          | `li.artifact-row` in `ul.artifact-list[role=list]`; see `reference/index.html`                                  |
@@ -129,12 +132,18 @@ reference pages show each in place.
 |                   | `value=link`                             | the same with `dd.info-row__link` > `a`                                                                         |
 | `table-cell`      | `style=head`                             | `thead th[scope=col]`                                                                                           |
 |                   | `style=text` / `mono` / `muted` / `link` | `td` / `td.cell--mono` / `td.cell--muted` / `td.cell--link` > `a`; every `td` has `data-label`, its column name |
+| `field`           | `state=default`                          | `div.field` > `label.field__label` + `p.field__help` + `input.field__input` + `p.field__message` (hidden)       |
+|                   | `state=invalid`                          | the same once the input matches `:user-invalid`: its border in `color.danger`, the message shown                |
+| `button`          | `kind=primary` / `kind=secondary`        | `button.button.button--primary` / `.button--secondary`                                                          |
+| `notice`          |                                          | `p.notice`                                                                                                      |
 
 In `site-header`, `div.brand` is `a.brand__link` (`img.brand__icon` and the wordmark) then `span.brand__version`.
 
-Screens also use `main.page` (`.page--detail` on an artifact page), `hgroup.page-heading`, `header.artifact-heading`,
-`section.section` and `div.data-table[role=region][tabindex=0][aria-labelledby]` around each `table`; `.cell--grow`
-marks the column that takes the remaining width (the version title, the file path).
+Screens also use `main.page` (`.page--detail` on an artifact page, `.page--narrow` on the consent pages),
+`hgroup.page-heading`, `header.artifact-heading`, `section.section`,
+`div.data-table[role=region][tabindex=0][aria-labelledby]` around each `table`, and `form.form` > the field and
+`div.form__actions` > the buttons; `.cell--grow` marks the column that takes the remaining width (the version title,
+the file path). The input lists its help in `aria-describedby`; see `reference/consent.html` for its attributes.
 
 Lists and tables carry their roles explicitly (`role=list`; `table`, `rowgroup`, `row`, `columnheader`, `cell`):
 Safari drops list semantics without list markers, and browsers may drop table semantics when the narrow layout
@@ -142,9 +151,11 @@ changes a table's `display`.
 
 Pencil draws the design's strokes inside the frame (`strokeAlignment: inner`) and lays out the children by the padding
 alone, so a stroke covers the outer pixel of the padding. CSS draws a border outside the padding, so content inside a
-bordered container sits one pixel further in. The nav tab subtracts its border from its padding, because its size is
-part of the design; the other containers keep the one pixel. Pencil paints a frame's stroke under its children unless
-the frame clips them, so the artifact list and the tables, whose rows reach their edges, clip as they do in CSS.
+bordered container sits one pixel further in. The nav tab, the input and the buttons subtract their border from their
+padding, because their size is part of the design; the other containers keep the one pixel. A primary button's border
+is transparent over its background, so both buttons have the same size. Pencil paints a frame's stroke under its
+children unless the frame clips them, so the artifact list and the tables, whose rows reach their edges, clip as they
+do in CSS.
 
 ## Behavior the static design does not show
 
@@ -163,10 +174,18 @@ the frame clips them, so the artifact list and the tables, whose rows reach thei
   open link under the summary; under 24rem of the info list's width, where a value would get less than about twice its
   label's width, each label moves above its value; under 36rem of a table's own width (`.data-table` is the query
   container) the table becomes one card per row, each cell prefixed by its `data-label`. The header row is hidden
-  visually but stays for screen readers, and the prefix is hidden from them.
+  visually but stays for screen readers, and the prefix is hidden from them. The consent pages' column is `size.prose`
+  wide, narrowed to the same gutter; the input stretches to it, border included, and the buttons wrap.
 - **Times** are UTC, `YYYY-MM-DD HH:MM`, in `<time datetime="YYYY-MM-DDTHH:MM:00Z">`; list rows show a relative time
   (`2 hours ago`) with the same `datetime`.
-- **Focus.** Links and the scrollable table regions show `focus.width` of `color.focus` on `:focus-visible`.
+- **Focus.** Links, the scrollable table regions, the input and the buttons show `focus.width` of `color.focus` on
+  `:focus-visible`.
+- **The field's message** shows only while the input matches `:user-invalid`: after the owner changes the value and
+  leaves the field, or tries to submit it, and not while typing or on load. No script keeps `aria-invalid` or
+  `aria-describedby` in step with it, so the input is described by its help alone, and a submit with a bad value is
+  stopped by the browser's own validation, which names the error and focuses the field. **Deny** has `formnovalidate`,
+  so a bad value never blocks it.
 - **Contrast.** Every text color is at least 5.8:1 on its background (the lowest is `color.badge.neutral.fg` on
-  `color.badge.neutral.bg`). Borders are separators, not control boundaries; the current tab is also marked by its
-  weight and `aria-current`.
+  `color.badge.neutral.bg`). `color.border` draws separators, not control boundaries; the current tab is also marked
+  by its weight and `aria-current`. `color.control.border` bounds the input and the secondary button, at least 3.6:1
+  against `color.surface` and `color.bg` (WCAG asks 3:1 of a control's boundary).

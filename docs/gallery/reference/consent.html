@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="text-scale" content="scale" />
+    <title>Allow access · artifacts</title>
+    <!-- Reference only: the Worker serves the fonts itself. -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    />
+    <link rel="stylesheet" href="../../../packages/worker/src/gallery/gallery.css" />
+    <link rel="icon" href="../../../packages/worker/src/gallery/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="../../../packages/worker/src/gallery/icon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <a class="brand__link" href="/"
+          ><img
+            class="brand__icon"
+            src="../../../packages/worker/src/gallery/icon.svg"
+            alt=""
+            width="16"
+            height="16"
+          />artifacts</a
+        >
+        <span class="brand__version">v0.3.0</span>
+      </div>
+    </header>
+    <main class="page page--narrow">
+      <hgroup class="page-heading">
+        <h1>Allow access?</h1>
+        <p>An app asks for access to your artifacts. Check it before you allow it.</p>
+      </hgroup>
+      <dl class="info">
+        <div class="info-row">
+          <dt>App</dt>
+          <dd>Claude Code, identified by claude.ai</dd>
+        </div>
+        <div class="info-row">
+          <dt>Sends access to</dt>
+          <dd>localhost</dd>
+        </div>
+        <div class="info-row">
+          <dt>Resource</dt>
+          <dd>MCP at https://artifacts-api.example.com/mcp</dd>
+        </div>
+        <div class="info-row">
+          <dt>Allows</dt>
+          <dd>Reading, publishing, making public and deleting every artifact</dd>
+        </div>
+      </dl>
+      <p class="notice">localhost is an app on this computer: allow only if you just started signing in from it.</p>
+      <form class="form" method="post" action="/oauth/authorize">
+        <input type="hidden" name="handle" value="…" />
+        <div class="field">
+          <label class="field__label" for="publisher">Publisher name</label>
+          <p class="field__help" id="publisher-help">
+            Shown as who published each version. 1 to 32 lowercase letters, digits or hyphens.
+          </p>
+          <input
+            class="field__input"
+            id="publisher"
+            name="publisher"
+            type="text"
+            value="claude-code"
+            required
+            pattern="[a-z0-9\-]{1,32}"
+            maxlength="32"
+            autocomplete="off"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            aria-describedby="publisher-help"
+          />
+          <p class="field__message">Enter 1 to 32 lowercase letters, digits or hyphens.</p>
+        </div>
+        <div class="form__actions">
+          <button class="button button--primary" type="submit" name="decision" value="approve">Allow</button>
+          <button class="button button--secondary" type="submit" name="decision" value="deny" formnovalidate>
+            Deny
+          </button>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>
