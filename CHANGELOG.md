@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/shuymn/artifacts/compare/v0.1.1...v0.1.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **worker:** silence the module rule warnings ([95b231e](https://github.com/shuymn/artifacts/commit/95b231e3382f296f2d9af57afe6010e6b9da042f))
+* **worker:** silence the module rule warnings ([60bde22](https://github.com/shuymn/artifacts/commit/60bde22b4408f8113659af04178e59511d95a6c1))
+
 ## [0.1.1](https://github.com/shuymn/artifacts/compare/v0.1.0...v0.1.1) (2026-11-16)
 
 
