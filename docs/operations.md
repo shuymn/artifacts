@@ -58,14 +58,35 @@ The same platforms build and run the smoke tests in CI for every pull request th
 the root `package.json`, the lockfiles, `mise.toml`, the binaries workflow), so a build that would block a release
 fails before it is merged. That check is not required.
 
+### Adding an action to a workflow
+
+The repository admits only the actions `.github/infra.yaml` lists under `selected_actions` (`github_owned_allowed` is
+off). GitHub refuses a whole run whose workflow names any other action before a job starts, so an `if:` that would skip
+the job does not help: the run ends in `startup_failure` with no jobs. For the release workflow that means every push
+to `main` loses its fast-forward, and with it deployment. **Observed:** a release run of this repository whose workflow
+named an action not yet allowed ended in `startup_failure` with no jobs. A new action therefore lands in this order:
+
+1. Merge a pull request that only adds the action to `selected_actions` in `.github/infra.yaml`.
+2. Run `gh infra apply`.
+3. Check that GitHub admits it; the list holds the new pattern:
+
+   ```sh
+   gh api 'repos/{owner}/{repo}/actions/permissions/selected-actions' --jq '.patterns_allowed[]'
+   ```
+
+4. Only then merge the pull request whose workflow names the action. Its own checks may fail at startup until step 2;
+   run them again after it.
+
 ### Recovering a release
 
 - **A failure outside the code** (a runner, the network, GitHub's API) during prepare, build or publish: run the failed
   jobs again from the run's page, or run the release workflow manually on `main` with `tag` set to the draft's tag
   (`gh workflow run release.yml --ref main -f tag=vX.Y.Z`). Either finishes the same draft at the same commit: it
   checks the tag again, builds the binaries, replaces the draft's assets and publishes. Assets change only while the
-  release is a draft; publish refuses a release that is no longer one, and a draft holding an asset the workflow does
-  not make (remove it on the release's page first).
+  release is a draft. A release published already (an earlier attempt published it, then lost the answer or failed
+  the check after it) is accepted, and the fast-forward follows, only if it holds exactly the run's files at the tag's
+  commit; otherwise publish fails and the next release replaces it. Publish refuses a draft holding an asset the
+  workflow does not make (remove it on the release's page first).
 - **A failure the code causes** (a build or a smoke test that fails): the tag cannot move, so this release cannot carry
   the fix. Fix it on `main` and merge the next release PR; its draft is finished as usual and deployment resumes. The
   failed release stays a draft and never deploys; delete it on the releases page (its tag stays).
@@ -339,8 +360,9 @@ export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<toke
 2. Fill the deployment values (section 2).
 3. `gh infra apply`: it restricts who can push to `release` (below), adds the release-please labels and allows the
    actions the workflows use (release-please, and `actions/upload-artifact` and `actions/download-artifact`, which hand
-   the binaries to the publish job). Until then the release workflow fails on every push to `main`, since the action is
-   not allowed; the next push after the apply runs it.
+   the binaries to the publish job). Then check with the request of "Adding an action to a workflow" that GitHub
+   admits each of them. Until the apply, GitHub refuses at startup every run whose workflow names an action not yet
+   allowed, the release workflow's on every push to `main` among them; run those again after the check.
 4. Merge the first release PR; the release workflow publishes it with the CLI binaries and creates `release` at its
    tag.
 5. Connect Workers Builds (section 3); its first build deploys. Its log shows Node of the major in `.node-version`
