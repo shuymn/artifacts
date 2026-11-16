@@ -82,7 +82,9 @@ risks say what the shared-domain layout exposes.
   or ends_with(http.host, "-pub.example.com")
   ```
 
-  In the dedicated layout, the last two lines are one `or ends_with(http.host, ".example-content.net")`. The rule turns
+  Configuration Rules apply per zone, so the dedicated layout needs two rules with the same settings: one in
+  `example.com` matching the first line, and one in `example-content.net` matching
+  `ends_with(http.host, ".example-content.net")`. The rule turns
   off **Email Obfuscation**, **Automatic HTTPS Rewrites**, **Rocket Loader** and **Fonts** (Cloudflare Fonts), and
   turns on **Disable Real User Monitoring (RUM)** and **Disable Zaraz**. Each of them would change an artifact's bytes,
   inject a script that the gallery's CSP blocks, or drop the `ETag` a revalidation needs.
@@ -452,13 +454,14 @@ Logs below are the Worker's Workers Logs in the dashboard, kept 7 days on Worker
 
    ```sh
    ARTIFACTS_TOKEN=$TOKEN artifacts public "$ID" on
-   curl -s "https://$ID-pub.example.com/"
+   curl -s "https://$ID-pub.example.com/" | cmp - probe/index.html
    curl -sI "https://$ID-pub.example.com/" | grep -i -E '^(etag|vary)'
    ARTIFACTS_TOKEN=$TOKEN artifacts public "$ID" off
    ```
 
-   Pass: the body is the probe's page byte for byte, with no injected script or rewritten link; `vary: Accept-Encoding`
-   once; no `etag` is the known limit of section 1, an `etag` means the zone's setting has changed.
+   Pass: `cmp` prints nothing, so the body is the probe's page byte for byte, with no injected script or rewritten
+   link; `vary: Accept-Encoding` once; no `etag` is the known limit of section 1, an `etag` means the zone's setting
+   has changed.
 
 Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"`, and revoke the check token.
 
