@@ -168,11 +168,16 @@ a:focus-visible,
   outline-offset: var(--space-0-5);
 }
 
-/* site-header */
+/*
+ * site-header. When the brand and the nav do not fit on one line, the nav moves under the brand; when the brand alone
+ * does not, the version moves under the wordmark; the tabs wrap too. So the header never makes the page scroll sideways.
+ */
 .site-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2) var(--space-6);
   padding: var(--space-3) var(--space-7);
   border-block-end: var(--border-width) solid var(--color-border);
   background: var(--color-bg);
@@ -184,6 +189,7 @@ a:focus-visible,
  */
 .brand {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-2);
 }
@@ -211,6 +217,7 @@ a:focus-visible,
 
 .site-nav {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }

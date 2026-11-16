@@ -156,10 +156,13 @@ the frame clips them, so the artifact list and the tables, whose rows reach thei
 - **A row's description** stays on one line and ends with an ellipsis; the artifact page shows it whole, and the row's
   title links there.
 - **Archived rows** end their meta line with the reason: `archived by hand` or `archived: no updates for N days`.
-- **Narrow widths.** `main` keeps a `space.4` gutter. Under 36rem of the list's width an artifact row puts its open link
-  under the summary; under 36rem of a table's own width (`.data-table` is the query container) the table becomes one
-  card per row, each cell prefixed by its `data-label`. The header row is hidden visually but stays for screen readers,
-  and the prefix is hidden from them.
+- **Narrow widths.** The header wraps rather than scroll the page sideways: when the brand and the nav do not fit on one
+  line `space.6` apart, the nav moves under the brand, `space.2` below; when the brand alone does not fit, the version
+  moves under the wordmark; and the tabs wrap. The icon and the wordmark stay on one line, running into the header's
+  side padding if they must. `main` keeps a `space.4` gutter. Under 36rem of the list's width an artifact row puts its
+  open link under the summary; under 36rem of a table's own width (`.data-table` is the query container) the table
+  becomes one card per row, each cell prefixed by its `data-label`. The header row is hidden visually but stays for
+  screen readers, and the prefix is hidden from them.
 - **Times** are UTC, `YYYY-MM-DD HH:MM`, in `<time datetime="YYYY-MM-DDTHH:MM:00Z">`; list rows show a relative time
   (`2 hours ago`) with the same `datetime`.
 - **Focus.** Links and the scrollable table regions show `focus.width` of `color.focus` on `:focus-visible`.
