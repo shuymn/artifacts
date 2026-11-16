@@ -336,6 +336,33 @@ describe("section 10: paging", () => {
   });
 });
 
+// Each page shows its rows, the archive counts and (on an artifact) the latest files and version 1 from one D1 batch,
+// a single snapshot, so an update between reads cannot mix two states on one page.
+describe("section 10: one snapshot per page", () => {
+  it("reads each page in one D1 batch and the assets without D1", async () => {
+    const world = new World();
+    const id = await create(world, "Page");
+    for (let base = 1; base < 52; base++) await world.updated(id, { base_version: base });
+    await world.patch(await create(world, "Old"), { archive: "archived" });
+    const db = new DatabaseProbe();
+    world.env = { ...world.env, DB: db.binding };
+    const batches: Record<string, number> = {};
+    for (const path of [
+      "/",
+      "/?cursor=1.aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "/archived",
+      `/a/${id}`,
+      `/a/${id}?versions_cursor=3`,
+      "/assets/gallery.css",
+    ]) {
+      const before = db.batches;
+      expect({ path, status: (await app(world, path)).status }).toEqual({ path, status: 200 });
+      batches[path] = db.batches - before;
+    }
+    expect(Object.values(batches)).toEqual([1, 1, 1, 1, 1, 0]);
+  });
+});
+
 describe("section 10: what answers 404", () => {
   it("answers 404 for a deleted or unknown artifact, a malformed cursor and any other path", async () => {
     const world = new World();
