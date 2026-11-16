@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0](https://github.com/shuymn/artifacts/compare/v0.1.2...v0.2.0) (2026-11-16)
+
+
+### Features
+
+* add a favicon for the gallery and artifact pages ([98fe376](https://github.com/shuymn/artifacts/commit/98fe376be32df325eab36d2ca9d3af4efc867325))
+* **gallery:** add the gallery icon ([4308842](https://github.com/shuymn/artifacts/commit/4308842b1578db25062a3bb43aab4cc59f415f3d))
+* **worker:** fall back to the gallery's favicon ([0aee51b](https://github.com/shuymn/artifacts/commit/0aee51b19aabda3d3e1aeff769c8fe9ba561f334))
+
 ## [0.1.2](https://github.com/shuymn/artifacts/compare/v0.1.1...v0.1.2) (2026-11-16)
 
 
