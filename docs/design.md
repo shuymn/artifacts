@@ -103,7 +103,7 @@ skipped only when every configured host is a `localhost` name, and the deploymen
 - **ID:** 26 characters from `a-z2-7` (RFC 4648 base32, lowercase), each from 5 bits of a byte of
   `crypto.getRandomValues`: 130 bits, a valid DNS label, and not guessable from a public link. Deleting keeps a
   tombstone row, so an ID is never reused and no new artifact inherits an old origin's state (ISO-1).
-- **Title:** one line (no control characters), at most 1 KiB of UTF-8: lists show it on one line.
+- **Title:** non-empty, one line (no control characters), at most 1 KiB of UTF-8: lists show it on one line.
 - **Description:** any text, tabs and line breaks included, at most 16 KiB of UTF-8: a listing carries it for up to 100
   artifacts.
 - Both belong to a version; the artifact shows its latest version's. An update that omits them keeps the base's.
@@ -214,14 +214,16 @@ extension, with `; charset=utf-8` on text types and `application/octet-stream` f
 
 ### Limits
 
-| Bound                                | Value                | Reason                                                                                                                                                                                                                                        |
-| ------------------------------------ | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| REST publish request body            | 32 MiB               | `formData()` holds the body in memory; an isolate has 128 MB and may serve several requests at once                                                                                                                                           |
-| MCP request body                     | 4 MiB                | the SDK's default; large binaries go through REST                                                                                                                                                                                             |
-| Files per version and per request    | 2000                 | each new file costs up to four R2 calls (`head`, `put`, two retries) against 10,000 subrequests per invocation ([limits](https://developers.cloudflare.com/workers/platform/limits/)); equal bounds let any version be created in one request |
-| Path, title, description             | 1 KiB, 1 KiB, 16 KiB | above                                                                                                                                                                                                                                         |
-| File content returned by `read_file` | 1 MiB                | tool results go into the model's context                                                                                                                                                                                                      |
-| Page size of a listing               | 1 to 100, default 50 | response size                                                                                                                                                                                                                                 |
+| Bound                                | Value                      | Reason                                                                                                                                                                                                                                        |
+| ------------------------------------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| REST publish request body            | 32 MiB                     | `formData()` holds the body in memory; an isolate has 128 MB and may serve several requests at once                                                                                                                                           |
+| MCP request body                     | 4 MiB                      | the SDK's default; large binaries go through REST                                                                                                                                                                                             |
+| REST `PATCH` body                    | 4 KiB, whitespace included | the largest valid body is under 100 bytes; the bound is counted on the raw body                                                                                                                                                               |
+| Files per version and per request    | 2000                       | each new file costs up to four R2 calls (`head`, `put`, two retries) against 10,000 subrequests per invocation ([limits](https://developers.cloudflare.com/workers/platform/limits/)); equal bounds let any version be created in one request |
+| Path, title, description             | 1 KiB, 1 KiB, 16 KiB       | above                                                                                                                                                                                                                                         |
+| File content returned by `read_file` | 1 MiB                      | tool results go into the model's context                                                                                                                                                                                                      |
+| Page size of a listing               | 1 to 100, default 50       | response size                                                                                                                                                                                                                                 |
+| Wait for an R2 call, a D1 read       | 30 s, 10 s                 | RES-2; a `put` carries up to the REST request bound, and a D1 read is an indexed lookup or a page of at most 100 rows. The Access key set waits 5 s (ACC-1)                                                                                   |
 
 A file's size is bounded by the request it travels in. The body is counted as it is read (RES-1). There is no quota and
 no limit on versions.
@@ -231,13 +233,18 @@ no limit on versions.
 - **MCP:** each file is `{ path, content, encoding, content_type? }`, `encoding` `"utf8"` (default; well-formed
   Unicode) or `"base64"` (RFC 4648 with padding, no whitespace).
 - **REST:** `multipart/form-data`: a `meta` part with the JSON input; `meta.files[n]` gives the path and optional type
-  of the n-th part named `file`. Part names, file names and part types are ignored, so no path depends on how a client
-  encodes a part header.
+  of the n-th part named `file`. A part's file name and `Content-Type` are ignored, so no path depends on how a client
+  encodes a part header; a part named other than `meta` or `file` is `invalid_request`. A `file` part must carry a
+  file name all the same: without one, multipart parsing yields its content as text decoded from UTF-8, which changes
+  bytes that are not UTF-8, so it is `invalid_request` before any write.
 
 ### Serving
 
-- `Content-Type` as stored, `ETag: "<sha256>"`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` (a
-  public host is its share link; a page can set its own policy), no CORS headers (SRV-1, ISO-2).
+- `Content-Type` as stored, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` (a public host is its
+  share link; a page can set its own policy), no CORS headers (SRV-1, ISO-2).
+- `ETag` names the representation, the bytes with their type: 32 hex digits of the SHA-256 over the file's SHA-256 and
+  its content type. The same bytes published again under another type get another tag, so a cached copy with the old
+  type is not revalidated. The REST file route sends the same tag.
 - `Cache-Control: private, no-cache` on private hosts and `no-cache` on public hosts, for the latest and pinned versions
   alike. Access, the public flag and existence are checked before `If-None-Match` answers 304 (SRV-3), so revoking
   access, making an artifact private or deleting it takes effect on the next request. Immutability belongs to storage,
@@ -254,7 +261,8 @@ no limit on versions.
 
 - **API tokens:** `art_` + 32 base32 characters (160 bits), generated by a repository script that prints the token
   once and its entry. The secret `API_TOKENS` maps a token name (`[a-z0-9-]{1,32}`, one per agent) to the hex SHA-256
-  of the token; a plain hash suffices for a random token, and about 40 entries fit in a 5 KB variable. The Worker
+  of the token; a plain hash suffices for a random token, and about 40 entries fit in a 5 KB variable. It is a JSON
+  object, `{"codex": "<64 lowercase hex>", …}`; two entries with the same hash are refused. The Worker
   compares the hash with every entry using `crypto.subtle.timingSafeEqual`
   ([Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)); the name becomes the version's
   `published_by` (TOK-1, TOK-3). Revoking is removing the entry and putting the secret again. OAuth is not used: every
@@ -307,15 +315,15 @@ no limit on versions.
     "archived": false,
     "archive": null,
     "latest_version": 3,
-    "created_at": "2026-11-16T09:00:00Z",
-    "updated_at": "2026-11-16T10:00:00Z",
+    "created_at": "2026-11-16T09:00:00.000Z",
+    "updated_at": "2026-11-16T10:00:00.000Z",
     "url": "https://k2x7…-art.example.com/",
     "public_url": null,
     "gallery_url": "https://artifacts.example.com/a/k2x7…"
   },
   "version": {
     "number": 3,
-    "created_at": "2026-11-16T10:00:00Z",
+    "created_at": "2026-11-16T10:00:00.000Z",
     "published_by": "codex",
     "title": "Quarterly chart",
     "description": "",

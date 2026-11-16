@@ -12,6 +12,12 @@ catalogs:
     '@cloudflare/workers-types':
       specifier: 5.20261112.1
       version: 5.20261112.1
+    jose:
+      specifier: 6.2.17
+      version: 6.2.17
+    mime:
+      specifier: 4.1.2
+      version: 4.1.2
     typescript:
       specifier: 7.0.2
       version: 7.0.2
@@ -21,6 +27,9 @@ catalogs:
     wrangler:
       specifier: 4.161.0
       version: 4.161.0
+    zod:
+      specifier: 4.6.7
+      version: 4.6.7
 
 importers:
 
@@ -46,6 +55,16 @@ importers:
         version: 7.0.2007
 
   packages/worker:
+    dependencies:
+      jose:
+        specifier: 'catalog:'
+        version: 6.2.17
+      mime:
+        specifier: 'catalog:'
+        version: 4.1.2
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
     devDependencies:
       '@cloudflare/vitest-plugin':
         specifier: 'catalog:'
@@ -1270,6 +1289,9 @@ packages:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
 
+  jose@6.2.17:
+    resolution: {integrity: sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg==}
+
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
@@ -1420,6 +1442,11 @@ packages:
 
   magic-string@1.4.5:
     resolution: {integrity: sha512-oLLC2+YvQUfAa+vxoufE/yc1icb87M9iXIRqAoR/2EhE/8cb3SF/+Gi0c2By1B+5Vz2e2vQtUvHiu1+63Znh+w==}
+
+  mime@4.1.2:
+    resolution: {integrity: sha512-ikRzZ2RwbUVDyL9SsU0f2Phcmav4yq5r8faH5ZZKHtOZrMBLnrQOrj0uvqZ5R1uQnj+RO7Wcklw/lAf81mP9LQ==}
+    engines: {node: '>=16'}
+    hasBin: true
 
   miniflare@5.20261110.2-beta:
     resolution: {integrity: sha512-vzUwcal5OtR/1nr5cmjCbZSrsR3QRA1cDnRUDVgET17HeDkdpQNG2QxeIkuHFLyszjdBqme59w8Nrrj4FkuFsQ==}
@@ -1726,6 +1753,9 @@ packages:
 
   zod@4.6.6:
     resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
+
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
 snapshots:
 
@@ -2559,6 +2589,8 @@ snapshots:
 
   jiti@2.7.0: {}
 
+  jose@6.2.17: {}
+
   js-tokens@4.0.0: {}
 
   js-yaml@4.3.2:
@@ -2668,6 +2700,8 @@ snapshots:
   magic-string@1.4.5:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  mime@4.1.2: {}
 
   miniflare@5.20261110.2-beta:
     dependencies:
@@ -2991,3 +3025,5 @@ snapshots:
       youch-core: 0.3.3
 
   zod@4.6.6: {}
+
+  zod@4.6.7: {}
