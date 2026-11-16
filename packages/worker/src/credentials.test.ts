@@ -94,30 +94,72 @@ async function expectRefused(response: Response, resource: ResourceRoute): Promi
   expect(await response.json()).toMatchObject({ error: { code: "unauthorized" } });
 }
 
+/** A second host configuration, on its own domains, so that no value of the default fixture can pass for it. */
+const OTHER_HOSTS = {
+  APP_HOST: "gallery.example.net",
+  API_HOST: "agents.example.net",
+  CONTENT_HOST_SUFFIX: "-p.example-content.net",
+  PUBLIC_HOST_SUFFIX: "-s.example-content.net",
+} as const;
+
 // Section 7, RFC 9728.
 describe("the protected resource metadata", () => {
-  it("serves one document per resource from the configuration, to GET and HEAD, without a credential or storage", async () => {
-    const world = new World();
-    const { db, bucket } = untouchable(world);
-    const kv = observedKv(world);
+  it.each<[string, Partial<Env>, string]>([
+    ["the default hosts", {}, API],
+    ["another host configuration", OTHER_HOSTS, `https://${OTHER_HOSTS.API_HOST}`],
+  ])(
+    "serves one document per resource from %s, to GET and HEAD, without a credential or storage, and the 401 names it",
+    async (_name, vars, origin) => {
+      const world = new World({ vars });
+      const { db, bucket } = untouchable(world);
+      const kv = observedKv(world);
+      for (const resource of ROUTES) {
+        const url = `${origin}/.well-known/oauth-protected-resource/${resource}`;
+        const response = await world.fetch(url, { headers: { Origin: "https://evil.example.org" } });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          resource: `${origin}/${resource}`,
+          authorization_servers: [origin],
+          bearer_methods_supported: ["header"],
+          resource_name: resource === "mcp" ? "artifacts MCP" : "artifacts REST API",
+        });
+        expect(response.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
+        expect([...response.headers.keys()].filter((name) => name.startsWith("access-control-"))).toEqual([]);
+        const head = await world.fetch(url, { method: "HEAD" });
+        expect(head.status).toBe(200);
+        expect(await head.text()).toBe("");
+        const refused = await world.fetch(`${origin}/${resource === "mcp" ? "mcp" : "v1/artifacts"}`, {
+          method: "POST",
+        });
+        expect(refused.status).toBe(401);
+        expect(refused.headers.get("WWW-Authenticate")).toBe(`Bearer resource_metadata="${url}"`);
+      }
+      expect(db.batches).toBe(0);
+      expect(bucket.calls).toEqual([]);
+      expect(kv).toEqual([]);
+    },
+  );
+
+  it("answers 404 on both documents where OAuth is off, as in a localhost configuration", async () => {
+    const world = new World({
+      vars: {
+        APP_HOST: "app.localhost:8787",
+        API_HOST: "api.localhost:8787",
+        CONTENT_HOST_SUFFIX: "-art.localhost:8787",
+        PUBLIC_HOST_SUFFIX: "-pub.localhost:8787",
+      },
+    });
     for (const resource of ROUTES) {
-      const response = await world.fetch(metadataUrl(resource), { headers: { Origin: "https://evil.example.org" } });
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({
-        resource: `${API}/${resource}`,
-        authorization_servers: [API],
-        bearer_methods_supported: ["header"],
-        resource_name: resource === "mcp" ? "artifacts MCP" : "artifacts REST API",
-      });
-      expect(response.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
-      expect([...response.headers.keys()].filter((name) => name.startsWith("access-control-"))).toEqual([]);
-      const head = await world.fetch(metadataUrl(resource), { method: "HEAD" });
-      expect(head.status).toBe(200);
-      expect(await head.text()).toBe("");
+      for (const method of ["GET", "HEAD"]) {
+        const response = await world.fetch(
+          `http://api.localhost:8787/.well-known/oauth-protected-resource/${resource}`,
+          {
+            method,
+          },
+        );
+        expect({ resource, method, status: response.status }).toEqual({ resource, method, status: 404 });
+      }
     }
-    expect(db.batches).toBe(0);
-    expect(bucket.calls).toEqual([]);
-    expect(kv).toEqual([]);
   });
 
   it("answers 404 on any other path under it, and 405 with Allow to other methods, OPTIONS included", async () => {
