@@ -1,7 +1,8 @@
 /**
  * The artifacts Worker (docs/design.md). One Worker serves every host: it classifies the request's host first
  * (HOST-1), then authenticates it for the host's class (Access JWT on the app and private content hosts, a bearer token
- * on the API host, none on public hosts) before any storage is read.
+ * on the API host, none on public hosts) before any storage is read. The API host's OAuth authorization server paths
+ * take no credential; only they reach the OAuth library.
  */
 import { AccessVerifier, type AccessSettings } from "./access.ts";
 import { parseConfig, type Config } from "./config.ts";
@@ -10,8 +11,9 @@ import { classifyHost } from "./hosts.ts";
 import { newArtifactId, type ArtifactId } from "./id.ts";
 import { errorName, logEvent, type HostKind } from "./log.ts";
 import { handleMcp } from "./mcp.ts";
+import { AUTHORIZE_PATH, isApiOAuthPath, LIBRARY_PATHS, serveOAuth } from "./oauth.ts";
 import type { OperationDeps } from "./operations.ts";
-import { handleRest, jsonResponse, transportError } from "./rest.ts";
+import { handleRest, jsonResponse, restAllow, transportError } from "./rest.ts";
 import { methodAllowed, methodNotAllowed, plainResponse, serveArtifact, type BrowserClass } from "./serve.ts";
 import { TIMEOUTS, type Timeouts } from "./timeout.ts";
 import { authenticate } from "./tokens.ts";
@@ -56,27 +58,38 @@ async function refuseWithoutAccess(
   return plainResponse("private", outcome.status);
 }
 
-/**
- * The paths OAuth serves (design.md section 7): on the API host, the authorization server's metadata, token and
- * registration endpoints and the protected resource metadata; on the app host, the authorization endpoint.
- */
-const API_OAUTH_PATHS: ReadonlySet<string> = new Set([
-  "/.well-known/oauth-authorization-server",
-  "/oauth/token",
-  "/oauth/register",
-]);
-const RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
-const AUTHORIZE_PATH = "/oauth/authorize";
-
-function isApiOAuthPath(path: string): boolean {
-  return API_OAUTH_PATHS.has(path) || path === RESOURCE_METADATA_PATH || path.startsWith(`${RESOURCE_METADATA_PATH}/`);
-}
-
 const noSuchRoute = () => jsonResponse(404, { error: { code: "not_found", message: "no such route" } });
 
-async function api(request: Request, url: URL, env: Env, config: Config, deps: WorkerDeps): Promise<Response> {
+/** The methods of the route that takes `url` behind a bearer token, for `Allow`; undefined when none does. */
+function apiAllow(url: URL): string | undefined {
+  if (url.pathname === "/mcp") return "POST";
+  if (url.pathname.startsWith("/v1/")) return restAllow(url);
+  return undefined;
+}
+
+async function api(
+  request: Request,
+  url: URL,
+  env: Env,
+  ctx: ExecutionContext,
+  config: Config,
+  deps: WorkerDeps,
+): Promise<Response> {
   // OAuth is off in a localhost configuration, so its paths do not exist, whatever the credential.
   if (!config.oauth && isApiOAuthPath(url.pathname)) return noSuchRoute();
+  // The authorization server takes no bearer token; `fetch` refused a configuration with OAuth and without OAUTH_KV.
+  if (config.oauth && env.OAUTH_KV !== undefined && LIBRARY_PATHS.has(url.pathname)) {
+    return serveOAuth(request, url, env, env.OAUTH_KV, config, {
+      now: deps.now,
+      kvReadMs: deps.timeouts.kvReadMs,
+      ctx,
+    });
+  }
+  // ISO-2: a preflight answers 405 before authentication, so no API answer is readable from another origin.
+  if (request.method === "OPTIONS") {
+    const allow = apiAllow(url);
+    return allow === undefined ? noSuchRoute() : transportError("method_not_allowed", { Allow: allow });
+  }
   const auth = await authenticate(request, config.tokens);
   if (!auth.ok) {
     logEvent("token.refused", { reason: auth.reason });
@@ -109,12 +122,12 @@ async function browser(
   return serveArtifact(request, url, operationDeps(env, config, deps), id, kind);
 }
 
-/** The Worker's fetch handler; it uses neither the execution context nor `cf`. */
-export type Worker = { fetch(request: Request, env: Env): Promise<Response> };
+/** The Worker's fetch handler; the execution context goes to the OAuth library only, and `cf` is not used. */
+export type Worker = { fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> };
 
 export function createWorker(deps: WorkerDeps): Worker {
   return {
-    async fetch(request, env): Promise<Response> {
+    async fetch(request, env, ctx): Promise<Response> {
       const parsed = parseConfig(env);
       if (!parsed.ok) {
         logEvent("config.invalid", {
@@ -138,7 +151,7 @@ export function createWorker(deps: WorkerDeps): Worker {
           case "unmatched":
             return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
           case "api":
-            return await api(request, url, env, config, deps);
+            return await api(request, url, env, ctx, config, deps);
           case "app":
             return withGalleryPolicy(await browser(request, url, env, config, deps, "app", undefined));
           case "content":

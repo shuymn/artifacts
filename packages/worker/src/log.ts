@@ -7,6 +7,8 @@
 import type { AccessReason } from "./access.ts";
 import type { ConfigErrorCode, ConfigVariable } from "./config.ts";
 import type { ArtifactId } from "./id.ts";
+import type { OAuthErrorCategory, OAuthErrorCode } from "./oauth.ts";
+import type { GrantId } from "./revocation.ts";
 import type { ArchiveSetting } from "./schemas.ts";
 import type { TokenName, TokenRefusal } from "./tokens.ts";
 
@@ -22,6 +24,8 @@ export const LOG_EVENTS = [
   "cleanup.failed",
   "operation.failed",
   "request.failed",
+  "oauth.refused",
+  "grant.revoked",
 ] as const;
 export type LogEvent = (typeof LOG_EVENTS)[number];
 
@@ -38,6 +42,8 @@ const LEVEL: Record<LogEvent, "log" | "error"> = {
   "cleanup.failed": "error",
   "operation.failed": "error",
   "request.failed": "error",
+  "oauth.refused": "log",
+  "grant.revoked": "log",
 };
 
 /** Error classes logged by name. Any other value, a custom error class included, is logged as `other`. */
@@ -53,7 +59,8 @@ export type HostKind = (typeof HOST_KINDS)[number];
 
 /** Every field a log line can carry, each typed by a closed set, a validated name or a number. */
 export type LogFields = {
-  readonly reason?: ConfigErrorCode | AccessReason | TokenRefusal | StorageFailure;
+  /** `revoked`: the token endpoint refused a grant with a revocation record. */
+  readonly reason?: ConfigErrorCode | AccessReason | TokenRefusal | StorageFailure | "revoked";
   readonly variable?: ConfigVariable;
   /** A binding the configuration needs and the Worker lacks. */
   readonly binding?: "OAUTH_KV";
@@ -65,6 +72,10 @@ export type LogFields = {
   readonly public?: boolean;
   readonly archive?: ArchiveSetting | null;
   readonly count?: number;
+  readonly grant?: GrantId;
+  /** An OAuth error code and the library's category for it, each from a closed set. */
+  readonly code?: OAuthErrorCode;
+  readonly category?: OAuthErrorCategory;
 };
 
 export function logEvent(event: LogEvent, fields: LogFields = {}): void {

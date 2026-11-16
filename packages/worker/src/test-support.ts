@@ -4,6 +4,7 @@
  * bindings to inject failures.
  */
 import { Client, StreamableHTTPClientTransport, type CallToolResult } from "@modelcontextprotocol/client";
+import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { exportJWK, generateKeyPair, SignJWT, type JWK, type JWTPayload } from "jose";
 import { vi } from "vitest";
@@ -11,6 +12,7 @@ import { vi } from "vitest";
 import { AccessVerifier } from "./access.ts";
 import { isArtifactId, newArtifactId } from "./id.ts";
 import { createWorker, type Worker } from "./index.ts";
+import type { Timeouts } from "./timeout.ts";
 
 export const TEAM = "team.example.com";
 export const APP_AUD = "app-audience";
@@ -112,7 +114,7 @@ export class World {
   env: Env;
   readonly worker: Worker;
 
-  constructor(options: { vars?: Vars; timeouts?: { r2Ms: number; d1ReadMs: number }; keyTimeoutMs?: number } = {}) {
+  constructor(options: { vars?: Vars; timeouts?: Timeouts; keyTimeoutMs?: number } = {}) {
     this.env = testEnv(options.vars);
     const access = new AccessVerifier({
       fetch: this.keys.fetch,
@@ -129,14 +131,14 @@ export class World {
       sleep: async (ms) => {
         this.sleeps.push(ms);
       },
-      timeouts: options.timeouts ?? { r2Ms: 2_000, d1ReadMs: 2_000 },
+      timeouts: options.timeouts ?? { r2Ms: 2_000, d1ReadMs: 2_000, kvReadMs: 2_000 },
       access,
     });
   }
 
   async fetch(input: Request | string, init?: RequestInit): Promise<Response> {
     const request = typeof input === "string" ? new Request(input, init) : input;
-    return this.worker.fetch(request, this.env);
+    return this.worker.fetch(request, this.env, createExecutionContext());
   }
 
   async jwt(options: JwtOptions = {}): Promise<string> {
@@ -364,6 +366,17 @@ export async function clearStorage(): Promise<void> {
     const listed = await env.FILES.list();
     if (listed.objects.length === 0) return;
     await env.FILES.delete(listed.objects.map((object) => object.key));
+  }
+}
+
+/** Empties `OAUTH_KV`, which the tests share like D1 and R2. */
+export async function clearOAuthStorage(): Promise<void> {
+  const kv = env.OAUTH_KV;
+  if (kv === undefined) return;
+  for (;;) {
+    const listed = await kv.list();
+    if (listed.keys.length === 0) return;
+    await Promise.all(listed.keys.map((key) => kv.delete(key.name)));
   }
 }
 

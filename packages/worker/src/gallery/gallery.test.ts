@@ -1,5 +1,6 @@
 // The gallery on the app host (design.md section 10; docs/gallery/design.md): its pages, their data, paging, the
 // headers of every response and the escaping of artifact text.
+import { createExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import rootPackage from "../../../../package.json" with { type: "json" };
@@ -486,11 +487,11 @@ describe("ISO-5: escaping artifact text", () => {
       now: () => START,
       newId: newArtifactId,
       sleep: async () => {},
-      timeouts: { r2Ms: 2_000, d1ReadMs: 2_000 },
+      timeouts: { r2Ms: 2_000, d1ReadMs: 2_000, kvReadMs: 2_000 },
       access: new ThrowingVerifier({ fetch: world.keys.fetch, now: () => START }),
     });
     captureLogs();
-    responses.push(await failing.fetch(new Request(`https://${APP_HOST}/`), world.env));
+    responses.push(await failing.fetch(new Request(`https://${APP_HOST}/`), world.env, createExecutionContext()));
     const unreachable = new World({ keyTimeoutMs: 50 });
     unreachable.keys.mode = "hang";
     responses.push(await app(unreachable, "/"));
@@ -582,7 +583,7 @@ describe("section 10: headers", () => {
 
   // RES-2: the gallery's reads have the D1 read timeout.
   it("answers 503 when a read times out", async () => {
-    const world = new World({ timeouts: { r2Ms: 2_000, d1ReadMs: 50 } });
+    const world = new World({ timeouts: { r2Ms: 2_000, d1ReadMs: 50, kvReadMs: 2_000 } });
     const id = await create(world, "Page");
     const db = new DatabaseProbe();
     db.behave = () => never();
@@ -935,7 +936,7 @@ describe("section 10: page validators", () => {
   });
 
   it("sends no tag and no 304 on a refusal, a 404, a failed read or a redirect", async () => {
-    const world = new World({ timeouts: { r2Ms: 2_000, d1ReadMs: 50 } });
+    const world = new World({ timeouts: { r2Ms: 2_000, d1ReadMs: 50, kvReadMs: 2_000 } });
     const id = await create(world, "Page");
     const etag = (await app(world, "/")).headers.get("ETag") ?? "";
     const matching = { "If-None-Match": "*" };

@@ -37,6 +37,17 @@ function counted(request: Request, limit: number): { body: ReadableStream | null
   return { body, over: () => over };
 }
 
+/** The bytes of `request`'s body, read through the count, for a parser that reads them later (the OAuth library). */
+export async function readBytes(request: Request, limit: number): Promise<BodyRead<Uint8Array>> {
+  const body = counted(request, limit);
+  if (body === undefined) return { ok: false, reason: "too_large" };
+  try {
+    return { ok: true, value: new Uint8Array(await new Response(body.body).arrayBuffer()) };
+  } catch {
+    return { ok: false, reason: body.over() ? "too_large" : "malformed" };
+  }
+}
+
 /** The multipart body of `request`, read through the count. */
 export async function readFormData(request: Request, limit: number): Promise<BodyRead<FormData>> {
   const body = counted(request, limit);
