@@ -2,13 +2,14 @@
  * The gallery on the app host (design.md section 10): `/`, `/archived` and `/a/<id>`, and the stylesheets, fonts and
  * icon they load. index.ts has checked the method (ISO-3) and Access (ACC-1) before this runs, and adds the gallery's
  * CSP to every app-host response, these included (`withGalleryPolicy`; ISO-5). Every response here carries the app
- * host's headers (`private, no-cache`, CORP, nosniff, no referrer; ISO-2). A deleted or unknown artifact, a malformed
- * cursor and any other path answer 404.
+ * host's headers (`private, no-cache`, CORP, nosniff, no referrer; ISO-2), except that a fingerprinted asset is cached
+ * as immutable (design.md section 6). A deleted or unknown artifact, a malformed cursor, an asset path that names no
+ * current asset, and any other path answer 404.
  */
 import type { OperationErrorCode } from "../errors.ts";
 import { getForGallery, listForGallery, type ArchiveCounts, type OperationDeps } from "../operations.ts";
 import { browserHeaders, plainResponse, serveAsset } from "../serve.ts";
-import { ASSETS } from "./assets.ts";
+import { FAVICON, findAsset, GALLERY_ASSETS, type FingerprintedAssets } from "./assets.ts";
 import type { Markup } from "./html.ts";
 import { artifactPage, listPage, type Chrome, type Section } from "./pages.ts";
 
@@ -24,6 +25,12 @@ const CONTENT_SECURITY_POLICY =
   "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 const HEADERS = browserHeaders("private");
+
+/**
+ * Design.md section 6: a fingerprinted asset's path changes with its bytes, so a cached copy never goes stale and the
+ * browser need not revalidate it. Still `private`: it is behind Access.
+ */
+const IMMUTABLE_HEADERS = { ...HEADERS, "Cache-Control": "private, max-age=31536000, immutable" };
 
 /**
  * ISO-5: the app host's response with the gallery's CSP. index.ts applies it to every app-host response at its outer
@@ -65,11 +72,27 @@ function page(request: Request, markup: Markup): Response {
   });
 }
 
+/**
+ * An asset's answer, or `undefined` when the path names no asset. `/favicon.ico` keeps its URL, so it revalidates like
+ * a stored file (`no-cache` with an ETag). Any other asset at its current fingerprinted path is immutable; at an
+ * outdated or unhashed path, which a page from another deployment names, it is the current file, revalidated, so no
+ * browser keeps these bytes under that path (design.md section 6). `assets` is the deployed set; tests pass another.
+ */
+export function serveGalleryAsset(
+  request: Request,
+  path: string,
+  assets: FingerprintedAssets = GALLERY_ASSETS,
+): Promise<Response> | undefined {
+  if (path === "/favicon.ico") return serveAsset(request, FAVICON, HEADERS);
+  const found = findAsset(assets, path);
+  if (found === undefined) return undefined;
+  return serveAsset(request, found.asset, found.current ? IMMUTABLE_HEADERS : HEADERS);
+}
+
 export async function serveGallery(request: Request, url: URL, deps: OperationDeps): Promise<Response> {
   const path = url.pathname;
-  // An asset revalidates like a stored file (`no-cache` with an ETag), so a deployment's new stylesheet shows at once.
-  const file = ASSETS.get(path);
-  if (file !== undefined) return serveAsset(request, file, "private");
+  const asset = serveGalleryAsset(request, path);
+  if (asset !== undefined) return asset;
 
   const chrome = (counts: ArchiveCounts): Chrome => ({
     counts,
