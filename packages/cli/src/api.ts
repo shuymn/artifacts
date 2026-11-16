@@ -306,9 +306,15 @@ export class Api {
     await this.#call("DELETE", `/v1/artifacts/${segment(id)}`, this.#timeouts.requestMs, answer);
   }
 
-  /** `DELETE /v1/grants/{id}`, under `timeoutMs`. */
+  /** `DELETE /v1/grants/{id}`, under `timeoutMs`. Only a 204 confirms the revocation; any other success fails. */
   async revokeGrant(id: string, timeoutMs: number): Promise<void> {
-    await this.#call("DELETE", `/v1/grants/${segment(id)}`, timeoutMs, answer);
+    await this.#call("DELETE", `/v1/grants/${segment(id)}`, timeoutMs, async (response) => {
+      if (!response.ok || response.status === 204) return answer(response);
+      await response.body?.cancel().catch(() => undefined);
+      throw new CliError(
+        `the API answered ${response.status} instead of 204, so the revocation is not confirmed; the login is kept`,
+      );
+    });
   }
 
   /**

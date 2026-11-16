@@ -433,6 +433,16 @@ describe("PL-51: logout", () => {
       "the server does not list this login's grant yet; the login is kept, so run artifacts logout again",
     ],
     ["no answer", "network", "no answer from the API (ECONNRESET)"],
+    [
+      "a 200",
+      { status: 200, body: {} },
+      "the API answered 200 instead of 204, so the revocation is not confirmed; the login is kept",
+    ],
+    [
+      "a 202",
+      { status: 202 },
+      "the API answered 202 instead of 204, so the revocation is not confirmed; the login is kept",
+    ],
   ])("keeps the login after %s, so running it again completes it", async (_name, answer, message) => {
     const { standIn, credentials, env } = await setup();
     const { client, grant, tokens } = standIn.issue();
