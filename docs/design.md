@@ -245,7 +245,8 @@ no limit on versions.
   share link; a page can set its own policy), no CORS headers (SRV-1, ISO-2).
 - `ETag` names the representation, the bytes with their type: 32 hex digits of the SHA-256 over the file's SHA-256 and
   its content type. The same bytes published again under another type get another tag, so a cached copy with the old
-  type is not revalidated. The REST file route sends the same tag.
+  type is not revalidated. The REST file route sends the same tag. Cloudflare removes the tag from artifact HTML on
+  delivery, so HTML is sent in full on every revalidation ([operations.md](operations.md), section 1, "Known limit").
 - `Cache-Control: private, no-cache` on private hosts and `no-cache` on public hosts, for the latest and pinned versions
   alike. Access, the public flag and existence are checked before `If-None-Match` answers 304 (SRV-3), so revoking
   access, making an artifact private or deleting it takes effect on the next request. Immutability belongs to storage,
