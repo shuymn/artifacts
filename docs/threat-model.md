@@ -106,7 +106,8 @@ adversaries below, not untrusted users.
   reason code only. _Enforced (main)_ in `src/access.ts`. Pinned by behavior (`src/access.test.ts`,
   `src/routing.test.ts`; a local key set: missing JWT, bad signature, other issuer, the other class's audience, missing
   `exp`, expired and the tolerance edges, an algorithm other than RS256, an unknown `kid` that refreshes the set once,
-  an unreachable key endpoint, a valid JWT sent only as a cookie).
+  an unreachable key endpoint, a valid JWT sent only as a cookie). **Gap:** the production durations (a key set reused
+  for 7 days, a 5 s key fetch) are checked by review, not by tests, which substitute short ones.
 - **ACC-2: Access verification is skipped only for a `localhost` configuration.** Every configured host must be a
   `localhost` name; no variable turns verification off, and the deployment script refuses `localhost` hosts and ports.
   _Enforced (main)_ in `src/config.ts`. Pinned by behavior (`src/routing.test.ts`: production-shaped hosts without a
@@ -219,7 +220,8 @@ adversaries below, not untrusted users.
   timeout and answer 503 `unavailable`; a publish that times out before its commit leaves no version. The D1 commit
   has none: a timed-out commit could still apply. _Enforced (main)_ in `src/timeout.ts`, `src/objects.ts`, `src/db.ts`,
   `src/access.ts`. Pinned by behavior (`src/access.test.ts`, `src/publish.test.ts`: slow key endpoint, R2 and D1
-  reads; a slow commit still applies).
+  reads; a slow commit still applies). **Gap:** the production waits (5 s for Access keys, 30 s per R2 call, 10 s per D1
+  read) are checked by review, not by tests, which substitute short ones.
 
 ### Data (DATA)
 
