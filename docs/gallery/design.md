@@ -19,10 +19,25 @@ then the templates. Content and behavior of each page are in [design.md](../desi
 - **No script, forms or frames** (design.md, section 10). Every state is a link or plain markup.
 - **Text scales with the user's setting.** Each page has `<meta name="text-scale" content="scale">`, no rule sets a
   root `font-size`, and text and the spacing around it are in `rem`.
-- **Fonts are served by the Worker**: IBM Plex Sans and IBM Plex Mono (Latin subsets, `woff2`,
-  `font-display: swap`) in a separate `@font-face` stylesheet. `gallery.css` falls back to `system-ui` and
-  `ui-monospace` with `font-size-adjust: from-font`, so Japanese text falls back to the system font at the same
-  x-height. The reference pages load the same fonts from Google Fonts instead, for previewing only.
+- **Fonts are served by the Worker**: IBM Plex Sans and IBM Plex Mono (Latin subsets, `woff2`) in a separate
+  `@font-face` stylesheet, all at fingerprinted paths cached as immutable ([design.md](../design.md), section 6). A page
+  that loads its stylesheets or fonts after the next deployment gets that deployment's files at its own outdated paths,
+  revalidated rather than immutable, so it renders with the current stylesheet and fonts instead of unstyled.
+  `gallery.css` falls back to `system-ui` and `ui-monospace` with `font-size-adjust: from-font`, so Japanese text falls
+  back to the system font at the same x-height. The reference pages load the same fonts from Google Fonts instead, for
+  previewing only.
+- **Text never changes font after it shows.** Every face has `font-display: optional`, and every page preloads the faces
+  the top of its pages uses: Sans 400 (body), Sans 600 (headings, titles) and Mono 400 (counts, meta) at a font's
+  default priority, Sans 500 (links, badges) and Mono 600 (the wordmark) with `fetchpriority="low"`; Mono 500 is
+  declared but no rule uses it. A preloaded optional face holds rendering for up to about 100 ms until it loads, and a
+  face that misses that window is not swapped in later ([web.dev, "Prevent layout shifting and flashes of invisible text
+  by preloading optional fonts"](https://web.dev/articles/preload-optional-fonts)). With the files cached, only a page
+  that finds a face uncached (after its bytes change, or in a fresh browser) can miss it, and it then shows the fallback
+  until the next page. `swap` would paint the fallback first and swap each face in as it arrives, a flash whenever the
+  fonts are not already loaded. The `@font-face` rules stay in their own stylesheet rather than in `gallery.css` or
+  inline: the preloads let the browser fetch the fonts from the HTML, so the stylesheet no longer sits before them;
+  `gallery.css` stays the file the reference pages load; and an inline `<style>` would need its hash in the CSP's
+  `style-src` and would travel with every page instead of being cached once.
 
 ## Icon
 
@@ -34,11 +49,11 @@ it stays sharp at 16 px.
 - **Light and dark chrome.** The icon looks the same in both: the tile carries the gallery's own background, so the
   glyph keeps its contrast whatever the tab strip's color, and the ICO, which cannot switch, matches the SVG. A
   `prefers-color-scheme` variant would need a light palette the dark-only gallery does not have.
-- **Files.** Pages link `/assets/icon.svg` (`type="image/svg+xml"`) and `/favicon.ico` (`sizes="32x32"`, which keeps
-  Chrome from choosing the ICO over the SVG). [`favicon.ico`](../../packages/worker/src/gallery/favicon.ico) is
-  `icon.svg` rendered at 16 and 32 px and stored as PNG images; after a change to the SVG,
-  `uv run packages/worker/scripts/favicon.py` writes it again. Artifact hosts answer `/favicon.ico` with the same file
-  when the artifact has none ([design.md](../design.md), section 6).
+- **Files.** Pages link `icon.svg` at its fingerprinted path (`/assets/icon.<hash>.svg`, `type="image/svg+xml"`) and
+  `/favicon.ico` (`sizes="32x32"`, which keeps Chrome from choosing the ICO over the SVG).
+  [`favicon.ico`](../../packages/worker/src/gallery/favicon.ico) is `icon.svg` rendered at 16 and 32 px and stored as
+  PNG images; after a change to the SVG, `uv run packages/worker/scripts/favicon.py` writes it again. Artifact hosts
+  answer `/favicon.ico` with the same file when the artifact has none ([design.md](../design.md), section 6).
 
 ## Tokens
 

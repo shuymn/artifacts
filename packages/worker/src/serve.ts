@@ -67,20 +67,25 @@ export function matchesETag(header: string | null, etag: string): boolean {
 }
 
 /**
- * A file bundled with the Worker, with its host class's headers. It revalidates like a stored file (`no-cache` with an
- * ETag), and HEAD answers GET's headers without the body.
+ * A file bundled with the Worker, with the headers given: its host class's, under which it revalidates like a stored
+ * file (`no-cache` with an ETag), or the app host's immutable ones for a fingerprinted gallery asset. HEAD answers
+ * GET's headers without the body.
  */
-export async function serveAsset(request: Request, asset: Asset, kind: BrowserClass): Promise<Response> {
+export async function serveAsset(
+  request: Request,
+  asset: Asset,
+  hostHeaders: Record<string, string>,
+): Promise<Response> {
   const etag = await assetTag(asset);
   if (matchesETag(request.headers.get("If-None-Match"), etag)) {
-    return new Response(null, { status: 304, headers: { ETag: etag, ...browserHeaders(kind) } });
+    return new Response(null, { status: 304, headers: { ETag: etag, ...hostHeaders } });
   }
   const body = typeof asset.body === "string" ? new TextEncoder().encode(asset.body) : asset.body.slice(0);
   const headers = {
     "Content-Type": asset.contentType,
     "Content-Length": String(body.byteLength),
     ETag: etag,
-    ...browserHeaders(kind),
+    ...hostHeaders,
   };
   return new Response(request.method === "HEAD" ? null : body, { headers });
 }
@@ -110,7 +115,7 @@ export async function serveArtifact(
     const code = lookup.error.code;
     return plainResponse(kind, code === "not_found" ? 404 : code === "unavailable" ? 503 : 500);
   }
-  if (lookup.value.kind === "absent") return serveAsset(request, FAVICON, kind);
+  if (lookup.value.kind === "absent") return serveAsset(request, FAVICON, browserHeaders(kind));
   if (lookup.value.kind === "directory") {
     return new Response(null, {
       status: 308,

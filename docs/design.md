@@ -250,6 +250,19 @@ no limit on versions.
   alike. Access, the public flag and existence are checked before `If-None-Match` answers 304 (SRV-3), so revoking
   access, making an artifact private or deleting it takes effect on the next request. Immutability belongs to storage,
   not to the cache.
+- **Gallery assets** (section 10) are cached as immutable instead. They are not artifact files: the stylesheets, fonts
+  and SVG icon are bundled with the Worker and are the same for every request that passes Access, whatever an artifact's
+  visibility, so no later check could change the answer. Each is served at a fingerprinted path, its name with 16 hex
+  digits of the SHA-256 of its bytes (`/assets/gallery.<hash>.css`), computed when the Worker loads, with
+  `Cache-Control: private, max-age=31536000, immutable`: changed bytes get a new path, so a cached copy never goes stale
+  and a reload requests none of them. Only that exact path is immutable. A page can load its assets after the next
+  deployment is live, and a release before fingerprints named unhashed paths, so a path with a current asset's name and
+  extension under another fingerprint (`/assets/gallery.<other>.css`) or none (`/assets/gallery.css`) answers 200 with
+  the current file, `private, no-cache` and its `ETag`: the page gets today's stylesheet and fonts rather than none, and
+  no browser keeps them under a path that named other bytes. The Worker holds only the deployed bytes; keeping earlier
+  deployments' files would need storage that outlives a deployment. A `fonts.css` answered this way names the current
+  fonts' paths, which are immutable. A path that names no current asset answers 404. `/favicon.ico` keeps its fixed URL,
+  which browsers request on their own, and revalidates with the app host's `private, no-cache` and its `ETag`.
 - `Cross-Origin-Resource-Policy: same-origin` on every response of a private content host and of the app host,
   including 304, 308 and 404, so another origin cannot load private content as a script, image, stylesheet or media
   with the owner's cookie (ISO-2). Public hosts omit it: their content needs no credential, and other sites may embed
@@ -443,11 +456,12 @@ Server-rendered on `APP_HOST`, without script, forms or frames; the screens foll
 A deleted artifact and any other path answer 404. Artifact text is escaped and the CSP forbids scripts and framing
 (ISO-5). The gallery links to artifacts rather than framing them: Access's behavior in frames is not documented.
 
-Every page links the gallery's icon ([gallery/design.md](gallery/design.md), "Icon"): `/assets/icon.svg`, and
-`/favicon.ico` for browsers that take no SVG icon. `/favicon.ico` is a real ICO file rather than SVG content: Safari
-reads SVG icons only from version 26 ([caniuse](https://caniuse.com/link-icon-svg)), and no browser documents taking
-SVG at that path. Both are served as the other assets are; the CSP's `img-src 'self'` lets them load, since Firefox
-applies `img-src` to a page's icon.
+Every page links its stylesheets, preloads the fonts it uses ([gallery/design.md](gallery/design.md), "Ground rules")
+and links the gallery's icon ([gallery/design.md](gallery/design.md), "Icon"): `icon.svg` at its fingerprinted path
+(section 6), and `/favicon.ico` for browsers that take no SVG icon. `/favicon.ico` is a real ICO file rather than SVG
+content: Safari reads SVG icons only from version 26 ([caniuse](https://caniuse.com/link-icon-svg)), and no browser
+documents taking SVG at that path. The SVG is cached as immutable like the other assets and `/favicon.ico` revalidates
+(section 6); the CSP's `img-src 'self'` lets both load, since Firefox applies `img-src` to a page's icon.
 
 ## 11. Operations
 
