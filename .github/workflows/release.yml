@@ -1,0 +1,77 @@
+name: Release
+
+# Releases go through release-please: it keeps a release PR open from the Conventional Commits on main, and merging
+# that PR tags the release and creates its GitHub release. This workflow then fast-forwards the `release` branch to the
+# latest release, and Workers Builds deploys from `release` only (docs/operations.md). main itself is never deployed.
+#
+# Both steps use the repository's GitHub App token (scripts/github-app.mjs): a pull request opened with GITHUB_TOKEN
+# starts no workflow, so the release PR would never run the required checks.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Create App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          # Labels on pull requests are covered by the Pull requests permission.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Update the release PR or create the release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Runs on every push, so a failed run is repaired by running it again or by the next push.
+      - name: Fast-forward the release branch to the latest release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -eu
+          repo="repos/$GITHUB_REPOSITORY"
+          tag=$(gh api "$repo/releases" --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name // empty')
+          if [ -z "$tag" ]; then
+            echo "no release yet"
+            exit 0
+          fi
+          sha=$(gh api "$repo/commits/$tag" --jq .sha)
+          # The release must be a commit of main: main's head is the same commit or ahead of it.
+          status=$(gh api "$repo/compare/$sha...$GITHUB_SHA" --jq .status)
+          case "$status" in
+            ahead | identical) ;;
+            *)
+              echo "::error::$tag is not a commit of main ($status)"
+              exit 1
+              ;;
+          esac
+          if current=$(gh api "$repo/git/ref/heads/release" --jq .object.sha 2>/dev/null); then
+            if [ "$current" = "$sha" ]; then
+              echo "release is already at $tag"
+              exit 0
+            fi
+            # force=false: GitHub refuses an update that is not a fast-forward, so release never moves back or across.
+            gh api -X PATCH "$repo/git/refs/heads/release" -f sha="$sha" -F force=false >/dev/null
+          else
+            gh api -X POST "$repo/git/refs" -f ref=refs/heads/release -f sha="$sha" >/dev/null
+          fi
+          echo "release is at $tag ($sha)" >>"$GITHUB_STEP_SUMMARY"
