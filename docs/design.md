@@ -407,7 +407,8 @@ every version needs index.html at its root.
 
 - **Commands:** `publish <dir> [--id <id>] [--title <t>] [--description <d>]`, `list [--archived only|include]`,
   `get <id> [--version <n>]`, `pull <id> <dir> [--version <n>]`, `public <id> on|off`, `archive <id> on|off|auto`,
-  `delete <id>`, `token <name>`; `--json` prints the API's JSON. `list` follows every page. Configuration:
+  `delete <id>`, `token <name>`; `--json` prints the API's JSON, and `artifacts --version` alone prints the CLI's
+  version. `list` follows every page. Configuration:
   `ARTIFACTS_API_URL`, the API origin (`http` only for `localhost` names, since the token travels with it), and
   `ARTIFACTS_TOKEN`, which is never printed. The help text carries the authoring rule.
 - **`publish` without `--id`** creates (`--title` required). After a lost response (no answer, or a 5xx) it lists
@@ -426,8 +427,10 @@ every version needs index.html at its root.
   itself (a loop), is refused. The root
   `index.html`, the file count and the request bound are checked before sending; a publish over the bound is refused,
   not split into versions.
-- **Distribution:** TypeScript without runtime dependencies, run by Node 24 from a checkout and put on `PATH` by a
-  symbolic link; Node strips types outside `node_modules`, so there is no build and no npm package.
+- **Distribution:** TypeScript without runtime dependencies. Each release carries a single binary per platform (macOS
+  arm64, Linux x64 and arm64 with glibc, Windows x64), compiled by `bun build --compile` with the root package's
+  version inlined, with `SHA256SUMS`; it installs with mise's github backend. From a checkout, Bun runs the source,
+  put on `PATH` by a symbolic link. There is no npm package.
 
 ## 10. Gallery
 
@@ -461,8 +464,9 @@ The steps are in [operations.md](operations.md).
   `wrangler.deploy.jsonc` on the owner's machine. `API_TOKENS` is a secret. The deployment script
   (`scripts/deploy.ts`) checks the values with the Worker's own parser, merges them, checks that the bucket exists,
   applies the D1 migrations on every deploy and runs `wrangler deploy` (DATA-2).
-- **Releases:** `main` is never deployed. release-please keeps a release PR open; merging it tags a version, a
-  workflow fast-forwards the `release` branch to it, and Workers Builds deploys `release` only.
+- **Releases:** `main` is never deployed. release-please keeps a release PR open; merging it tags a version as a
+  draft release, a workflow builds the CLI binaries, attaches them and publishes it, then fast-forwards the `release`
+  branch to it, and Workers Builds deploys `release` only.
 - **Cloudflare setup by the owner:** the proxied wildcard DNS record, the two Access applications, the D1 database and a
   private R2 bucket, on Workers Paid.
 - **Logging:** `logEvent` only, with closed fields; every change logs its token name, so the 7 days of Workers Logs

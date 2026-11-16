@@ -19,26 +19,60 @@ does not state but a deployment of this repository showed.
 ## How a change reaches the deployment
 
 ```text
-main ──(release-please keeps a release PR open)──> merge the release PR ──> tag vX.Y.Z and GitHub release
-     ──(.github/workflows/release.yml fast-forwards)──> release ──(Workers Builds)──> scripts/deploy.ts
+main ──(release-please keeps a release PR open)──> merge the release PR ──> tag vX.Y.Z and a draft release
+     ──(.github/workflows/release.yml builds the CLI binaries and publishes)──> published release
+     ──(release.yml fast-forwards)──> release ──(Workers Builds)──> scripts/deploy.ts
 ```
 
 - `main` takes every change, dependency updates included, and is never deployed.
 - release-please keeps one release PR open with the next version and the changelog, from the Conventional Commits on
   `main` (one version for the repository: the `node` release type on the root package, tags `vX.Y.Z`, first release
-  `0.1.0`; `release-please-config.json`, `.release-please-manifest.json`). Merging it tags the release.
-- Releases are immutable (`release_immutability` in `.github/infra.yaml`): once published, a release's tag cannot be
-  moved or deleted, and deleting the release does not free its tag name
+  `0.1.0`; `release-please-config.json`, `.release-please-manifest.json`). Merging it tags the release and creates it
+  as a draft: `draft` keeps it unpublished, and `force-tag-creation` creates the tag with the draft, at the release's
+  commit, since GitHub creates a draft's tag only when it is published.
+- Releases are immutable (`release_immutability` in `.github/infra.yaml`): once published, a release's assets cannot
+  change, its tag cannot be moved or deleted, and deleting the release does not free its tag name
   ([immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)).
-  A bad release is fixed by the next one.
-- The release workflow then fast-forwards the `release` branch to the latest release. It refuses a release that is not
-  a commit of `main` and an update that is not a fast-forward: it updates the branch with `force=false`, which GitHub
-  refuses unless the update is a fast-forward
-  ([update a reference](https://docs.github.com/en/rest/git/refs#update-a-reference)). It runs on every push to `main`,
-  so running it again, or the next push, repairs a run that failed.
+  So the binaries go up while the release is a draft, and a bad release is fixed by the next one.
+- The release workflow then runs, in order, in the same run:
+  1. **prepare** runs release-please and finds the draft to finish: the one release-please just created; in a run
+     started again, the draft at the run's commit; in a manual run with `tag`, that tag's draft. It checks that the tag
+     is at the draft's commit and that the commit is on `main`. An ordinary push finds none and goes to step 4.
+  2. **build** (`.github/workflows/cli-binaries.yml`) builds the CLI's binary at that commit on each platform's own
+     runner: macOS arm64, Linux x64 and arm64 (glibc), Windows x64. Each checks that the root package's version is the
+     tag's, runs the smoke tests against the binary unpacked from its archive, and hands the archive to the next job.
+  3. **publish** runs only when every platform passed. It checks the four archives (names, the binary alone at the
+     root), writes `SHA256SUMS`, uploads them to the release while it is still a draft (replacing the assets an
+     earlier attempt left), checks the draft's assets against the files (size, and digest when GitHub gives one) and
+     publishes the release.
+  4. **fast-forward** moves the `release` branch to the latest published release. It refuses a release that is not a
+     commit of `main` and an update that is not a fast-forward: it updates the branch with `force=false`, which GitHub
+     refuses unless the update is a fast-forward
+     ([update a reference](https://docs.github.com/en/rest/git/refs#update-a-reference)). It runs on every push to
+     `main` and in every manual run, after publish when the run finishes a draft.
+- A draft never moves `release`. **A failing binary build blocks deployment until it is fixed:** a platform that does
+  not build or fails its smoke tests leaves the release a draft, and `release` stays at the previous release.
 - Workers Builds deploys each push to `release` and nothing else.
 
-Both workflow steps use the repository's GitHub App token (`APP_CLIENT_ID`, `APP_PRIVATE_KEY`; `pnpm run github-app`
+The same platforms build and run the smoke tests in CI for every pull request that can change a binary (`packages/cli`,
+the root `package.json`, the lockfiles, `mise.toml`, the binaries workflow), so a build that would block a release
+fails before it is merged. That check is not required.
+
+### Recovering a release
+
+- **A failure outside the code** (a runner, the network, GitHub's API) during prepare, build or publish: run the failed
+  jobs again from the run's page, or run the release workflow manually on `main` with `tag` set to the draft's tag
+  (`gh workflow run release.yml --ref main -f tag=vX.Y.Z`). Either finishes the same draft at the same commit: it
+  checks the tag again, builds the binaries, replaces the draft's assets and publishes. Assets change only while the
+  release is a draft; publish refuses a release that is no longer one, and a draft holding an asset the workflow does
+  not make (remove it on the release's page first).
+- **A failure the code causes** (a build or a smoke test that fails): the tag cannot move, so this release cannot carry
+  the fix. Fix it on `main` and merge the next release PR; its draft is finished as usual and deployment resumes. The
+  failed release stays a draft and never deploys; delete it on the releases page (its tag stays).
+- **Publish succeeded but the fast-forward failed:** the fast-forward reads only the latest published release from
+  GitHub, so running the failed job again, a manual run or the next push to `main` repairs it.
+
+Every job that writes uses the repository's GitHub App token (`APP_CLIENT_ID`, `APP_PRIVATE_KEY`; `pnpm run github-app`
 creates the App, see [README](../README.md)): a pull request opened with `GITHUB_TOKEN` starts no workflow, so the
 release PR would never run the required checks. release-please creates its commits through the API without an author,
 which GitHub signs for an App ([bot
@@ -291,12 +325,11 @@ curl -sS https://artifacts-api.example.com/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-**The CLI** ([packages/cli/README.md](../packages/cli/README.md)), from the repository root, with `~/.local/bin` on
-`PATH`:
+**The CLI** ([packages/cli/README.md](../packages/cli/README.md)): the binary of the latest release, through mise's
+github backend, or from the release's archive checked against its `SHA256SUMS`:
 
 ```sh
-mkdir -p ~/.local/bin
-ln -s "$PWD/packages/cli/src/main.ts" ~/.local/bin/artifacts
+mise use -g github:shuymn/artifacts
 export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<token>
 ```
 
@@ -304,10 +337,12 @@ export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<toke
 
 1. Section 1: Workers Paid, zones, the wildcard record, the D1 database, the R2 bucket, the two Access applications.
 2. Fill the deployment values (section 2).
-3. `gh infra apply`: it restricts who can push to `release` (below), adds the release-please labels and allows its
-   action. Until then the release workflow fails on every push to `main`, since the action is not allowed; the next
-   push after the apply runs it.
-4. Merge the first release PR; the release workflow creates `release` at its tag.
+3. `gh infra apply`: it restricts who can push to `release` (below), adds the release-please labels and allows the
+   actions the workflows use (release-please, and `actions/upload-artifact` and `actions/download-artifact`, which hand
+   the binaries to the publish job). Until then the release workflow fails on every push to `main`, since the action is
+   not allowed; the next push after the apply runs it.
+4. Merge the first release PR; the release workflow publishes it with the CLI binaries and creates `release` at its
+   tag.
 5. Connect Workers Builds (section 3); its first build deploys. Its log shows Node of the major in `.node-version`
    among the tools Builds detected, no `Installing project dependencies` before the build command, and
    `install: pnpm <version> from mise.lock` followed by pnpm's `Done in … using pnpm v<version>`.
