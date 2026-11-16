@@ -147,13 +147,23 @@ const screen =
 // Each matcher stands for one frame or component and must find at least one node, so a renamed or deleted frame fails
 // even when others carry the same token.
 const SIZED: Record<string, Match[]> = {
-  "size.page": [screen("index"), screen("archived"), screen("artifact"), component("site-header")],
+  "size.page": [
+    screen("index"),
+    screen("archived"),
+    screen("artifact"),
+    screen("consent"),
+    screen("consent-error"),
+    component("site-header"),
+  ],
   "size.content": [
-    (n) => n.type === "frame" && /^page( |$)/.test(String(n.name)),
+    (n) => n.type === "frame" && /^page( page--detail)?$/.test(String(n.name)),
     component("pager"),
     component("artifact-row"),
   ],
-  "size.prose": [(n, p) => n.name === "Description" && p?.name === "artifact-heading"],
+  "size.prose": [
+    (n, p) => n.name === "Description" && p?.name === "artifact-heading",
+    (n) => n.type === "frame" && n.name === "page page--narrow",
+  ],
   "size.label": [(n, p) => n.name === "Term" && p?.reusable === true && String(p.name).startsWith("info-row/")],
 };
 
