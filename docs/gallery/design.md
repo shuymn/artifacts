@@ -94,9 +94,11 @@ Pencil's document, whose node ids and layout change with every edit, rather than
 | `font.weight.*`                                                               | a string variable (`"400"`), the only type Pencil binds to a font weight                                                                                                                                                                                |
 | `type.x` (typography)                                                         | the reusable text `type.x` on the Typography board, with the family, size and weight bound to their variables and the line height as a number. Pencil has no text styles: every text in the components and screens is an instance of one of these texts |
 
-Pencil binds no variable to a width, so the frames repeat `size.*` as numbers: `size.page` on the screens and the
-`site-header` component, `size.content` on `page` and the `pager` and `artifact-row` components, `size.prose` on the
-artifact description, `size.label` on the term of `info-row`.
+The `.pen` format allows a variable for a width, but Pencil (1.2.23) drops it: a width set to `$size.content` reads
+back as `fit_content(0)`, and a file that has one is saved with `fit_content(0)`. So the frames repeat `size.*` as
+numbers, and `tokens.test.ts` checks that each has its token's value: `size.page` on the screens and the `site-header`
+component, `size.content` on `page` and the `pager` and `artifact-row` components, `size.prose` on the artifact
+description, `size.label` on the term of `info-row`.
 
 Values Pencil shows that are not tokens (a text's measured width or height, a frame's height, the width of a table
 column) are not part of the design.

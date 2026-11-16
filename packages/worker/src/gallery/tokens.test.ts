@@ -1,6 +1,7 @@
 // The design file and gallery.css carry tokens.json one to one (docs/gallery/design.md, "Tokens"). In gallery.css every
 // token is a custom property with the value the mapping gives, and every typography token is one rule headed by its
-// name; in gallery.pen every other token is a Pencil variable, and every typography token a reusable text.
+// name; in gallery.pen every other token is a Pencil variable, every typography token a reusable text, and the frames
+// that stand for a size token have its width.
 import { describe, expect, it } from "vitest";
 
 import pen from "../../../../docs/gallery/gallery.pen?raw";
@@ -123,11 +124,31 @@ function penVariable(name: string, token: Token): { type: string; value: unknown
   return { type, value: penValue(type, String(value)) };
 }
 
-function* penNodes(node: unknown): Generator<Record<string, unknown>> {
+// Every node with its parent (the document for a top-level node).
+function* penNodes(
+  node: unknown,
+  parent?: Record<string, unknown>,
+): Generator<[Record<string, unknown>, Record<string, unknown> | undefined]> {
   if (!isRecord(node)) return;
-  yield node;
-  if (Array.isArray(node.children)) for (const child of node.children) yield* penNodes(child);
+  yield [node, parent];
+  if (Array.isArray(node.children)) for (const child of node.children) yield* penNodes(child, node);
 }
+
+// Pencil drops a variable bound to a width, so these frames repeat the size tokens as numbers (design.md, "Tokens").
+type Match = (node: Record<string, unknown>, parent: Record<string, unknown> | undefined) => boolean;
+const component =
+  (...names: string[]): Match =>
+  (n) =>
+    n.reusable === true && names.includes(String(n.name));
+const SIZED: Record<string, Match[]> = {
+  "size.page": [
+    (n, p) => p === design && ["index", "archived", "artifact"].includes(String(n.name)),
+    component("site-header"),
+  ],
+  "size.content": [(n) => n.type === "frame" && /^page( |$)/.test(String(n.name)), component("pager", "artifact-row")],
+  "size.prose": [(n, p) => n.name === "Description" && p?.name === "artifact-heading"],
+  "size.label": [(n, p) => n.name === "Term" && p?.reusable === true && String(p.name).startsWith("info-row/")],
+};
 
 describe("gallery.pen and tokens.json", () => {
   it("defines exactly the tokens as variables, with the mapped values", () => {
@@ -149,11 +170,25 @@ describe("gallery.pen and tokens.json", () => {
       want[name] = [{ fontFamily, fontSize, fontWeight, lineHeight: v.lineHeight }];
     }
     const got: Record<string, unknown[]> = {};
-    for (const n of penNodes(design)) {
+    for (const [n] of penNodes(design)) {
       if (n.reusable !== true || n.type !== "text" || typeof n.name !== "string" || !n.name.startsWith("type."))
         continue;
       const { fontFamily, fontSize, fontWeight, lineHeight } = n;
       (got[n.name] ??= []).push({ fontFamily, fontSize, fontWeight, lineHeight });
+    }
+    expect(got).toEqual(want);
+  });
+
+  it("gives the frames that stand for a size token its width", () => {
+    const got: Record<string, unknown[]> = {};
+    const want: Record<string, unknown[]> = {};
+    for (const [name, matches] of Object.entries(SIZED)) {
+      got[name] = [];
+      for (const [n, p] of penNodes(design)) if (matches.some((match) => match(n, p))) got[name].push(n.width);
+      const token = all.get(name);
+      const px = token?.$type === "dimension" ? Number(String(token.$value).replace(/px$/, "")) : undefined;
+      // At least one frame per token, so a renamed frame cannot pass by matching nothing.
+      want[name] = Array.from({ length: Math.max(got[name].length, 1) }, () => px);
     }
     expect(got).toEqual(want);
   });
