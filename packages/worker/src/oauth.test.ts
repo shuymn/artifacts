@@ -588,7 +588,9 @@ describe("the authorization server's configuration", () => {
       issuer: API,
       authorization_endpoint: `https://${APP_HOST}/oauth/authorize`,
       token_endpoint: TOKEN_URL,
+      revocation_endpoint: TOKEN_URL,
       registration_endpoint: REGISTER_URL,
+      protected_resources: [`${API}/mcp`, `${API}/v1`],
       client_id_metadata_document_supported: true,
       code_challenge_methods_supported: ["S256"],
     });
@@ -643,6 +645,7 @@ describe("PL-45: DATA-1 on every OAuth path and failure", () => {
     kv: "KV-ERROR-MARKER",
     fetch: "FETCH-ERROR-MARKER",
     renewal: "RENEWAL-ERROR-MARKER",
+    userinfo: "USERINFO-MARKER",
   };
   const CIMD_FAILED = "CIMD fetch failed for ";
   const RENEWAL_FAILED = "Failed to renew client registration ";
@@ -730,6 +733,9 @@ describe("PL-45: DATA-1 on every OAuth path and failure", () => {
     );
     await tokenRequest(world, { grant_type: "refresh_token", refresh_token: "a:b:c", client_id: cimdId });
     fetchSpy.mockRestore();
+    // A caller's own client ID is logged as sent, a password in its userinfo included.
+    const withUserinfo = `https://user:${MARKERS.userinfo}@client.example.org/client.json`;
+    await tokenRequest(world, { grant_type: "refresh_token", refresh_token: "a:b:c", client_id: withUserinfo });
 
     // A registration renewal that fails after a successful token request.
     const due = await register(world);
@@ -767,12 +773,16 @@ describe("PL-45: DATA-1 on every OAuth path and failure", () => {
     // A marker in a library line comes only from what section 7 says that line carries.
     for (const line of libraryLines) {
       const allowed = line.includes(CIMD_FAILED)
-        ? [MARKERS.cimdPath, MARKERS.cimdQuery, MARKERS.fetch, MARKERS.document]
+        ? [MARKERS.cimdPath, MARKERS.cimdQuery, MARKERS.fetch, MARKERS.document, MARKERS.userinfo]
         : [MARKERS.renewal];
       for (const marker of Object.values(MARKERS).filter((value) => !allowed.includes(value))) {
         expect(line).not.toContain(marker);
       }
     }
+    // The caller's userinfo appears in the CIMD line for its client ID, and nowhere else.
+    const withUserinfoLines = logs.lines.filter((line) => line.includes(MARKERS.userinfo));
+    expect(withUserinfoLines).toHaveLength(1);
+    expect(withUserinfoLines[0]).toContain(`${CIMD_FAILED}${withUserinfo}:`);
     // The onError hook writes oauth.refused with a closed code and category only.
     const refusals = events.filter((event) => event.event === "oauth.refused" && event.reason === undefined);
     expect(refusals.length).toBeGreaterThan(5);
