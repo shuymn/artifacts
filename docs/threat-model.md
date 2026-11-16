@@ -306,10 +306,12 @@ and the threats are the three adversaries below, not untrusted users.
   a token request waits 10 s and answers 503: _Enforced (main)_ in `src/revocation.ts`, `src/oauth.ts`, pinned by
   behavior (`src/oauth.test.ts`, `src/revocation.test.ts`: a read that fails or never answers). The library's KV calls
   on the token, registration and authorize paths, and a revocation's writes, have no timeout of ours, since a write
-  that timed out could still apply; the library bounds a client document fetch at 10 s (OAUTH-6). The grant listing
-  an approval reads to replace a client's grants waits 10 s per page and answers the 503 error page: _Enforced (main)_
-  in `src/consent.ts`, pinned by behavior (`src/consent.test.ts`: a listing that fails or never answers). The KV reads
-  of a credential check and of `/v1/grants` wait 10 s and answer 503: _Planned (OAuth)_ (PL-40).
+  that timed out could still apply; the library bounds a client document fetch at 10 s (OAUTH-6). The grant
+  listing's KV reads wait 10 s and answer 503: _Enforced (main)_ in `src/grants.ts`, and for the listing an approval
+  reads to replace a client's grants in `src/consent.ts`, where the 503 is the error page; pinned by behavior
+  (`src/grants.test.ts`: a listing page and a record read that never answer, and a revocation whose slow writes still
+  complete; `src/consent.test.ts`: a listing that fails or never answers). The KV reads of a credential check:
+  _Planned (OAuth)_ (PL-40).
 
 ### Data (DATA)
 
@@ -325,16 +327,18 @@ and the threats are the three adversaries below, not untrusted users.
   identifier, a password in its userinfo included, reaches the logs. Neither carries another party's secret or
   private content: the library fetches the document without a credential from a public address, where a private host
   answers with Access's sign-in. Invocation logs are off. _Enforced (main)_ in
-  `src/log.ts`, for the authorization server's paths in `src/oauth.ts`, and for the consent page in `src/consent.ts`;
-  _Planned (OAuth)_ for OAuth credentials on `/mcp` and `/v1/`. Pinned by log redaction (`src/log-redaction.test.ts`:
-  every route and failure path, `/mcp` and its SDK refusals included; `src/oauth.test.ts`: the metadata,
-  registration and token endpoints, their refusals, a revocation and KV and fetch failures, every `console` method
-  captured, with markers in codes, tokens, verifiers, client names, client-ID paths, queries and userinfo, a client
-  document's fields and thrown errors, each appearing only where those two lines put it, and the `onError` hook
-  logging `oauth.refused` only (PL-45); `src/consent.test.ts`: every outcome of the authorization endpoint, with
-  markers in a client's name and URI, a redirect path, `state`, a consent handle and cookie, a code, a form value and
-  a KV error's message, none appearing) and source check (`src/source.test.ts`: `console` only in the logging module;
-  `wrangler.jsonc`). **Gap:** the gallery's routes are not among the redaction
+  `src/log.ts`, for the authorization server's paths in `src/oauth.ts`, for the grants routes in `src/grants.ts`, and
+  for the consent page in `src/consent.ts`; _Planned (OAuth)_ for OAuth credentials on `/mcp` and `/v1/`. Pinned by
+  log redaction (`src/log-redaction.test.ts`: every route and failure path, `/mcp` and its SDK refusals included;
+  `src/oauth.test.ts`: the metadata, registration and token endpoints, their refusals, a revocation and KV and fetch
+  failures, every `console` method captured, with markers in codes, tokens, verifiers, client names, client-ID paths,
+  queries and userinfo, a client document's fields and thrown errors, each appearing only where those two lines put
+  it, and the `onError` hook logging `oauth.refused` only (PL-45); `src/grants.test.ts`: the listing, a revocation and
+  their failures, with markers in a grant's metadata, a client's name and a KV error; `src/consent.test.ts`: every
+  outcome of the authorization endpoint, with markers in a client's name and URI, a redirect path, `state`, a consent
+  handle and cookie, a code, a form value and a KV error's message, none appearing) and source check
+  (`src/source.test.ts`: `console` only in the logging module; `wrangler.jsonc`). **Gap:** the gallery's routes are
+  not among the redaction
   markers yet. **Changed for OAuth:** "only `logEvent`" covers the Worker's own sources, since the dependency's two
   lines are bounded here rather than suppressed by patching it, and the first can quote a public artifact's values
   when a client ID names it or redirects to it. What DATA-1 protected holds: no credential or private content reaches
@@ -392,14 +396,18 @@ _Planned (OAuth)_.
   wrapper and the token endpoint in `src/revocation.ts`, `src/oauth.ts`, pinned by behavior (`src/revocation.test.ts`:
   the record before the deletion, a failed write failing it; `src/oauth.test.ts`: a revoked grant's code and refresh
   token refused, to a client that authenticated, as a grant that is gone, a refresh's and a code exchange's write-back
-  after the revocation, RFC 7009 with each token, injected failures of the record's write and of the deletion); and
-  for approval in `src/consent.ts`, pinned by behavior (`src/consent.test.ts`: the client's grant for the resource
-  replaced and its tokens refused, its other resource and other clients kept, a CIMD client's grant replaced only from
-  the same redirect URI; a refresh's write-back after the replacement refused; injected failures of the listing, the
-  record's write and the deletion answering 503 without a code). _Planned (OAuth)_ for `/v1/grants` and access
-  tokens. Pinned by behavior (PL-41: for each path, barriers
-  between a refresh's and a code exchange's read and write of the grant; injected failures of the record's write and
-  of the deletion) and deployed check (AC-20, the delay measured).
+  after the revocation, RFC 7009 with each token, injected failures of the record's write and of the deletion);
+  for `/v1/grants` in `src/grants.ts`, pinned by behavior (`src/grants.test.ts`, PL-41 at the token endpoint: the
+  listing before and after, an unknown and a repeated `DELETE` (404), barriers between a refresh's and a code
+  exchange's read and write of the grant with the grant revoked through `DELETE` between them, its tokens then refused
+  and the grant kept out of the listing, injected failures of the record's write (503, the grant kept, a retry revokes
+  it) and of the deletion after it (503, the grant refused at once, a retry deletes it)); and for approval in
+  `src/consent.ts`, pinned by behavior (`src/consent.test.ts`: the client's grant for the resource replaced and its
+  tokens refused, its other resource and other clients kept, a CIMD client's grant replaced only from the same
+  redirect URI; a refresh's write-back after the replacement refused; injected failures of the listing, the record's
+  write and the deletion answering 503 without a code). _Planned (OAuth)_ for access tokens. Pinned by behavior
+  (PL-41: for each path, barriers between a refresh's and a code exchange's read and write of the grant; injected
+  failures of the record's write and of the deletion) and deployed check (AC-20, the delay measured).
 - **OAUTH-6: client documents are fetched only from public addresses and bounded, and a client on this deployment's
   hosts gets no consent page.** The compatibility flag `global_fetch_strictly_public` keeps the library's CIMD fetches
   on public addresses, the library bounds a document at 5 KB and 10 s, and the authorize endpoint refuses a client ID
