@@ -1,10 +1,11 @@
-import { SELF } from "cloudflare:test";
+import { exports } from "cloudflare:workers";
 import { expect, it } from "vitest";
 
-it("answers every request 404 Not Found", async () => {
-  for (const url of ["https://example.com/", "https://example.com/api/artifacts", "https://example.com/mcp"]) {
-    const response = await SELF.fetch(url);
-    expect(response.status).toBe(404);
-    expect(await response.text()).toBe("Not Found");
-  }
+// The deployed entry point with the test configuration (vitest.config.ts): it classifies by host before anything else.
+it("answers an unknown host 404 and the API without a token 401", async () => {
+  const unknown = await exports.default.fetch("https://example.com/");
+  expect(unknown.status).toBe(404);
+  const api = await exports.default.fetch("https://artifacts-api.example.com/v1/artifacts");
+  expect(api.status).toBe(401);
+  expect(api.headers.get("WWW-Authenticate")).toBe("Bearer");
 });
