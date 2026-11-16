@@ -8,7 +8,11 @@ Values in angle brackets are placeholders, and the hosts below are the examples 
 `artifacts.example.com` (`APP_HOST`), `artifacts-api.example.com` (`API_HOST`), `-art.example.com`
 (`CONTENT_HOST_SUFFIX`) and `-pub.example.com` (`PUBLIC_HOST_SUFFIX`) on one shared domain, or `-p.example-content.net`
 and `-s.example-content.net` for content on its own registrable domain. `<team>` is the Zero Trust team name,
-`<DATABASE_NAME>` the D1 database, `<BUCKET_NAME>` the R2 bucket. None of them is written in this repository (P7).
+`<DATABASE_NAME>` the D1 database, `<BUCKET_NAME>` the R2 bucket, `<KV_NAME>` the KV namespace for OAuth. None of them
+is written in this repository (P7).
+
+**Planned (OAuth)** marks a step for OAuth sign-in (design.md section 7), which applies from the release that carries it
+(design.md, "OAuth delivery"); until then a deployment uses API tokens only.
 
 Commands run from `packages/worker`, with the tools mise installs from `mise.toml` and `.node-version`: there
 `pnpm exec wrangler` is the Wrangler of the lockfile and `wrangler.jsonc` names the Worker. A block that starts elsewhere
@@ -159,6 +163,10 @@ risks say what the shared-domain layout exposes.
   access is turned on ([public buckets](https://developers.cloudflare.com/r2/buckets/public-buckets/)); leave both the
   `r2.dev` URL and custom domains off. Create it before the first deploy: `wrangler deploy` creates a bucket that does
   not exist (the deploy script checks first, section 3).
+- **KV** (Planned (OAuth)). `pnpm exec wrangler kv namespace create <KV_NAME> --update-config=false` prints the
+  namespace ID ([get started](https://developers.cloudflare.com/kv/get-started/)). It holds OAuth clients, grants and
+  hashed tokens, and nothing else; every record expires on its own. `--update-config=false` keeps the ID out of
+  `wrangler.jsonc`, as for D1.
 
 ### Access
 
@@ -174,6 +182,14 @@ application](https://developers.cloudflare.com/cloudflare-one/access-controls/ap
 - A wildcard at the start of the subdomain matches one level only
   ([application paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/)), so the
   content application covers exactly the artifact hosts. Neither application covers the API host or the public hosts.
+- If an application already covers the whole zone (`*.example.com`, made for other services), give the API host and
+  the public hosts (`*-pub.example.com`) a Bypass application each: MCP clients, the CLI and the OAuth endpoints carry
+  no Access session, and a share link needs none. Bypass "disables any Access enforcement" for the traffic it matches,
+  and its requests are not logged
+  ([policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)).
+  The documentation states precedence only for paths ("the more specific rule takes precedence", application paths
+  above). **Observed:** in a deployment of this repository, Bypass applications on those hosts take precedence over a
+  zone-wide application. Checks 3 and 9 of section 7 show it.
 - In each application, **Advanced settings → Cookie settings**: turn on **HttpOnly**. On a protected domain the
   `CF_Authorization` cookie's HttpOnly flag is the administrator's choice ([authorization
   cookie](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/)),
@@ -192,11 +208,13 @@ application](https://developers.cloudflare.com/cloudflare-one/access-controls/ap
 | `account_id`                           | the account ID, when the credentials reach several accounts; otherwise leave the key out |
 | `routes`                               | the Custom Domains and routes of section 1                                               |
 | `d1_databases`, `r2_buckets`           | `<DATABASE_NAME>` and the database ID; `<BUCKET_NAME>`                                   |
+| `kv_namespaces`                        | the binding `OAUTH_KV` and the namespace ID (Planned (OAuth))                            |
 | `vars.APP_HOST` … `PUBLIC_HOST_SUFFIX` | the hosts of the chosen layout                                                           |
 | `vars.ARCHIVE_AFTER_DAYS`              | days until an untouched artifact is archived (design.md section 5)                       |
 | `vars.ACCESS_*`                        | the team domain and the two AUD tags                                                     |
 
-`API_TOKENS` is a secret and never part of these values (section 4). The values live in two places, never both at once:
+`API_TOKENS` is a secret, optional from the OAuth release, and never part of these values (section 4). The values live
+in two places, never both at once:
 
 - **Workers Builds:** the build variable `ARTIFACTS_DEPLOY_JSONC` holds the whole file, comments included.
 - **The owner's machine:** `packages/worker/wrangler.deploy.jsonc`, which git ignores.
@@ -215,7 +233,8 @@ the same.
 JSONC, or leave a value empty, and when a variable fails the Worker's own configuration check (HOST-2), a host is a
 `localhost` name or has a port (ACC-2), a key belongs in `wrangler.jsonc`, `API_TOKENS` appears, a route would serve
 hosts that are not the deployment's, or a route repeats another, is outside its `zone_name`, or sets both `zone_name`
-and `zone_id`. The committed example is refused for its empty values.
+and `zone_id`. From the OAuth release it also refuses values without a `kv_namespaces` entry for `OAUTH_KV` whose ID
+is 32 hexadecimal characters. The committed example is refused for its empty values.
 
 ## 3. Deploying
 
@@ -262,7 +281,9 @@ Cloudflare's documentation for Deploy to Cloudflare buttons tells a project to a
 `.wrangler-deploy-<random>.json` next to it, removed on every exit. Then, each step stopping the rest when it fails:
 
 1. `wrangler r2 bucket info <BUCKET_NAME>`: the bucket must exist, since `wrangler deploy` would create a new, empty one
-   for a mistyped name.
+   for a mistyped name. From the OAuth release, `wrangler kv namespace list` must list the namespace ID too: the
+   documentation describes provisioning only for a binding without an ID and does not say what a wrong ID does, and a
+   new, empty namespace would sign every client out.
 2. `wrangler d1 migrations apply DB --remote`, **on every deploy**: the code of a release expects the schema of that
    release, and the command applies only the migrations not yet applied (`d1_migrations` records them;
    [migrations](https://developers.cloudflare.com/d1/reference/migrations/)). A flag would let a release deploy against
@@ -308,12 +329,17 @@ and rows, which is why migrations must keep the previous code working. Each vers
 with, so **after a rollback, put `API_TOKENS` again** if a token was revoked since that version (inferred from secrets
 being part of a version and preserved into the next,
 [secrets](https://developers.cloudflare.com/workers/configuration/secrets/); the rollbacks page does not say). The next
-release replaces the rollback; to stay on old code, revert on `main` and release.
+release replaces the rollback; to stay on old code, revert on `main` and release. A rollback to a version before the
+OAuth release answers OAuth clients with 401 and serves no metadata, so they cannot sign in until the next release;
+keep an API token for the CLI until OAuth has run for a while.
 
-## 4. API tokens
+## 4. API tokens and OAuth grants
+
+### API tokens
 
 Each agent gets its own token, named after it (design.md section 7); the name is recorded on every version it publishes.
-`artifacts token` needs no configuration:
+From the OAuth release, tokens are for automation that cannot sign in (a CI job, `claude -p` before any
+`claude mcp login`), and a deployment may have none. `artifacts token` needs no configuration:
 
 ```sh
 artifacts token codex
@@ -331,36 +357,94 @@ pnpm exec wrangler secret put API_TOKENS < ~/artifacts/api-tokens.json
 `wrangler secret put` reads the value from standard input when piped, and creates and deploys a new version at once
 ([`secret put`](https://developers.cloudflare.com/workers/wrangler/commands/workers/#secret-put)), and a deployment
 never deletes a secret ([`deploy`](https://developers.cloudflare.com/workers/wrangler/commands/workers/#deploy)). Until
-the first put, the Worker answers 503 on every host.
+the first put, the Worker answers 503 on every host; from the OAuth release it serves OAuth only instead.
 
 - **Rotate:** run `artifacts token <name>` again, replace the entry, put the object, then update the agent; the old
   token is refused from the put on.
 - **Revoke:** remove the entry and put the object. The token is refused from the next request (TOK-1).
+- **Turn all off** (Planned (OAuth)): put `{}`, or `pnpm exec wrangler secret delete API_TOKENS`. Every API token is
+  refused from the next request, and OAuth clients keep working (AC-18). A malformed object still answers 503.
+
+### OAuth grants (Planned (OAuth))
+
+Each client the owner allows on the consent page gets a grant, named on that page with the publisher name it records
+on versions (design.md section 7). With any credential the CLI can use:
+
+```sh
+artifacts grants                                    # id, publisher, client, redirect host, resource, created, expires
+artifacts revoke <grant>                            # one grant and its tokens
+```
+
+Until the CLI has these commands (design.md, "OAuth delivery", step 8), the same through REST, with an API token in
+`TOKEN`:
+
+```sh
+API=https://artifacts-api.example.com
+curl -s "$API/v1/grants" -H "Authorization: Bearer $TOKEN" | jq '.grants[] | {id, publisher, client_name, redirect_host}'
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE "$API/v1/grants/<grant>" -H "Authorization: Bearer $TOKEN"
+```
+
+- **Revocation is final** once it answers 204. A 503 may have revoked part: run it again until it answers 204, or 404
+  when the earlier call had finished after all.
+- **Sign a client out:** `artifacts logout` for the CLI, which revokes its own grant as above; `claude mcp logout
+  artifacts` for Claude Code, which revokes at the server through RFC 7009 ([MCP](https://code.claude.com/docs/en/mcp))
+  with the same lasting effect (design.md section 7). Removing a server from a client's configuration only forgets its
+  tokens: revoke its grant here as well.
+- **A grant expires** after 30 days without a refresh; a client in use refreshes it. Signing a client in again
+  replaces its grant only when it returns with the same client and redirect URI: Claude Code and Codex pick a new
+  loopback port each time, so revoke the grant they leave behind.
+- **Revocation takes up to a minute or more** to reach every Cloudflare location, longer where the token was just
+  read (design.md section 7). Until then the revoked tokens can still work there.
+- **Revoke every grant at once,** for a leak whose extent is unknown: create a new namespace (section 1), replace the
+  old ID with it in the build variable, and deploy what `release` holds from the owner's machine with the same values
+  (section 3). The new version reads only the new, empty namespace, so every OAuth token is refused at once and every
+  client signs in again. Delete the old namespace afterwards with
+  `pnpm exec wrangler kv namespace delete --namespace-id <OLD_ID>`.
 
 ## 5. Clients
 
-Agents use MCP over streamable HTTP at `https://artifacts-api.example.com/mcp` with `Authorization: Bearer <token>`;
-there is no OAuth (design.md section 7).
+Agents use MCP over streamable HTTP at `https://artifacts-api.example.com/mcp`. Until the OAuth release each sends
+`Authorization: Bearer <token>`. From it (Planned (OAuth)), each signs in with OAuth instead and the consent page opens
+in the browser: check the client and the redirect host it shows, name the publisher and allow (design.md section 7).
+Claude Code uses a configured `Authorization` header in place of OAuth and Codex tries it first, so remove the header
+when moving a client to OAuth.
 
 **Claude Code** ([MCP](https://code.claude.com/docs/en/mcp)):
 
 ```sh
-claude mcp add --transport http --scope user artifacts https://artifacts-api.example.com/mcp \
-  --header "Authorization: Bearer <token>"
+claude mcp add --transport http --scope user artifacts https://artifacts-api.example.com/mcp
+claude mcp login artifacts                          # OAuth (Planned (OAuth)); or, with an API token:
+# claude mcp add ... --header "Authorization: Bearer <token>"
 claude mcp get artifacts
 ```
 
-**Codex CLI**, in `~/.codex/config.toml`, with the token in the environment
-([MCP](https://developers.openai.com/codex/mcp)):
+To move from the header to OAuth, `claude mcp remove artifacts` and add the server again without it. `claude -p`
+cannot sign in by itself: run `claude mcp login` first.
+
+**Codex CLI**, in `~/.codex/config.toml` ([MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)):
 
 ```toml
 [mcp_servers.artifacts]
 url = "https://artifacts-api.example.com/mcp"
-bearer_token_env_var = "ARTIFACTS_CODEX_TOKEN"
+# with an API token instead of OAuth: bearer_token_env_var = "ARTIFACTS_CODEX_TOKEN"
 ```
 
-**Any other client** that speaks streamable HTTP with a static header takes the URL and the header. A raw call, with
-the token in `TOKEN`, also checks the server by hand:
+Then `codex mcp login artifacts` (Planned (OAuth)).
+
+**claude.ai and Claude Desktop** (Planned (OAuth)): **Customize → Connectors → Add → Add custom connector**, with the
+URL above, signing in with **Use Claude's published identity**
+([custom connectors](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp)).
+Claude reaches the server from Anthropic's infrastructure, which the API host allows like any client.
+
+**Gemini CLI** (Planned (OAuth)), in `~/.gemini/settings.json`, then `/mcp auth artifacts` in a session
+([MCP servers](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md)):
+
+```json
+{ "mcpServers": { "artifacts": { "httpUrl": "https://artifacts-api.example.com/mcp" } } }
+```
+
+**Any other client** that speaks streamable HTTP takes the URL, and signs in with OAuth or sends the header. A raw
+call, with the token in `TOKEN`, also checks the server by hand:
 
 ```sh
 curl -sS https://artifacts-api.example.com/mcp \
@@ -377,9 +461,19 @@ mise use -g github:shuymn/artifacts
 export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<token>
 ```
 
+From the OAuth release (Planned (OAuth)), sign in instead of setting `ARTIFACTS_TOKEN`, which, when set, still takes
+precedence. The binary carries the OAuth client; a checkout that runs the source needs `pnpm install` first. On
+Windows the CLI keeps to `ARTIFACTS_TOKEN`: it stores no login there (design.md section 9).
+
+```sh
+export ARTIFACTS_API_URL=https://artifacts-api.example.com
+artifacts login                                     # opens the consent page; stores ~/.config/artifacts/credentials.json
+```
+
 ## 6. First deployment
 
-1. Section 1: Workers Paid, zones, the wildcard record, the D1 database, the R2 bucket, the two Access applications.
+1. Section 1: Workers Paid, zones, the wildcard record, the D1 database, the R2 bucket, the KV namespace (from the
+   OAuth release), the two Access applications.
 2. Fill the deployment values (section 2).
 3. `gh infra apply`: it restricts who can push to `release` (below), adds the release-please labels and allows the
    actions the workflows use (release-please, and `actions/upload-artifact` and `actions/download-artifact`, which hand
@@ -391,8 +485,21 @@ export ARTIFACTS_API_URL=https://artifacts-api.example.com ARTIFACTS_TOKEN=<toke
 5. Connect Workers Builds (section 3); its first build deploys. Its log shows Node of the major in `.node-version`
    among the tools Builds detected, no `Installing project dependencies` before the build command, and
    `install: pnpm <version> from mise.lock` followed by pnpm's `Done in … using pnpm v<version>`.
-6. Generate a token per agent and put `API_TOKENS` (section 4); configure the clients (section 5).
+6. Generate a token per agent and put `API_TOKENS` (section 4), or, from the OAuth release, only for the clients that
+   cannot sign in; configure the clients (section 5).
 7. Run the checklist (section 7).
+
+### Upgrading to the OAuth release (Planned (OAuth))
+
+1. Before merging the release PR that carries the OAuth storage binding (design.md, "OAuth delivery", step 1): create
+   the KV namespace (section 1) and add its `kv_namespaces` entry to the deployment values (section 2), in the build
+   variable and in `wrangler.deploy.jsonc` if you keep one. Without it the deploy stops at the values check, and the
+   previous release keeps serving.
+2. After the release that accepts OAuth tokens deploys: run checks 10 to 14 of section 7, then move each client to OAuth
+   (section 5) and its API token out of `API_TOKENS`. From this release a token of the form `<a>:<b>:<c>`, which only
+   a token made by hand can have, is read as an OAuth token and refused (design.md section 7): replace it with one
+   from `artifacts token`.
+3. Once no client needs one, turn API tokens off (section 4) and run check 16, or keep one for automation.
 
 ### Restrict pushes to `release`
 
@@ -520,7 +627,76 @@ Logs below are the Worker's Workers Logs in the dashboard, kept 7 days on Worker
    link; `vary: Accept-Encoding` once; no `etag` is the known limit of section 1, an `etag` means the zone's setting
    has changed.
 
-Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"`, and revoke the check token.
+The checks below are Planned (OAuth): run 10 to 14 once the release that accepts OAuth tokens deploys, 15 once the
+CLI signs in, and 16 when API tokens are turned off.
+
+10. **OAuth discovery** (design.md section 7). From the Worker, not an Access redirect, which also shows the API host's
+    Bypass (section 1):
+
+    ```sh
+    curl -s "$API/.well-known/oauth-authorization-server" \
+      | jq '{issuer, authorization_endpoint, client_id_metadata_document_supported, code_challenge_methods_supported}'
+    curl -s "$API/.well-known/oauth-protected-resource/mcp" | jq '{resource, authorization_servers}'
+    curl -s -o /dev/null -D - -X POST "$API/mcp" | grep -i -E '^(HTTP|www-authenticate|cache-control)'
+    curl -s -o /dev/null -D - -X POST "$API/oauth/token" -H 'Origin: https://example.org' | grep -i -c access-control
+    curl -s -o /dev/null -w '%{http_code}\n' "https://$ID-pub.example.com/.well-known/oauth-authorization-server"
+    ```
+
+    Pass: `issuer` is `$API`, `authorization_endpoint` `https://artifacts.example.com/oauth/authorize`,
+    `client_id_metadata_document_supported` `true`, `["S256"]`; the resource is `$API/mcp` with `["$API"]`; the
+    `POST` answers 401 with `Bearer resource_metadata="$API/.well-known/oauth-protected-resource/mcp"` and
+    `cache-control: no-store`; no `access-control-*` header (`0`); the public host answers `404`, as for any path the
+    probe lacks.
+
+11. **Real clients** (AC-14, AC-15). Sign in Claude Code, Codex CLI, claude.ai and Gemini CLI (section 5). Pass: each
+    consent page names the client, with `claude.ai` or `chatgpt.com` as the domain of a CIMD client and "registered
+    itself" for Gemini CLI, and shows its redirect host; after **Allow**, `/mcp` lists the nine tools and a publish
+    works; a day later a call works without a new sign-in. For a client that cannot sign in, note the step that failed
+    and the client's version.
+
+12. **Consent page** (AC-19, ISO-5). In the browser's developer tools, the consent page for Claude Code carries
+    `Content-Security-Policy` with `form-action 'self' http://localhost:<port>` and `frame-ancestors 'none'`,
+    `X-Frame-Options: DENY`, and `cache-control: no-store` without an `etag` (design.md section 10); the redirect after
+    **Allow** is not blocked. An authorization URL opened in a private window as another identity is denied by Access.
+
+13. **Publisher and logs** (AC-17, DATA-1). The version a signed-in client published shows its publisher name in the
+    gallery; its `artifact.created` line carries that name and the grant's ID, and `grant.created` names the same
+    grant. A search of the logs for `owner:`, the start of every OAuth token, finds nothing.
+
+14. **Revocation** (AC-20). List the grants and revoke Claude Code's with the check token, as section 4 shows
+    (`artifacts grants` and `artifacts revoke <grant>` once the CLI has them), then have Claude Code call a tool every
+    10 s. Pass: the `DELETE` answers `204`; the calls are refused within 5 minutes, this project's threshold, since
+    Cloudflare documents no bound on KV's propagation; afterwards `/mcp` asks to sign in again, and the grant stays out
+    of the listing. Note the delay.
+
+15. **The CLI's sign-in** (AC-16), on macOS or Linux; on Windows `artifacts login` refuses and names `ARTIFACTS_TOKEN`.
+    `artifacts login`; `ls -l ~/.config/artifacts/credentials.json` shows
+    `-rw-------`; `artifacts list` works without `ARTIFACTS_TOKEN`. Publish a second probe, so the two publishes below
+    cannot conflict:
+
+    ```sh
+    mkdir -p probe2 && echo '<p>probe 2</p>' > probe2/index.html
+    ID2=$(artifacts publish ./probe2 --title probe2 --json | jq -r .artifact.id)
+    ```
+
+    More than an hour later, when the stored access token has expired, start both publishes from one command line.
+    This is a smoke check: the shell starts both together but cannot hold them where each reads the stored token, so
+    they usually, not always, both read the expired token before either refreshes; PL-50 holds them at barriers in
+    the local tests.
+
+    ```sh
+    artifacts publish --id "$ID" ./probe & artifacts publish --id "$ID2" ./probe2 & wait
+    ```
+
+    Pass: both print a new version; another hour later `artifacts list` still works without signing in again, so the
+    file kept the token the server holds. Then `artifacts logout`; `artifacts list` fails, naming `artifacts login`;
+    the grant listing (section 4) no longer shows the CLI's grant.
+
+16. **API tokens off** (AC-18). The `curl` of section 5 with the check token answers 401, and a signed-in client still
+    works.
+
+Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"` (and `"$ID2"` after check 15), revoke the check token,
+and revoke the grants made only for the checks.
 
 ## 8. Backups and restore
 
@@ -542,6 +718,8 @@ Not backed up (design.md section 11):
   unreferenced, until removed by hand.
 - **`API_TOKENS`**, which can be read back from nowhere: keep the object of entries; a lost token is replaced (section
   4).
+- **OAuth storage (KV)** (Planned (OAuth)): clients, grants and tokens. Losing it costs each client one sign-in;
+  a D1 restore does not touch it.
 - **The deployment values**: keep `wrangler.deploy.jsonc` or a copy of the build variable.
 - **Access applications and Workers Builds settings**, recreated from sections 1 and 3.
 - **Logs**, kept 7 days.
