@@ -1,14 +1,18 @@
 // PL-49 and PL-51: `login`, `logout`, the stored login and the credential precedence, against a local stand-in for the
 // API host's OAuth side (login-test-support.ts) with the browser step played by the test. The CLI against the Worker
 // itself is e2e.test.ts; the lock and the refresh races are lock.test.ts.
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { chmod, readFile, rm, writeFile } from "node:fs/promises";
+import { connect } from "node:net";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import type { Fetch } from "./api.ts";
 import { helpText } from "./cli.ts";
-import { Credentials, StandIn, until, type Answer } from "./login-test-support.ts";
-import { cli, TOKEN, type RunOptions } from "./test-support.ts";
+import { codeOf } from "./errors.ts";
+import { Credentials, exists, StandIn, until, type Answer } from "./login-test-support.ts";
+import { cli, tempDir, TOKEN, type RunOptions } from "./test-support.ts";
 
 const fetch: Fetch = (input, init) => globalThis.fetch(input, init);
 
@@ -29,13 +33,20 @@ function callbackPort(stderr: string): number {
   return Number(new URL(new URL(url ?? "").searchParams.get("redirect_uri") ?? "").port);
 }
 
-async function refused(port: number): Promise<boolean> {
-  try {
-    await globalThis.fetch(`http://127.0.0.1:${port}/callback`, { signal: AbortSignal.timeout(2000) });
-    return false;
-  } catch {
-    return true;
-  }
+/** How a TCP connection to `port` on `127.0.0.1` ends: `ECONNREFUSED` once no listener is on it. */
+function connecting(port: number): Promise<string> {
+  return new Promise((resolve) => {
+    const socket = connect(port, "127.0.0.1");
+    socket.setTimeout(2000, () => {
+      socket.destroy();
+      resolve("no answer");
+    });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve("connected");
+    });
+    socket.once("error", (error) => resolve(codeOf(error) ?? error.message));
+  });
 }
 
 const redirectTo = (location: string): Answer => ({ status: 302, headers: { Location: location } });
@@ -74,6 +85,29 @@ describe("PL-49: login", () => {
     expect(await credentials.modes()).toEqual({ directory: 0o700, file: 0o600 });
     // The command uses the stored login.
     expect(await cli(["list"], { env, fetch })).toEqual({ status: 0, stdout: "", stderr: "" });
+  });
+
+  it("sends a new PKCE challenge and state on every login", async () => {
+    const { standIn, env } = await setup();
+    const opened: URLSearchParams[] = [];
+    const openBrowser = (url: string) => {
+      opened.push(new URL(url).searchParams);
+      standIn.approve(url);
+    };
+    expect((await login(standIn, env, { openBrowser })).status).toBe(0);
+    expect((await login(standIn, env, { openBrowser })).status).toBe(0);
+    const [first, second] = opened;
+    expect(first?.get("code_challenge")).toMatch(/^[\w-]{43}$/);
+    expect(second?.get("code_challenge")).not.toBe(first?.get("code_challenge"));
+    expect(second?.get("state")).not.toBe(first?.get("state"));
+    // The exchanges, not the client checks, which send the registered redirect URI without a port.
+    const verifiers = standIn.seen
+      .filter(
+        ({ form }) => form.grant_type === "authorization_code" && form.redirect_uri !== "http://127.0.0.1/callback",
+      )
+      .map(({ form }) => form.code_verifier);
+    expect(verifiers).toHaveLength(2);
+    expect(verifiers[1]).not.toBe(verifiers[0]);
   });
 
   it("creates the directory 0700 and the file 0600 under a umask that would narrow them", async () => {
@@ -173,7 +207,7 @@ describe("PL-49: login", () => {
       text: "The sign-in did not complete. Return to the terminal to see why.\n",
     });
     expect((await credentials.read())[standIn.origin]).toBeUndefined();
-    expect(await refused(callbackPort(ran.stderr))).toBe(true);
+    expect(await connecting(callbackPort(ran.stderr))).toBe("ECONNREFUSED");
   });
 
   it("accepts metadata without iss support and still requires iss on the callback", async () => {
@@ -201,17 +235,18 @@ describe("PL-49: login", () => {
     const ran = await login(standIn, env, { openBrowser: () => undefined, signIn: { callbackMs: 200 } });
     expect(ran.status).toBe(1);
     expect(ran.stderr).toContain("no sign-in arrived within 0 s");
-    expect(await refused(callbackPort(ran.stderr))).toBe(true);
+    expect(await connecting(callbackPort(ran.stderr))).toBe("ECONNREFUSED");
     expect((await credentials.read())[standIn.origin]).toBeUndefined();
   });
 
   it("accepts one callback: a second one, while the first is exchanged, finds the listener closed", async () => {
     const { standIn, credentials, env } = await setup();
     let port = 0;
-    let second: boolean | undefined;
+    let second: string | undefined;
     standIn.override = async ({ form }) => {
       // The code exchange of the first callback waits until a second callback has been tried.
-      if (form.grant_type === "authorization_code" && standIn.codes.has(form.code ?? "")) second = await refused(port);
+      if (form.grant_type === "authorization_code" && standIn.codes.has(form.code ?? ""))
+        second = await connecting(port);
       return undefined;
     };
     const ran = await login(standIn, env, {
@@ -221,7 +256,7 @@ describe("PL-49: login", () => {
       },
     });
     expect(ran.status).toBe(0);
-    expect(second).toBe(true);
+    expect(second).toBe("ECONNREFUSED");
     expect((await credentials.read())[standIn.origin]?.tokens).not.toBeNull();
   });
 
@@ -405,6 +440,54 @@ describe("login: a refresh refused with another status", () => {
       expect(await readFile(credentials.file, "utf8")).toBe(before);
     },
   );
+});
+
+describe("the stored login", () => {
+  it("keeps its refresh token when a refresh answers without a new one", async () => {
+    const { standIn, credentials, env } = await setup();
+    const { client, grant, tokens } = standIn.issue();
+    await credentials.put(standIn.origin, { client, tokens, expires: Date.now() });
+    let issued: string | undefined;
+    standIn.override = ({ path }) => {
+      if (path !== "/oauth/token") return undefined;
+      const next = standIn.tokens(grant);
+      issued = next.access_token;
+      return { status: 200, body: { access_token: next.access_token, token_type: "bearer", expires_in: 3600 } };
+    };
+    expect(await cli(["list"], { env, fetch })).toEqual({ status: 0, stdout: "", stderr: "" });
+    expect((await credentials.read())[standIn.origin]?.tokens).toMatchObject({
+      access_token: issued,
+      refresh_token: tokens.refresh_token,
+    });
+  });
+
+  it.each<[string, (home: string, relative: string) => Record<string, string>, Record<string, unknown>, boolean]>([
+    [
+      "a relative XDG_CONFIG_HOME, storing below HOME",
+      (home, relative) => ({ XDG_CONFIG_HOME: relative, HOME: home }),
+      { status: 0 },
+      true,
+    ],
+    [
+      "a relative HOME without XDG_CONFIG_HOME, storing nothing",
+      (_home, relative) => ({ HOME: relative }),
+      { status: 1, stderr: "artifacts: set HOME or XDG_CONFIG_HOME, below which the login is stored\n" },
+      false,
+    ],
+  ])("ignores %s", async (_name, variables, outcome, stored) => {
+    const standIn = await StandIn.start();
+    const home = await tempDir();
+    const relative = `relative-${randomBytes(6).toString("hex")}`;
+    try {
+      expect(await login(standIn, { ARTIFACTS_API_URL: standIn.origin, ...variables(home, relative) })).toMatchObject(
+        outcome,
+      );
+      expect(await exists(relative)).toBe(false);
+      expect(await exists(join(home, ".config", "artifacts", "credentials.json"))).toBe(stored);
+    } finally {
+      await rm(relative, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("PL-51: the credential precedence", () => {
@@ -592,6 +675,6 @@ describe("the listener", () => {
     expect(ran.status).toBe(1);
     await until(() => standIn.callbacks.length === 1);
     expect((await standIn.callbacks[0])?.status).toBe(400);
-    expect(await refused(callbackPort(ran.stderr))).toBe(true);
+    expect(await connecting(callbackPort(ran.stderr))).toBe("ECONNREFUSED");
   });
 });
