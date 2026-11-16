@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/shuymn/artifacts/compare/v0.7.0...v0.8.0) (2026-11-16)
+
+
+### Features
+
+* **worker:** accept OAuth access tokens ([62839e5](https://github.com/shuymn/artifacts/commit/62839e59b854b4236115961c09bec4cb93e3b3a1))
+* **worker:** accept OAuth access tokens ([a03a70e](https://github.com/shuymn/artifacts/commit/a03a70ec4c610bd93495d91a150acd7853197eec))
+
 ## [0.7.0](https://github.com/shuymn/artifacts/compare/v0.6.0...v0.7.0) (2026-11-16)
 
 
