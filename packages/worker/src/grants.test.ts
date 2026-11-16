@@ -113,6 +113,51 @@ describe("GET /v1/grants", () => {
     expect(tokens.refresh_token).toContain(describedId);
   });
 
+  it("reads every page of the library's listing, and orders grants made in the same second by ID, last first", async () => {
+    const world = new World();
+    const clientId = await register(world);
+    const ids: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const code = await authorize(world, clientId, `${API}/mcp`);
+      const id = code.split(":")[1] ?? "";
+      const stored = await oauthKv().get<Record<string, unknown>>(grantKey(id), { type: "json" });
+      await oauthKv().put(grantKey(id), JSON.stringify({ ...stored, createdAt: 1_800_000_000 }));
+      ids.push(id);
+    }
+    // One grant per page, so the listing has three pages; KV lists them in lexical order, the reverse of the answer's.
+    const base = oauthKv();
+    const paged = new Proxy(base, {
+      get(target, property) {
+        const value: unknown = Reflect.get(target, property, target);
+        if (property !== "list") return typeof value === "function" ? value.bind(target) : value;
+        return (options: KVNamespaceListOptions) => target.list({ ...options, limit: 1 });
+      },
+    });
+    world.env = { ...world.env, OAUTH_KV: paged };
+    expect((await listed(world)).map((grant) => grant.id)).toEqual(ids.toSorted().toReversed());
+  });
+
+  it.each([
+    ["a null client name", { publisher: "laptop-claude", clientName: null, redirectHost: "127.0.0.1" }],
+    ["fields of another type", { publisher: 7, clientName: ["Claude"], redirectHost: { host: "127.0.0.1" } }],
+    ["metadata that is null", null],
+    ["metadata that is a string", "laptop-claude"],
+  ] as const)("lists null for each consent field it cannot read: %s", async (_name, metadata) => {
+    const world = new World();
+    const clientId = await register(world);
+    const id = (await authorize(world, clientId)).split(":")[1] ?? "";
+    const stored = await oauthKv().get<Record<string, unknown>>(grantKey(id), { type: "json" });
+    await oauthKv().put(grantKey(id), JSON.stringify({ ...stored, metadata }));
+    const [grant] = await listed(world);
+    const named = metadata !== null && typeof metadata === "object" && typeof metadata.publisher === "string";
+    expect(grant).toMatchObject({
+      id,
+      publisher: named ? "laptop-claude" : null,
+      client_name: null,
+      redirect_host: named ? "127.0.0.1" : null,
+    });
+  });
+
   it("answers an empty listing when there is no grant", async () => {
     expect(await listed(new World())).toEqual([]);
   });
