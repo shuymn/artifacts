@@ -43,7 +43,7 @@ main ──(release-please keeps a release PR open)──> merge the release PR 
      tag's, runs the smoke tests against the binary unpacked from its archive, and hands the archive to the next job.
   3. **publish** runs only when every platform passed. It checks the four archives (names, the binary alone at the
      root), writes `SHA256SUMS`, uploads them to the release while it is still a draft (replacing the assets an
-     earlier attempt left), checks the draft's assets against the files (size, and digest when GitHub gives one) and
+     earlier attempt left), checks the draft's assets against the files (size and SHA-256 digest) and
      publishes the release.
   4. **fast-forward** moves the `release` branch to the latest published release. It refuses a release that is not a
      commit of `main` and an update that is not a fast-forward: it updates the branch with `force=false`, which GitHub

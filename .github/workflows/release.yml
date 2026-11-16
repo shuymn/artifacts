@@ -221,8 +221,8 @@ jobs:
             exit 1
           fi
           files=$(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
-          # Whether the release holds exactly these files, each uploaded whole: its size and, when GitHub gives one, its
-          # digest.
+          # Whether the release holds exactly these files, each uploaded whole: its size and its digest. GitHub gives a
+          # SHA-256 digest for each uploaded asset, so an asset without one is not taken as this run's.
           holds_files() {
             gh api --paginate "$repo/releases/$RELEASE_ID/assets" \
               --jq '.[] | [.name, .state, .size, (.digest // "")] | @tsv' >"$RUNNER_TEMP/listed" || return 1
@@ -234,7 +234,7 @@ jobs:
             fi
             while IFS="$(printf '\t')" read -r name state size digest; do
               if [ "$state" != uploaded ] || [ "$size" != "$(stat -c %s "$name")" ] ||
-                { [ -n "$digest" ] && [ "$digest" != "sha256:$(sha256sum "$name" | cut -d' ' -f1)" ]; }; then
+                [ "$digest" != "sha256:$(sha256sum "$name" | cut -d' ' -f1)" ]; then
                 echo "::error::the asset $name is not the file of this run ($state, $size bytes, ${digest:-no digest})"
                 return 1
               fi
