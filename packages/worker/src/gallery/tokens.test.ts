@@ -1,7 +1,9 @@
-// gallery.css carries the Penpot tokens one to one (docs/gallery/design.md, "Tokens"): every token is a custom property
-// with the value the mapping gives, and every typography token is one rule headed by its name.
+// The design file and gallery.css carry tokens.json one to one (docs/gallery/design.md, "Tokens"). In gallery.css every
+// token is a custom property with the value the mapping gives, and every typography token is one rule headed by its
+// name; in gallery.pen every other token is a Pencil variable, and every typography token a reusable text.
 import { describe, expect, it } from "vitest";
 
+import pen from "../../../../docs/gallery/gallery.pen?raw";
 import tokens from "../../../../docs/gallery/tokens.json";
 
 import css from "./gallery.css?raw";
@@ -90,5 +92,63 @@ describe("gallery.css and tokens.json", () => {
   it("uses no typography token that is not in tokens.json", () => {
     const named = [...css.matchAll(/\/\* (type\.[\w-]+) \*\//g)].map((m) => m[1]);
     expect(named.filter((n) => n === undefined || !all.has(n))).toEqual([]);
+  });
+});
+
+const design: unknown = JSON.parse(pen);
+const penRef = (value: string) => value.replace(/^\{(.+)\}$/, (_, name: string) => `$${name}`);
+const PEN_TYPE: Record<string, string> = {
+  color: "color",
+  dimension: "number",
+  fontFamily: "string",
+  fontWeight: "string",
+};
+
+// Pencil keeps a color's hex as written; it is compared in lower case.
+const penValue = (type: unknown, value: unknown) =>
+  type === "color" && typeof value === "string" && value.startsWith("#") ? value.toLowerCase() : value;
+
+function penVariable(token: Token): { type: string | undefined; value: unknown } {
+  const value = token.$value;
+  const type = PEN_TYPE[token.$type];
+  if (typeof value === "string" && value.startsWith("{")) return { type, value: penRef(value) };
+  if (token.$type === "dimension") return { type, value: Number(String(value).replace(/px$/, "")) };
+  return { type, value: penValue(type, String(value)) };
+}
+
+function* penNodes(node: unknown): Generator<Record<string, unknown>> {
+  if (!isRecord(node)) return;
+  yield node;
+  if (Array.isArray(node.children)) for (const child of node.children) yield* penNodes(child);
+}
+
+describe("gallery.pen and tokens.json", () => {
+  it("defines exactly the tokens as variables, with the mapped values", () => {
+    const want: Record<string, unknown> = {};
+    for (const [name, token] of all) if (!name.startsWith("type.")) want[name] = penVariable(token);
+    const variables = isRecord(design) && isRecord(design.variables) ? design.variables : {};
+    const got: Record<string, unknown> = {};
+    for (const [name, v] of Object.entries(variables))
+      got[name] = isRecord(v) ? { type: v.type, value: penValue(v.type, v.value) } : v;
+    expect(got).toEqual(want);
+  });
+
+  it("has one reusable text per typography token, with its font", () => {
+    const want: Record<string, unknown[]> = {};
+    for (const [name, token] of all) {
+      if (!name.startsWith("type.")) continue;
+      const v = token.$value;
+      if (!isTypography(v)) throw new Error(`${name} is not a typography value`);
+      const [fontFamily, fontSize, fontWeight] = [v.fontFamily, v.fontSize, v.fontWeight].map(penRef);
+      want[name] = [{ fontFamily, fontSize, fontWeight, lineHeight: v.lineHeight }];
+    }
+    const got: Record<string, unknown[]> = {};
+    for (const n of penNodes(design)) {
+      if (n.reusable !== true || n.type !== "text" || typeof n.name !== "string" || !n.name.startsWith("type."))
+        continue;
+      const { fontFamily, fontSize, fontWeight, lineHeight } = n;
+      (got[n.name] ??= []).push({ fontFamily, fontSize, fontWeight, lineHeight });
+    }
+    expect(got).toEqual(want);
   });
 });
