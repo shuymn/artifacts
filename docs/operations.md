@@ -26,6 +26,10 @@ main ──(release-please keeps a release PR open)──> merge the release PR 
 - release-please keeps one release PR open with the next version and the changelog, from the Conventional Commits on
   `main` (one version for the repository: the `node` release type on the root package, tags `vX.Y.Z`, first release
   `0.1.0`; `release-please-config.json`, `.release-please-manifest.json`). Merging it tags the release.
+- Releases are immutable (`release_immutability` in `.github/infra.yaml`): once published, a release's tag cannot be
+  moved or deleted, and deleting the release does not free its tag name
+  ([immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)).
+  A bad release is fixed by the next one.
 - The release workflow then fast-forwards the `release` branch to the latest release. It refuses a release that is not
   a commit of `main` and an update that is not a fast-forward: it updates the branch with `force=false`, which GitHub
   refuses unless the update is a fast-forward
