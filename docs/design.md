@@ -192,20 +192,21 @@ of the archive regardless of age.
 
 | Rule          | Value and reason                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Form          | relative, `/`-separated, no leading or trailing `/`, no empty segment: Cloudflare merges adjacent slashes in requests, and a trailing `/` names a directory index                                                                                                                                                                                                                  |
+| Form          | relative, `/`-separated, no leading or trailing `/`, no empty segment: a zone with Cloudflare URL normalization merges adjacent slashes in requests, and a trailing `/` names a directory index                                                                                                                                                                                    |
 | Segments      | not `.` or `..`, which URL parsing and Cloudflare's normalization remove before a request arrives; the first segment is not `_v`, which pinned versions use, nor `cdn-cgi`, which Cloudflare manages on every proxied hostname and does not pass on ([`/cdn-cgi/`](https://developers.cloudflare.com/fundamentals/reference/cdn-cgi-endpoint/)); both are refused before any write |
 | Characters    | any Unicode scalar value except NUL, which SQLite's string functions treat as an end; `%`, `#`, `?` and `\` are allowed, and links percent-encode them (the authoring rule)                                                                                                                                                                                                        |
 | Normalization | stored and looked up in NFC: macOS file names can arrive in NFD while pages name files in NFC                                                                                                                                                                                                                                                                                      |
 | Case          | case-sensitive                                                                                                                                                                                                                                                                                                                                                                     |
 | Length        | at most 1 KiB of UTF-8: the whole file list is loaded on every update and returned by `get`, so 2000 paths stay near 2 MiB                                                                                                                                                                                                                                                         |
 
-A request is resolved from the pathname the Worker receives, after URL parsing and Cloudflare's normalization have
-removed dot segments and merged slashes
-([URL normalization](https://developers.cloudflare.com/rules/normalization/how-it-works/)): split on `/`, decode each
-segment once with strict percent-decoding (a malformed escape or invalid UTF-8 answers 404; an encoded `/` answers
-404), normalize to NFC, add `index.html` after a trailing `/`, and look the path up in the selected version only
-(SRV-2). A directory with an `index.html` and no file of its own name answers 308 to the path with `/`, and so does
-`/_v/<n>`; `<n>` is a canonical decimal of an existing version.
+A request is resolved from the pathname the Worker receives, after URL parsing and the zone's URL normalization have
+removed dot segments; the default normalization type, RFC 3986, keeps adjacent slashes, which the Cloudflare type merges
+([URL normalization](https://developers.cloudflare.com/rules/normalization/how-it-works/),
+[settings](https://developers.cloudflare.com/rules/normalization/settings/)), so an empty segment that arrives answers
+404: split on `/`, decode each segment once with strict percent-decoding (a malformed escape or invalid UTF-8 answers
+404; an encoded `/` answers 404), normalize to NFC, add `index.html` after a trailing `/`, and look the path up in the
+selected version only (SRV-2). A directory with an `index.html` and no file of its own name answers 308 to the path
+with `/`, and so does `/_v/<n>`; `<n>` is a canonical decimal of an existing version.
 
 ### Content types
 
