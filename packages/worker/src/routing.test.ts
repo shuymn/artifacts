@@ -238,6 +238,8 @@ describe("PL-46: optional API_TOKENS", () => {
     async (state) => {
       const world = new World();
       const created = await world.created({ title: "t", files: { "index.html": "page" } });
+      const shared = await world.created({ title: "s", files: { "index.html": "shared page" } });
+      expect((await world.patch(shared.artifact.id, { public: true })).status).toBe(200);
       if (state === "missing") without(world, "API_TOKENS");
       else world.env = { ...world.env, API_TOKENS: state };
       const logs = captureLogs();
@@ -256,6 +258,7 @@ describe("PL-46: optional API_TOKENS", () => {
       });
       expect(gallery.status).toBe(200);
       expect(await (await world.content(created.artifact.id, "/")).text()).toBe("page");
+      expect(await (await world.public(shared.artifact.id, "/")).text()).toBe("shared page");
     },
   );
 
@@ -265,14 +268,22 @@ describe("PL-46: optional API_TOKENS", () => {
       const world = new World({ vars: { API_TOKENS: value } });
       const { db, bucket } = untouchable(world);
       const logs = captureLogs();
-      for (const url of [`https://${APP_HOST}/`, `${API}/v1/artifacts`, `https://${ID}${CONTENT_SUFFIX}/`]) {
+      const urls = [
+        `https://${APP_HOST}/`,
+        `${API}/v1/artifacts`,
+        `https://${ID}${CONTENT_SUFFIX}/`,
+        `https://${ID}${PUBLIC_SUFFIX}/`,
+        "https://example.com/",
+      ];
+      for (const url of urls) {
         const response = await world.fetch(url, { headers: { Authorization: `Bearer ${TOKENS.codex}` } });
         expect({ url, status: response.status }).toEqual({ url, status: 503 });
       }
       expect(db.batches).toBe(0);
       expect(bucket.calls).toEqual([]);
+      expect(world.keys.calls).toBe(0);
       expect(logEvents(logs.lines)).toEqual(
-        Array.from({ length: 3 }, () => ({ event: "config.invalid", reason: "invalid", variable: "API_TOKENS" })),
+        urls.map(() => ({ event: "config.invalid", reason: "invalid", variable: "API_TOKENS" })),
       );
     },
   );
