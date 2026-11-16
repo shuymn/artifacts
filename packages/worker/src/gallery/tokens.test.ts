@@ -33,6 +33,13 @@ function flatten(node: Record<string, unknown>, prefix: string[] = []): Map<stri
 }
 
 const all = flatten(tokens);
+
+// A typography token's value, after checking that the token is one.
+function typography(name: string, token: Token): Typography {
+  const value = token.$value;
+  if (token.$type !== "typography" || !isTypography(value)) throw new Error(`${name} is not a typography token`);
+  return value;
+}
 const varName = (name: string) => `--${name.replaceAll(".", "-")}`;
 const ref = (value: string) => value.replace(/^\{(.+)\}$/, (_, name: string) => `var(${varName(name)})`);
 const rem = (px: string) => `${Number(px.replace(/px$/, "")) / 16}rem`;
@@ -69,8 +76,7 @@ describe("gallery.css and tokens.json", () => {
     const got: Record<string, (string | undefined)[]> = {};
     for (const [name, token] of all) {
       if (!name.startsWith("type.")) continue;
-      const v = token.$value;
-      if (!isTypography(v)) throw new Error(`${name} is not a typography value`);
+      const v = typography(name, token);
       want[name] = [`${ref(v.fontWeight)} ${ref(v.fontSize)} / ${v.lineHeight} ${ref(v.fontFamily)}`];
       const rule = new RegExp(`/\\* ${name.replace(".", "\\.")} \\*/\\n[^{]+\\{\\s*font: ([^;]+);`, "g");
       got[name] = [...css.matchAll(rule)].map((m) => m[1]);
@@ -108,9 +114,10 @@ const PEN_TYPE: Record<string, string> = {
 const penValue = (type: unknown, value: unknown) =>
   type === "color" && typeof value === "string" && value.startsWith("#") ? value.toLowerCase() : value;
 
-function penVariable(token: Token): { type: string | undefined; value: unknown } {
+function penVariable(name: string, token: Token): { type: string; value: unknown } {
   const value = token.$value;
   const type = PEN_TYPE[token.$type];
+  if (type === undefined) throw new Error(`${name} has the $type ${token.$type}, which no Pencil variable holds`);
   if (typeof value === "string" && value.startsWith("{")) return { type, value: penRef(value) };
   if (token.$type === "dimension") return { type, value: Number(String(value).replace(/px$/, "")) };
   return { type, value: penValue(type, String(value)) };
@@ -125,7 +132,7 @@ function* penNodes(node: unknown): Generator<Record<string, unknown>> {
 describe("gallery.pen and tokens.json", () => {
   it("defines exactly the tokens as variables, with the mapped values", () => {
     const want: Record<string, unknown> = {};
-    for (const [name, token] of all) if (!name.startsWith("type.")) want[name] = penVariable(token);
+    for (const [name, token] of all) if (!name.startsWith("type.")) want[name] = penVariable(name, token);
     const variables = isRecord(design) && isRecord(design.variables) ? design.variables : {};
     const got: Record<string, unknown> = {};
     for (const [name, v] of Object.entries(variables))
@@ -137,8 +144,7 @@ describe("gallery.pen and tokens.json", () => {
     const want: Record<string, unknown[]> = {};
     for (const [name, token] of all) {
       if (!name.startsWith("type.")) continue;
-      const v = token.$value;
-      if (!isTypography(v)) throw new Error(`${name} is not a typography value`);
+      const v = typography(name, token);
       const [fontFamily, fontSize, fontWeight] = [v.fontFamily, v.fontSize, v.fontWeight].map(penRef);
       want[name] = [{ fontFamily, fontSize, fontWeight, lineHeight: v.lineHeight }];
     }
