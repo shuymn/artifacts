@@ -13,7 +13,8 @@ and `-s.example-content.net` for content on its own registrable domain. `<team>`
 Commands run from `packages/worker`, with the tools mise installs from `mise.toml` and `.node-version`: there
 `pnpm exec wrangler` is the Wrangler of the lockfile and `wrangler.jsonc` names the Worker. A block that starts elsewhere
 says so. `artifacts` is the CLI, installed as in section 5. A claim about Cloudflare or another product links the page
-that states it; **Unconfirmed** marks one the documentation does not state.
+that states it; **Unconfirmed** marks one the documentation does not state, and **Observed** one the documentation
+does not state but a deployment of this repository showed.
 
 ## How a change reaches the deployment
 
@@ -42,8 +43,8 @@ creates the App, see [README](../README.md)): a pull request opened with `GITHUB
 release PR would never run the required checks. release-please creates its commits through the API without an author,
 which GitHub signs for an App ([bot
 signatures](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification#signature-verification-for-bots)),
-as `main`'s `required_signatures` rule needs. **Unconfirmed:** that the first release PR's commits show as verified;
-check it before merging.
+as `main`'s `required_signatures` rule needs. **Observed:** the first release PR's commits showed as verified; check it
+again if the release workflow changes.
 
 ## 1. Cloudflare setup
 
@@ -153,7 +154,7 @@ the GitHub repository ([Builds](https://developers.cloudflare.com/workers/ci-cd/
 | Root directory                           | `packages/worker`                                          | where `wrangler.jsonc` is and the commands run ([monorepos](https://developers.cloudflare.com/workers/ci-cd/builds/advanced-setups/#monorepos))                                                                                                                                                                                                                                                                                                                                                                                |
 | Build command                            | `node scripts/install.ts`                                  | installs the workspace with the pnpm version of `mise.lock`: `npx --yes pnpm@<version> install --frozen-lockfile` at the repository root, so the image's pnpm (Corepack's default, 9.x) never runs the install. It first checks that Node is the version of `.node-version`, and refuses to start, naming the problem, when either version cannot be read or Node differs                                                                                                                                                      |
 | Deploy command                           | `node scripts/deploy.ts`                                   | the deploy script below; it runs the Wrangler of the lockfile from `node_modules/.bin` and needs no pnpm                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Build variable `ARTIFACTS_DEPLOY_JSONC`  | the deployment values (section 2)                          | build variables reach the build, not the Worker at run time (configuration page). **Unconfirmed:** that the page's "build" includes the deploy command; the script names the variable if it is missing                                                                                                                                                                                                                                                                                                                         |
+| Build variable `ARTIFACTS_DEPLOY_JSONC`  | the deployment values (section 2)                          | build variables reach the build, not the Worker at run time (configuration page). **Observed:** the deploy command reads it; the script names the variable if it is missing                                                                                                                                                                                                                                                                                                                                                    |
 | Build variable `SKIP_DEPENDENCY_INSTALL` | `1`                                                        | without it, Builds installs the whole workspace with its own pnpm before the build command, even with a root directory set (a build log in [workers-sdk#10941](https://github.com/cloudflare/workers-sdk/issues/10941) shows `Installing project dependencies: pnpm install --frozen-lockfile` and `Scope: all 26 workspace projects`); the variable turns that off ([build image](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)). The build command refuses to run in Builds (`WORKERS_CI`) without it |
 | API token                                | a token of your own, see below                             | the token Builds creates has Workers Scripts, KV and R2 edit, Workers Routes edit and account read, but no D1 permission ([API token](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/#api-token)), and the deploy applies D1 migrations                                                                                                                                                                                                                                                                  |
 
@@ -162,9 +163,10 @@ The dashboard holds no tool version; each build uses those of the commit it buil
 - **Node.js:** Builds reads `.node-version` from the root directory
   ([build image](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)). `packages/worker/.node-version`
   is a symbolic link to the repository's `.node-version`, which mise reads too. It holds the major only: the mise update
-  workflow advances `mise.lock` within it, and Builds picks the release of that major. **Unconfirmed:** that the
-  checkout of Builds keeps the link. If it does not, Builds uses its default Node, and the build command refuses once
-  that is not the major of `.node-version`.
+  workflow advances `mise.lock` within it, and Builds picks the release of that major. **Observed:** the checkout of
+  Builds keeps the link: the first build installed the latest release of that major instead of using the image's default
+  Node. If that changes, Builds uses its default Node, and the build command refuses once that is not the major of
+  `.node-version`.
 - **pnpm:** the version of `mise.lock`, which the build command reads and the mise update workflow advances.
 
 The API token is a user token with the permissions of the generated one plus **D1 edit** on the account.
