@@ -380,6 +380,30 @@ export async function clearOAuthStorage(): Promise<void> {
   }
 }
 
+export type Fault = "throw" | "hang" | Promise<void>;
+
+/** `base` with each call `pick` names failed, held forever, or held until the promise settles. */
+export function faulty(
+  base: KVNamespace,
+  pick: (method: string, key: string) => Fault | undefined,
+  message = "KV-FAILURE",
+): KVNamespace {
+  return new Proxy(base, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      return async (...args: unknown[]) => {
+        const fault = pick(String(property), typeof args[0] === "string" ? args[0] : "");
+        if (fault === "throw") throw new Error(message);
+        if (fault === "hang") return never();
+        if (fault !== undefined) await fault;
+        const result: unknown = Reflect.apply(value, target, args);
+        return result;
+      };
+    },
+  });
+}
+
 /** A promise with its resolver, for holding a call until the test releases it. */
 export function gate(): { promise: Promise<void>; open: () => void } {
   const { promise, resolve } = Promise.withResolvers<void>();

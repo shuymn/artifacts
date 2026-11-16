@@ -19,10 +19,13 @@ const DAY_MS = 86_400_000;
 
 /**
  * ISO-5: nothing but the gallery's own stylesheets, fonts and icon loads (Firefox checks a page's icon against
- * `img-src`); no script runs, no form submits, no frame shows.
+ * `img-src`); no script runs, no frame shows, and no form submits, except the consent page's to itself and to the
+ * client's redirect origin (`formAction`, design.md section 7).
  */
-const CONTENT_SECURITY_POLICY =
-  "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+function contentSecurityPolicy(formAction: string | undefined): string {
+  const forms = formAction === undefined ? "'none'" : `'self' ${formAction}`;
+  return `default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action ${forms}; frame-ancestors 'none'`;
+}
 
 const HEADERS = browserHeaders("private");
 
@@ -33,12 +36,14 @@ const HEADERS = browserHeaders("private");
 const IMMUTABLE_HEADERS = { ...HEADERS, "Cache-Control": "private, max-age=31536000, immutable" };
 
 /**
- * ISO-5: the app host's response with the gallery's CSP. index.ts applies it to every app-host response at its outer
- * boundary, so refusals before the gallery (405, 403, 503) and failures (500) carry it as well as pages and assets.
+ * ISO-5: the app host's response with the gallery's CSP, replacing any other. index.ts applies it to every app-host
+ * response at its outer boundary, so refusals before the gallery (405, 403, 503) and failures (500) carry it as well as
+ * pages and assets. `formAction` is the consent page's redirect origin, which consent.ts has checked; every other
+ * response keeps `form-action 'none'`.
  */
-export function withGalleryPolicy(response: Response): Response {
+export function withGalleryPolicy(response: Response, formAction?: string): Response {
   const answer = new Response(response.body, response);
-  answer.headers.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+  answer.headers.set("Content-Security-Policy", contentSecurityPolicy(formAction));
   return answer;
 }
 

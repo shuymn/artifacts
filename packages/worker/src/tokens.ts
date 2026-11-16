@@ -5,7 +5,10 @@
  * stands for the caller from then on. The token itself is never stored, returned or logged.
  */
 declare const tokenNameBrand: unique symbol;
-/** A name from `API_TOKENS`: `[a-z0-9-]{1,32}`. Only `parseApiTokens` makes one. */
+/**
+ * A publisher name (design.md section 7): `[a-z0-9-]{1,32}`, a name from `API_TOKENS` or the one the owner gives an
+ * OAuth grant on the consent page. Only `isTokenName` makes one.
+ */
 export type TokenName = string & { readonly [tokenNameBrand]: true };
 
 export type ApiToken = { readonly name: TokenName; readonly hash: Uint8Array };
@@ -15,7 +18,7 @@ const HASH = /^[0-9a-f]{64}$/;
 /** Longer credentials are refused without hashing; a token is `art_` and 32 characters. */
 const MAX_TOKEN_LENGTH = 512;
 
-function isTokenName(value: string): value is TokenName {
+export function isTokenName(value: string): value is TokenName {
   return NAME.test(value);
 }
 

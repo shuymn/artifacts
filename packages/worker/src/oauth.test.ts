@@ -1,6 +1,6 @@
 // The OAuth authorization server behind the router (design.md section 7): PL-43 to PL-45, the revocation record's check
-// at the token endpoint (OAUTH-5) and the configuration of section 7. The consent page is a later step; here the
-// library's `completeAuthorization` stands in for it, called by the test.
+// at the token endpoint (OAUTH-5) and the configuration of section 7. The consent page has its own tests
+// (consent.test.ts); here the library's `completeAuthorization` stands in for it, called by the test.
 import { OAuthAuthorizationServer } from "@cloudflare/workers-oauth-provider";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,10 +16,10 @@ import {
   captureLogs,
   CONTENT_SUFFIX,
   clearOAuthStorage,
+  faulty,
   gate,
   isRecord,
   logEvents,
-  never,
   PUBLIC_SUFFIX,
   stringAt,
   TOKENS,
@@ -147,26 +147,6 @@ async function signedIn(world: World): Promise<{ clientId: string; grantId: stri
   return { clientId, grantId: code.split(":")[1] ?? "", tokens };
 }
 
-type Fault = "throw" | "hang" | Promise<void>;
-
-/** `base` with each call `pick` names failed, held forever, or held until the promise settles. */
-function faulty(base: KVNamespace, pick: (method: string, key: string) => Fault | undefined, message = "KV-FAILURE") {
-  return new Proxy(base, {
-    get(target, property) {
-      const value: unknown = Reflect.get(target, property, target);
-      if (typeof value !== "function") return value;
-      return async (...args: unknown[]) => {
-        const fault = pick(String(property), typeof args[0] === "string" ? args[0] : "");
-        if (fault === "throw") throw new Error(message);
-        if (fault === "hang") return never();
-        if (fault !== undefined) await fault;
-        const result: unknown = Reflect.apply(value, target, args);
-        return result;
-      };
-    },
-  });
-}
-
 const corsHeaders = (response: Response) =>
   [...response.headers.keys()].filter((name) => name.toLowerCase().startsWith("access-control-"));
 
@@ -179,7 +159,7 @@ async function errorOf(response: Response): Promise<{ status: number; headers: s
 
 // PL-43, HOST-1, ISO-2.
 describe("PL-43: the library at the boundary", () => {
-  it("calls the library only for the API host's three OAuth paths", async () => {
+  it("calls the library only for the API host's three OAuth paths and the app host's authorization endpoint", async () => {
     const world = new World();
     const fetchSpy = vi.spyOn(OAuthAuthorizationServer.prototype, "fetch");
     const helperSpy = vi.spyOn(OAuthAuthorizationServer.prototype, "getOAuthApi");
@@ -201,14 +181,17 @@ describe("PL-43: the library at the boundary", () => {
       "/v1/artifacts",
       "/",
     ];
+    const helped: string[] = [];
     for (const [host, headers] of hosts) {
       for (const path of paths) {
         for (const method of ["GET", "HEAD", "POST", "PUT", "DELETE"]) {
+          const before = helperSpy.mock.calls.length;
           await world.fetch(`https://${host}${path}`, {
             method,
             headers,
             ...(method === "POST" || method === "PUT" ? { body: "x" } : {}),
           });
+          if (helperSpy.mock.calls.length > before) helped.push(`${method} https://${host}${path}`);
         }
       }
     }
@@ -219,7 +202,8 @@ describe("PL-43: the library at the boundary", () => {
       `POST ${API}/oauth/token`,
       `POST ${API}/oauth/register`,
     ]);
-    expect(helperSpy).not.toHaveBeenCalled();
+    // The consent page's helpers, on the app host's authorization endpoint only.
+    expect(helped).toEqual([`GET https://${APP_HOST}/oauth/authorize`, `POST https://${APP_HOST}/oauth/authorize`]);
     expect(validateSpy).not.toHaveBeenCalled();
   });
 
