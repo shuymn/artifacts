@@ -22,13 +22,18 @@ export const LIBRARY_PATHS: ReadonlyMap<string, readonly string[]> = new Map([
   [REGISTRATION_PATH, ["POST"]],
 ]);
 /** The router's protected resource metadata (design.md section 7); every path under it is OAuth's. */
-const RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
+export const RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 /** The authorization endpoint, on the app host. */
 export const AUTHORIZE_PATH = "/oauth/authorize";
 
+/** The protected resource metadata path, or a path under it. */
+export function isResourceMetadataPath(path: string): boolean {
+  return path === RESOURCE_METADATA_PATH || path.startsWith(`${RESOURCE_METADATA_PATH}/`);
+}
+
 /** The API host's OAuth paths: the library's three and the protected resource metadata. */
 export function isApiOAuthPath(path: string): boolean {
-  return LIBRARY_PATHS.has(path) || path === RESOURCE_METADATA_PATH || path.startsWith(`${RESOURCE_METADATA_PATH}/`);
+  return LIBRARY_PATHS.has(path) || isResourceMetadataPath(path);
 }
 
 /**

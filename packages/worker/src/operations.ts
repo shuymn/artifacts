@@ -1,11 +1,12 @@
 /**
  * The shared operation layer (design.md section 8; P5). Each operation takes input the adapter validated with the
- * schemas of schemas.ts, the caller's token name where it changes something, and its dependencies; it returns a result
+ * schemas of schemas.ts, the caller's publisher where it changes something, and its dependencies; it returns a result
  * or an operation error from errors.ts's closed set. REST (rest.ts) and MCP decode, call and encode only, so both give
  * the same results and errors for the same input.
  */
 import type { Config } from "./config.ts";
 import { contentTypeFor } from "./content-type.ts";
+import type { Publisher } from "./credentials.ts";
 import {
   ADVANCED_ROW,
   ARTIFACT_ROW,
@@ -54,9 +55,9 @@ import {
   type ObjectStore,
 } from "./objects.ts";
 import { ENTRY_FILE, parseVersionNumber, type ResolvedPath } from "./paths.ts";
+import type { GrantId } from "./revocation.ts";
 import { LIMITS, type ArchivedFilter, type ArchiveSetting } from "./schemas.ts";
 import type { Timeouts } from "./timeout.ts";
-import type { TokenName } from "./tokens.ts";
 
 export type OperationDeps = {
   readonly db: D1Database;
@@ -69,6 +70,14 @@ export type OperationDeps = {
   /** `OAUTH_KV`, where OAuth is on: the grants API's storage. */
   readonly oauthKv?: KVNamespace;
 };
+
+/**
+ * What a change log carries of its publisher (TOK-3): the publisher name, under `token` as for an API token's name, and
+ * an OAuth grant's ID, since names may repeat across grants.
+ */
+function changedBy(publisher: Publisher): { readonly token: Publisher["name"]; readonly grant?: GrantId } {
+  return { token: publisher.name, ...(publisher.grant === undefined ? {} : { grant: publisher.grant }) };
+}
 
 /** A file of a publish: a path in its stored form (filePathSchema), an optional given type, and its bytes. */
 export type FileInput = { readonly path: string; readonly contentType?: string | undefined; readonly body: Blob };
@@ -254,7 +263,7 @@ function publishResult(deps: OperationDeps, advanced: AdvancedRow, version: NewV
 /** Create (design.md sections 3 and 4): version 1 of a new artifact, private and with the archive setting unset. */
 export async function createArtifact(
   deps: OperationDeps,
-  token: TokenName,
+  publisher: Publisher,
   input: CreateInput,
 ): Promise<Result<PublishResult>> {
   const paths = input.files.map((file) => file.path);
@@ -270,7 +279,7 @@ export async function createArtifact(
       id,
       number: 1,
       createdAt: deps.now(),
-      publishedBy: token,
+      publishedBy: publisher.name,
       title: input.title,
       description: input.description ?? "",
       files,
@@ -281,7 +290,7 @@ export async function createArtifact(
     const results = await write(database(deps), createStatements(deps.db, version));
     const advanced = rows(results[0], ADVANCED_ROW)[0];
     if (advanced === undefined) return fail({ code: "internal" });
-    logEvent("artifact.created", { token, artifact: id, version: 1 });
+    logEvent("artifact.created", { ...changedBy(publisher), artifact: id, version: 1 });
     return succeed(publishResult(deps, advanced, version));
   });
 }
@@ -299,7 +308,7 @@ function updateRefusal(state: StateRow | undefined, base: number): Result<never>
  */
 export async function updateArtifact(
   deps: OperationDeps,
-  token: TokenName,
+  publisher: Publisher,
   input: UpdateInput,
 ): Promise<Result<PublishResult>> {
   const id = input.id;
@@ -355,7 +364,7 @@ export async function updateArtifact(
       id,
       number: input.baseVersion + 1,
       createdAt: deps.now(),
-      publishedBy: token,
+      publishedBy: publisher.name,
       title: input.title ?? artifact.title,
       description: input.description ?? artifact.description,
       files,
@@ -372,7 +381,7 @@ export async function updateArtifact(
     }
     const advanced = rows(results[0], ADVANCED_ROW)[0];
     if (advanced === undefined) return updateRefusal(rows(results.at(-1), STATE_ROW)[0], input.baseVersion);
-    logEvent("artifact.updated", { token, artifact: id, version: version.number });
+    logEvent("artifact.updated", { ...changedBy(publisher), artifact: id, version: version.number });
     return succeed(publishResult(deps, advanced, version));
   });
 }
@@ -554,7 +563,7 @@ export type SettingsInput = {
  */
 export async function updateSettings(
   deps: OperationDeps,
-  token: TokenName,
+  publisher: Publisher,
   input: SettingsInput,
 ): Promise<Result<{ readonly artifact: ArtifactJson }>> {
   if (input.public === undefined && input.archive === undefined) {
@@ -567,7 +576,7 @@ export async function updateSettings(
     const artifact = rows(results[1], ARTIFACT_ROW)[0];
     if ((results[0]?.meta.changes ?? 0) === 0 || artifact === undefined) return NOT_FOUND;
     logEvent("artifact.changed", {
-      token,
+      ...changedBy(publisher),
       artifact: id,
       ...(input.public === undefined ? {} : { public: input.public }),
       ...(input.archive === undefined ? {} : { archive: input.archive }),
@@ -583,7 +592,7 @@ export async function updateSettings(
  */
 export async function deleteArtifact(
   deps: OperationDeps,
-  token: TokenName,
+  publisher: Publisher,
   input: { readonly id: string },
 ): Promise<Result<{ readonly deleted: ArtifactId }>> {
   const id = input.id;
@@ -591,7 +600,7 @@ export async function deleteArtifact(
   return guarded(id, async () => {
     const results = await write(database(deps), deleteStatements(deps.db, id, deps.now()));
     if (rows(results[0], STATE_ROW)[0] === undefined) return NOT_FOUND;
-    logEvent("artifact.deleted", { token, artifact: id });
+    logEvent("artifact.deleted", { ...changedBy(publisher), artifact: id });
     try {
       await deletePrefix(objectStore(deps), id);
     } catch (error) {

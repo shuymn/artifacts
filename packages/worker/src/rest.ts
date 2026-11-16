@@ -1,10 +1,11 @@
 /**
- * The REST adapter on the API host (design.md section 8): routes under `/v1/`, after the bearer token (TOK-1). It
+ * The REST adapter on the API host (design.md section 8): routes under `/v1/`, after the bearer credential (TOK-1). It
  * decodes a request into an operation's input, calls the operation and encodes its result; operation errors and
  * transport errors share the JSON shape `{ "error": { "code", "message", … } }`.
  */
 import { JSON_BODY_BYTES, PUBLISH_BODY_BYTES, readFormData, readJson } from "./body.ts";
 import type { Config } from "./config.ts";
+import type { Publisher } from "./credentials.ts";
 import { ERROR_STATUS, errorBody, type Issue, type OperationError, type Result } from "./errors.ts";
 import { listGrants, revokeGrantById } from "./grants.ts";
 import { isArtifactId } from "./id.ts";
@@ -31,7 +32,6 @@ import {
   validate,
 } from "./schemas.ts";
 import { entityTag } from "./serve.ts";
-import type { TokenName } from "./tokens.ts";
 
 export const TRANSPORT_ERRORS = [
   "unauthorized",
@@ -76,7 +76,7 @@ function encode<T>(result: Result<T>, status = 200): Response {
   return result.ok ? jsonResponse(status, result.value) : operationError(result.error);
 }
 
-type Handler = (request: Request, deps: OperationDeps, token: TokenName) => Promise<Response>;
+type Handler = (request: Request, deps: OperationDeps, publisher: Publisher) => Promise<Response>;
 const METHODS = ["GET", "POST", "PATCH", "DELETE"] as const;
 type Handlers = Partial<Record<(typeof METHODS)[number], Handler>>;
 
@@ -144,14 +144,14 @@ function pairFiles(entries: readonly FileMeta[], parts: readonly Blob[]): FileIn
   return files;
 }
 
-async function create(request: Request, deps: OperationDeps, token: TokenName): Promise<Response> {
+async function create(request: Request, deps: OperationDeps, publisher: Publisher): Promise<Response> {
   const read = await readParts(request);
   if (!read.ok) return read.response;
   const meta = validate(restCreateMetaSchema, read.parts.meta);
   if (!meta.ok) return invalidRequest(meta.issues);
   const files = pairFiles(meta.value.files, read.parts.files);
   if (files === undefined) return invalidRequest([{ field: "files", reason: "count_mismatch" }]);
-  const result = await createArtifact(deps, token, {
+  const result = await createArtifact(deps, publisher, {
     title: meta.value.title,
     description: meta.value.description,
     files,
@@ -159,14 +159,14 @@ async function create(request: Request, deps: OperationDeps, token: TokenName): 
   return encode(result, 201);
 }
 
-async function update(request: Request, deps: OperationDeps, token: TokenName, id: string): Promise<Response> {
+async function update(request: Request, deps: OperationDeps, publisher: Publisher, id: string): Promise<Response> {
   const read = await readParts(request);
   if (!read.ok) return read.response;
   const meta = validate(restUpdateMetaSchema, read.parts.meta);
   if (!meta.ok) return invalidRequest(meta.issues);
   const files = pairFiles(meta.value.files ?? [], read.parts.files);
   if (files === undefined) return invalidRequest([{ field: "files", reason: "count_mismatch" }]);
-  const result = await updateArtifact(deps, token, {
+  const result = await updateArtifact(deps, publisher, {
     id,
     baseVersion: meta.value.base_version,
     title: meta.value.title,
@@ -177,7 +177,7 @@ async function update(request: Request, deps: OperationDeps, token: TokenName, i
   return encode(result, 201);
 }
 
-async function patch(request: Request, deps: OperationDeps, token: TokenName, id: string): Promise<Response> {
+async function patch(request: Request, deps: OperationDeps, publisher: Publisher, id: string): Promise<Response> {
   const contentType = request.headers.get("Content-Type") ?? "";
   if (!/^application\/json\s*(?:;|$)/i.test(contentType)) return transportError("unsupported_media_type");
   const body = await readJson(request, JSON_BODY_BYTES);
@@ -188,7 +188,9 @@ async function patch(request: Request, deps: OperationDeps, token: TokenName, id
   }
   const input = validate(patchSchema, body.value);
   if (!input.ok) return invalidRequest(input.issues);
-  return encode(await updateSettings(deps, token, { id, public: input.value.public, archive: input.value.archive }));
+  return encode(
+    await updateSettings(deps, publisher, { id, public: input.value.public, archive: input.value.archive }),
+  );
 }
 
 /** A query parameter, with an empty value read as absent (`?archived=&limit=`). */
@@ -287,16 +289,16 @@ function route(url: URL, config: Config): Handlers | undefined {
   if (segments.length === 3) {
     return {
       GET: (_r, deps) => list(url, deps),
-      POST: (r, deps, token) => create(r, deps, token),
+      POST: (r, deps, publisher) => create(r, deps, publisher),
     };
   }
   const id = segments[3] ?? "";
   if (segments.length === 4) {
     return {
       GET: async (_r, deps) => encode(await getArtifact(deps, { id })),
-      PATCH: (r, deps, token) => patch(r, deps, token, id),
-      DELETE: async (_r, deps, token) => {
-        const result = await deleteArtifact(deps, token, { id });
+      PATCH: (r, deps, publisher) => patch(r, deps, publisher, id),
+      DELETE: async (_r, deps, publisher) => {
+        const result = await deleteArtifact(deps, publisher, { id });
         return result.ok ? noContent() : operationError(result.error);
       },
     };
@@ -305,7 +307,7 @@ function route(url: URL, config: Config): Handlers | undefined {
   if (segments.length === 5) {
     return {
       GET: (_r, deps) => versions(url, deps, id),
-      POST: (r, deps, token) => update(r, deps, token, id),
+      POST: (r, deps, publisher) => update(r, deps, publisher, id),
     };
   }
   const version = parseVersionNumber(segments[5] ?? "");
@@ -316,19 +318,19 @@ function route(url: URL, config: Config): Handlers | undefined {
   return { GET: (r, deps) => file(r, url, deps, id, version, rawPath) };
 }
 
-/** The methods the route `url` names takes, for an `OPTIONS` refused before the token (ISO-2); none for no route. */
+/** The methods the route `url` names takes, for an `OPTIONS` refused before the credential (ISO-2); none for no route. */
 export function restAllow(url: URL, config: Config): string | undefined {
   const handlers = route(url, config);
   return handlers === undefined ? undefined : allowOf(handlers);
 }
 
 /** Routes a request on the API host under `/v1/`: the handler of its method, 405 with `Allow` otherwise. */
-export function handleRest(request: Request, url: URL, deps: OperationDeps, token: TokenName): Promise<Response> {
+export function handleRest(request: Request, url: URL, deps: OperationDeps, publisher: Publisher): Promise<Response> {
   const handlers = route(url, deps.config);
   if (handlers === undefined) return Promise.resolve(notFound());
   const requested = request.method === "HEAD" ? "GET" : request.method;
   const method = METHODS.find((known) => known === requested);
   const handler = method === undefined ? undefined : handlers[method];
-  if (handler !== undefined) return handler(request, deps, token);
+  if (handler !== undefined) return handler(request, deps, publisher);
   return Promise.resolve(transportError("method_not_allowed", { Allow: allowOf(handlers) }));
 }

@@ -1,6 +1,6 @@
 // OAuth helpers for the Worker's tests: a registered client, the owner's browser on the consent page, an approval
-// through the library's helper standing in for the consent page where a test is not about it, the token requests, and
-// a KV namespace with failures, holds and barriers.
+// through the library's helper standing in for the consent page where a test is not about it, the token requests, the
+// use of an access token, and a KV namespace with failures, holds and barriers.
 import { OAuthAuthorizationServer } from "@cloudflare/workers-oauth-provider";
 import { env } from "cloudflare:workers";
 
@@ -8,7 +8,7 @@ import { parseConfig } from "./config.ts";
 import { elements, parseHtml } from "./gallery/test-html.ts";
 import { authorizationServer, type OAuthEnv } from "./oauth.ts";
 import { recordingKv } from "./revocation.ts";
-import { API, APP_AUD, APP_HOST, never, stringAt, type World } from "./test-support.ts";
+import { API, APP_AUD, APP_HOST, never, sha256Text, stringAt, TOKENS, type World } from "./test-support.ts";
 
 export const METADATA_PATH = "/.well-known/oauth-authorization-server";
 export const TOKEN_URL = `${API}/oauth/token`;
@@ -137,6 +137,7 @@ export async function authorize(
   clientId: string,
   resource: string | null = `${API}/mcp`,
   metadata: Record<string, unknown> = {},
+  publisher = "test",
 ): Promise<string> {
   const { redirectTo } = await helpers(world).completeAuthorization({
     request: {
@@ -152,7 +153,7 @@ export async function authorize(
     userId: "owner",
     metadata,
     scope: [],
-    props: { publisher: "test" },
+    props: { publisher },
     revokeExistingGrants: false,
   });
   const code = new URL(redirectTo).searchParams.get("code");
@@ -191,12 +192,42 @@ export const exchange = (world: World, clientId: string, code: string) =>
 export const refresh = (world: World, clientId: string, refreshToken: string) =>
   tokenRequest(world, { grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId });
 
-/** A client, its grant's ID and the tokens of the code exchange. */
-export async function signedIn(world: World): Promise<{ clientId: string; grantId: string; tokens: Tokens }> {
+/** A client, its grant's ID and the tokens of the code exchange, for `resource` and as `publisher`. */
+export async function signedIn(
+  world: World,
+  resource = `${API}/mcp`,
+  publisher = "test",
+): Promise<{ clientId: string; grantId: string; tokens: Tokens }> {
   const clientId = await register(world);
-  const code = await authorize(world, clientId);
+  const code = await authorize(world, clientId, resource, {}, publisher);
   const tokens = await tokensOf(await exchange(world, clientId, code));
   return { clientId, grantId: code.split(":")[1] ?? "", tokens };
+}
+
+/** The KV key of an access token's record, as the library reads it: its user, grant and SHA-256. */
+export async function tokenKey(token: string): Promise<string> {
+  const [user = "", grant = ""] = token.split(":");
+  return `token:${user}:${grant}:${await sha256Text(token)}`;
+}
+
+/** Ends an access token as its hour would: its record's expiry, which the library checks, moves into the past. */
+export async function expire(token: string): Promise<void> {
+  const key = await tokenKey(token);
+  const record = await oauthKv().get<Record<string, unknown>>(key, "json");
+  if (record === null) throw new Error("no record for the token");
+  await oauthKv().put(key, JSON.stringify({ ...record, expiresAt: Math.floor(Date.now() / 1000) - 1 }));
+}
+
+export type ResourceRoute = "mcp" | "v1";
+
+/** A request with `token` (an API token by default) to the route of `resource`: a tool listing, or a listing. */
+export function useToken(world: World, resource: ResourceRoute, token: string = TOKENS.codex): Promise<Response> {
+  if (resource === "v1") return world.api("GET", "/v1/artifacts", { token });
+  return world.api("POST", "/mcp", {
+    token,
+    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+  });
 }
 
 export type Fault = "throw" | "hang" | Promise<void>;

@@ -27,6 +27,7 @@ import {
   REGISTER_URL,
   tokenRequest,
   tokensOf,
+  useToken,
   VERIFIER,
 } from "./oauth-test-support.ts";
 import { revocationKey } from "./revocation.ts";
@@ -934,8 +935,9 @@ describe("OAUTH-5: grant replacement on approval", () => {
     expect(await oauthKv().get(grantKey)).toBeNull();
     held.open();
     const raced = await tokensOf(await racing);
-    // The library wrote the grant back after its deletion; only the record still refuses it.
+    // The library wrote the grant back after its deletion; only the record still refuses it, and its new access token.
     expect(await oauthKv().get(grantKey)).not.toBeNull();
+    expect((await useToken(world, "mcp", raced.access_token)).status).toBe(401);
     const after = await refresh(world, client.clientId, raced.refresh_token);
     expect(after.status).toBe(400);
     expect(await after.json()).toEqual({ error: "invalid_grant", error_description: "Grant not found" });
