@@ -850,3 +850,78 @@ describe("design.md section 6: asset paths from another deployment", () => {
     }
   });
 });
+
+// Design.md section 10: a page revalidates by an ETag over its rendered bytes, after Access and a successful query.
+describe("section 10: page validators", () => {
+  const SAME_ON_304 = [
+    "cache-control",
+    "content-security-policy",
+    "cross-origin-resource-policy",
+    "etag",
+    "referrer-policy",
+    "x-content-type-options",
+  ];
+
+  it("answers a matching If-None-Match with 304 and the 200's headers", async () => {
+    const world = new World();
+    const id = await create(world, "Page");
+    for (const path of ["/", "/archived", `/a/${id}`, `/a/${id}?versions_cursor=1`]) {
+      const first = await app(world, path);
+      expect({ path, status: first.status }).toEqual({ path, status: 200 });
+      const etag = first.headers.get("ETag") ?? "";
+      expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+      for (const header of [etag, `W/${etag}`, `"other", ${etag}`, "*"]) {
+        for (const method of ["GET", "HEAD"]) {
+          const again = await app(world, path, { method, headers: { "If-None-Match": header } });
+          expect({ path, header, method, status: again.status }).toEqual({ path, header, method, status: 304 });
+          expect(await again.text()).toBe("");
+          const kept = (response: Response) => SAME_ON_304.map((name) => [name, response.headers.get(name)]);
+          expect(kept(again)).toEqual(kept(first));
+        }
+      }
+      expect((await app(world, path, { headers: { "If-None-Match": '"other"' } })).status).toBe(200);
+    }
+  });
+
+  it("changes the tag when the page's bytes change: a relative time, a count", async () => {
+    const world = new World();
+    await create(world, "Page");
+    const tagOf = async () => (await app(world, "/")).headers.get("ETag") ?? "";
+    const first = await tagOf();
+    expect(await tagOf()).toBe(first);
+
+    world.clock.now += 3 * HOUR_MS;
+    const later = await tagOf();
+    expect(later).not.toBe(first);
+    expect((await app(world, "/", { headers: { "If-None-Match": first } })).status).toBe(200);
+
+    await world.patch(await create(world, "Old"), { archive: "archived" });
+    const counted = await tagOf();
+    expect(counted).not.toBe(later);
+    expect((await app(world, "/", { headers: { "If-None-Match": later } })).status).toBe(200);
+  });
+
+  it("sends no tag and no 304 on a refusal, a 404, a failed read or a redirect", async () => {
+    const world = new World({ timeouts: { r2Ms: 2_000, d1ReadMs: 50 } });
+    const id = await create(world, "Page");
+    const etag = (await app(world, "/")).headers.get("ETag") ?? "";
+    const matching = { "If-None-Match": "*" };
+    const responses = [
+      // Before Access: no JWT.
+      await app(world, "/", { jwt: null, headers: { "If-None-Match": etag } }),
+      await app(world, `/a/${UNKNOWN_ID}`, { headers: matching }),
+      await app(world, "/nothing", { headers: matching }),
+      await app(world, "/?cursor=bad", { headers: matching }),
+      // The browser hosts' only redirect: a directory on a content host.
+      await world.fetch(`https://${id}${CONTENT_SUFFIX}/_v/1`, {
+        headers: { "Cf-Access-Jwt-Assertion": await world.jwt({ aud: "content-audience" }), ...matching },
+      }),
+    ];
+    const db = new DatabaseProbe();
+    db.behave = () => never();
+    world.env = { ...world.env, DB: db.binding };
+    responses.push(await app(world, "/", { headers: { "If-None-Match": etag } }));
+    expect(responses.map((response) => response.status)).toEqual([403, 404, 404, 404, 308, 503]);
+    for (const response of responses) expect(response.headers.has("ETag")).toBe(false);
+  });
+});

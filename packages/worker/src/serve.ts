@@ -67,9 +67,10 @@ export function matchesETag(header: string | null, etag: string): boolean {
 }
 
 /**
- * A file bundled with the Worker, with the headers given: its host class's, under which it revalidates like a stored
- * file (`no-cache` with an ETag), or the app host's immutable ones for a fingerprinted gallery asset. HEAD answers
- * GET's headers without the body.
+ * Bytes the Worker holds (a file bundled with it, or a rendered gallery page), with an `ETag` over them and the headers
+ * given: its host class's, under which it revalidates like a stored file (`no-cache` with an ETag), or the app host's
+ * immutable ones for a fingerprinted gallery asset. A matching `If-None-Match` answers 304; HEAD answers GET's headers
+ * without the body.
  */
 export async function serveAsset(
   request: Request,

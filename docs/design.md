@@ -456,6 +456,13 @@ Server-rendered on `APP_HOST`, without script, forms or frames; the screens foll
 A deleted artifact and any other path answer 404. Artifact text is escaped and the CSP forbids scripts and framing
 (ISO-5). The gallery links to artifacts rather than framing them: Access's behavior in frames is not documented.
 
+A page is `private, no-cache` with an `ETag`: 32 hex digits of the SHA-256 of its rendered bytes, so a matching
+`If-None-Match` answers 304 with the 200's headers (CSP, CORP, `nosniff`, referrer policy, `Cache-Control`). The tag
+covers everything the page shows, the archive counts, links and relative times included, which no stored timestamp
+would: a page with the same data an hour later reads differently. The Worker renders the page before it compares, after
+Access (ACC-1) and a successful query, so a 304 skips no check (SRV-3) and saves only the transfer; a refusal, a 404 and
+a failed read carry no tag.
+
 Every page links its stylesheets, preloads the fonts it uses ([gallery/design.md](gallery/design.md), "Ground rules")
 and links the gallery's icon ([gallery/design.md](gallery/design.md), "Icon"): `icon.svg` at its fingerprinted path
 (section 6), and `/favicon.ico` for browsers that take no SVG icon. `/favicon.ico` is a real ICO file rather than SVG

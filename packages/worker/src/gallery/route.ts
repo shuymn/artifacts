@@ -59,17 +59,14 @@ const STATUS: Readonly<Record<OperationErrorCode, number>> = {
 
 const refusal = (status: number) => plainResponse("private", status);
 
-/** A body for GET, none for HEAD; the headers are the same, `Content-Length` included. */
-function respond(request: Request, body: Uint8Array | ArrayBuffer, headers: Record<string, string>): Response {
-  const length = String(body.byteLength);
-  return new Response(request.method === "HEAD" ? null : body, { headers: { ...headers, "Content-Length": length } });
-}
-
-function page(request: Request, markup: Markup): Response {
-  return respond(request, new TextEncoder().encode(markup.text), {
-    "Content-Type": "text/html; charset=utf-8",
-    ...HEADERS,
-  });
+/**
+ * A rendered page, with an `ETag` over its bytes and a 304 for a matching `If-None-Match`, as an asset has (design.md
+ * section 10). The tag covers everything the page shows (counts, links, relative times), so no stored timestamp could
+ * stand in for it. Only a page answers this way: Access was checked and the query succeeded before it was rendered,
+ * and refusals carry no tag.
+ */
+function page(request: Request, markup: Markup): Promise<Response> {
+  return serveAsset(request, { contentType: "text/html; charset=utf-8", body: markup.text }, HEADERS);
 }
 
 /**
