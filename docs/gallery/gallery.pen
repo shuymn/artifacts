@@ -166,6 +166,30 @@
           "fontFamily": "$font.family.mono",
           "fontSize": "$font.size.lg",
           "fontWeight": "$font.weight.semibold"
+        },
+        {
+          "type": "text",
+          "id": "p7kaT",
+          "name": "type.input",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.input",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.mono",
+          "fontSize": "$font.size.lg",
+          "fontWeight": "$font.weight.regular"
+        },
+        {
+          "type": "text",
+          "id": "vslAj",
+          "name": "type.button",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.button",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.md",
+          "fontWeight": "$font.weight.semibold"
         }
       ]
     },
@@ -226,28 +250,6 @@
                   "ref": "E8AuAJ",
                   "name": "Label",
                   "content": "Archived",
-                  "fill": "$color.badge.neutral.fg"
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "XbSpc",
-              "name": "badge/kind=latest",
-              "reusable": true,
-              "fill": "$color.badge.neutral.bg",
-              "cornerRadius": "$radius.pill",
-              "padding": [
-                "$space.0-5",
-                "$space.2"
-              ],
-              "children": [
-                {
-                  "id": "H6DQrl",
-                  "type": "ref",
-                  "ref": "E8AuAJ",
-                  "name": "Label",
-                  "content": "Latest",
                   "fill": "$color.badge.neutral.fg"
                 }
               ]
@@ -835,6 +837,214 @@
                   "name": "Open",
                   "content": "Open ↗",
                   "fill": "$color.accent"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Fx8I0",
+          "name": "field",
+          "layout": "vertical",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "gbaWC",
+              "name": "field/state=default",
+              "reusable": true,
+              "width": 720,
+              "layout": "vertical",
+              "gap": "$space.2",
+              "children": [
+                {
+                  "id": "qrNUJ",
+                  "type": "ref",
+                  "ref": "koMgf",
+                  "name": "Label",
+                  "content": "Publisher name",
+                  "fill": "$color.text"
+                },
+                {
+                  "id": "KPkE8",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Help",
+                  "content": "Shown as who published each version. 1 to 32 lowercase letters, digits or hyphens.",
+                  "fill": "$color.text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container"
+                },
+                {
+                  "type": "frame",
+                  "id": "x7C7f",
+                  "name": "Input",
+                  "width": "fill_container",
+                  "fill": "$color.surface",
+                  "cornerRadius": "$radius.sm",
+                  "stroke": "$color.control.border",
+                  "strokeWidth": "$border.width",
+                  "strokeAlignment": "inner",
+                  "padding": "$space.3",
+                  "children": [
+                    {
+                      "id": "CmCx3",
+                      "type": "ref",
+                      "ref": "p7kaT",
+                      "name": "Value",
+                      "content": "claude-code",
+                      "fill": "$color.text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "HJ7JR",
+              "name": "field/state=invalid",
+              "reusable": true,
+              "width": 720,
+              "layout": "vertical",
+              "gap": "$space.2",
+              "children": [
+                {
+                  "id": "XCPMd",
+                  "type": "ref",
+                  "ref": "koMgf",
+                  "name": "Label",
+                  "content": "Publisher name",
+                  "fill": "$color.text"
+                },
+                {
+                  "id": "BFXcq",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Help",
+                  "content": "Shown as who published each version. 1 to 32 lowercase letters, digits or hyphens.",
+                  "fill": "$color.text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container"
+                },
+                {
+                  "type": "frame",
+                  "id": "HwzIk",
+                  "name": "Input",
+                  "width": "fill_container",
+                  "fill": "$color.surface",
+                  "cornerRadius": "$radius.sm",
+                  "stroke": "$color.danger",
+                  "strokeWidth": "$border.width",
+                  "strokeAlignment": "inner",
+                  "padding": "$space.3",
+                  "children": [
+                    {
+                      "id": "aQUdK",
+                      "type": "ref",
+                      "ref": "p7kaT",
+                      "name": "Value",
+                      "content": "Claude Code",
+                      "fill": "$color.text"
+                    }
+                  ]
+                },
+                {
+                  "id": "s0Azy",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Message",
+                  "content": "Enter 1 to 32 lowercase letters, digits or hyphens.",
+                  "fill": "$color.danger",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "doKxp",
+          "name": "button",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Q66TPc",
+              "name": "button/kind=primary",
+              "reusable": true,
+              "fill": "$color.accent",
+              "cornerRadius": "$radius.sm",
+              "padding": [
+                "$space.3",
+                "$space.5"
+              ],
+              "children": [
+                {
+                  "id": "G0fXU",
+                  "type": "ref",
+                  "ref": "vslAj",
+                  "name": "Label",
+                  "content": "Allow",
+                  "fill": "$color.bg"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "MQ81i",
+              "name": "button/kind=secondary",
+              "reusable": true,
+              "cornerRadius": "$radius.sm",
+              "stroke": "$color.control.border",
+              "strokeWidth": "$border.width",
+              "strokeAlignment": "inner",
+              "padding": [
+                "$space.3",
+                "$space.5"
+              ],
+              "children": [
+                {
+                  "id": "uW7vq",
+                  "type": "ref",
+                  "ref": "vslAj",
+                  "name": "Label",
+                  "content": "Deny",
+                  "fill": "$color.text"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "x7pNY2",
+          "name": "notice",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Lst9o",
+              "name": "notice",
+              "reusable": true,
+              "width": 720,
+              "fill": "$color.notice.bg",
+              "cornerRadius": "$radius.md",
+              "padding": [
+                "$space.3",
+                "$space.4"
+              ],
+              "children": [
+                {
+                  "id": "Aupm5",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Text",
+                  "content": "localhost is an app on this computer: allow only if you just started signing in from it.",
+                  "fill": "$color.notice.fg",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container"
                 }
               ]
             }
@@ -2140,6 +2350,263 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "w0TDl9",
+      "x": 4320,
+      "y": 842,
+      "name": "consent",
+      "clip": true,
+      "width": 1280,
+      "fill": "$color.bg",
+      "layout": "vertical",
+      "alignItems": "center",
+      "children": [
+        {
+          "id": "l8Mh3",
+          "type": "ref",
+          "ref": "z6iAY",
+          "name": "site-header",
+          "width": "fill_container",
+          "descendants": {
+            "PlBqI": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "qWXF6",
+          "name": "page page--narrow",
+          "width": 720,
+          "layout": "vertical",
+          "gap": "$space.5",
+          "padding": [
+            "$space.8",
+            0,
+            "$space.9",
+            0
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "gQtdb",
+              "name": "page-heading",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space.1",
+              "children": [
+                {
+                  "id": "agFXZ",
+                  "type": "ref",
+                  "ref": "ksPem",
+                  "name": "Title",
+                  "content": "Allow access?",
+                  "fill": "$color.text"
+                },
+                {
+                  "id": "oF4UF",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Subtitle",
+                  "content": "An app asks for access to your artifacts. Check it before you allow it.",
+                  "fill": "$color.text-muted"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "I0E2m",
+              "name": "info",
+              "width": "fill_container",
+              "fill": "$color.surface",
+              "cornerRadius": "$radius.md",
+              "stroke": "$color.border",
+              "strokeWidth": "$border.width",
+              "strokeAlignment": "inner",
+              "layout": "vertical",
+              "gap": "$space.3",
+              "padding": [
+                "$space.4",
+                "$space.5"
+              ],
+              "children": [
+                {
+                  "id": "sYHOq",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "App"
+                    },
+                    "kqZe5": {
+                      "content": "Claude Code, identified by client.example.com"
+                    }
+                  }
+                },
+                {
+                  "id": "TlMTP",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "Sends access to"
+                    },
+                    "kqZe5": {
+                      "content": "localhost"
+                    }
+                  }
+                },
+                {
+                  "id": "uBvC2",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "Resource"
+                    },
+                    "kqZe5": {
+                      "content": "MCP at https://artifacts-api.example.com/mcp"
+                    }
+                  }
+                },
+                {
+                  "id": "G36Yo",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "Allows"
+                    },
+                    "kqZe5": {
+                      "content": "Reading, publishing, making public and deleting every artifact"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "p5lmi5",
+              "type": "ref",
+              "ref": "Lst9o",
+              "name": "notice",
+              "width": "fill_container"
+            },
+            {
+              "type": "frame",
+              "id": "xxqxZ",
+              "name": "form",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space.6",
+              "children": [
+                {
+                  "id": "O8MfF",
+                  "type": "ref",
+                  "ref": "gbaWC",
+                  "name": "field",
+                  "width": "fill_container"
+                },
+                {
+                  "type": "frame",
+                  "id": "xaqbf",
+                  "name": "form__actions",
+                  "gap": "$space.3",
+                  "children": [
+                    {
+                      "id": "q6d77t",
+                      "type": "ref",
+                      "ref": "Q66TPc",
+                      "name": "Allow"
+                    },
+                    {
+                      "id": "Plfie",
+                      "type": "ref",
+                      "ref": "MQ81i",
+                      "name": "Deny"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "hG5va",
+      "x": 5760,
+      "y": 842,
+      "name": "consent-error",
+      "clip": true,
+      "width": 1280,
+      "fill": "$color.bg",
+      "layout": "vertical",
+      "alignItems": "center",
+      "children": [
+        {
+          "id": "YGNPX",
+          "type": "ref",
+          "ref": "z6iAY",
+          "name": "site-header",
+          "width": "fill_container",
+          "descendants": {
+            "PlBqI": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "JO7Qk",
+          "name": "page page--narrow",
+          "width": 720,
+          "layout": "vertical",
+          "gap": "$space.5",
+          "padding": [
+            "$space.8",
+            0,
+            "$space.9",
+            0
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "P22MQ6",
+              "name": "page-heading",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space.1",
+              "children": [
+                {
+                  "id": "i8DgD",
+                  "type": "ref",
+                  "ref": "ksPem",
+                  "name": "Title",
+                  "content": "This sign-in can’t continue",
+                  "fill": "$color.text"
+                },
+                {
+                  "id": "EMADK",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Subtitle",
+                  "content": "The request expired, was already used, or was opened in another browser. Start signing in again from the app.",
+                  "fill": "$color.text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "variables": {
@@ -2302,6 +2769,22 @@
     "space.9": {
       "type": "number",
       "value": 64
+    },
+    "color.control.border": {
+      "type": "color",
+      "value": "#6B7380"
+    },
+    "color.danger": {
+      "type": "color",
+      "value": "#F28B82"
+    },
+    "color.notice.bg": {
+      "type": "color",
+      "value": "#2B2412"
+    },
+    "color.notice.fg": {
+      "type": "color",
+      "value": "#F2C46D"
     }
   }
 }

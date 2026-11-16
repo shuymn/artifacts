@@ -11,6 +11,7 @@
   --color-bg: #111317;
   --color-surface: #181b21;
   --color-border: #2a2f37;
+  --color-control-border: #6b7380;
   --color-text: #e8eaed;
   --color-text-muted: #9aa1ac;
   --color-accent: #8fa8ff;
@@ -19,6 +20,9 @@
   --color-badge-public-fg: #7dd3a0;
   --color-badge-neutral-bg: #22262d;
   --color-badge-neutral-fg: #9aa1ac;
+  --color-danger: #f28b82;
+  --color-notice-bg: #2b2412;
+  --color-notice-fg: #f2c46d;
 
   --space-0-5: 0.125rem;
   --space-1: 0.25rem;
@@ -68,7 +72,8 @@ body,
 }
 
 /* type.section-title */
-.section-heading {
+.section-heading,
+.field__label {
   font: var(--font-weight-semibold) var(--font-size-lg) / 1.25 var(--font-family-sans);
 }
 
@@ -82,7 +87,10 @@ body,
 .artifact-row__description,
 .info-row dt,
 .info-row dd,
-.data-table td {
+.data-table td,
+.notice,
+.field__help,
+.field__message {
   font: var(--font-weight-regular) var(--font-size-sm) / 1.4 var(--font-family-sans);
 }
 
@@ -131,6 +139,16 @@ body,
   font: var(--font-weight-semibold) var(--font-size-lg) / 1.25 var(--font-family-mono);
 }
 
+/* type.input */
+.field__input {
+  font: var(--font-weight-regular) var(--font-size-lg) / 1.4 var(--font-family-mono);
+}
+
+/* type.button */
+.button {
+  font: var(--font-weight-semibold) var(--font-size-md) / 1.4 var(--font-family-sans);
+}
+
 /* Base: no browser margins or list styles, so only the rules below place anything. */
 body {
   margin: 0;
@@ -163,7 +181,9 @@ a:hover {
 }
 
 a:focus-visible,
-.data-table:focus-visible {
+.data-table:focus-visible,
+.field__input:focus-visible,
+.button:focus-visible {
   outline: var(--focus-width) solid var(--color-focus);
   outline-offset: var(--space-0-5);
 }
@@ -256,6 +276,11 @@ a:focus-visible,
 .page--detail {
   gap: var(--space-7);
   padding-block-start: var(--space-7);
+}
+
+/* The consent page and its error page: one column of prose width. */
+.page--narrow {
+  inline-size: min(var(--size-prose), 100% - 2 * var(--space-4));
 }
 
 .page-heading {
@@ -534,4 +559,87 @@ a:focus-visible,
     content: attr(data-label) ": " / "";
     color: var(--color-text-muted);
   }
+}
+
+/* notice: a warning beside what it is about, in its own colors. */
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-notice-bg);
+  color: var(--color-notice-fg);
+}
+
+/* The consent page's form: the field, then the buttons. */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/*
+ * field: the label, the persistent help, the input, then the message. The column stretches the input to the field's
+ * width, border included, so it never overflows a narrow page.
+ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.field__help {
+  color: var(--color-text-muted);
+}
+
+/* The border sits inside the padding, as the design's inner stroke does in Pencil, so the input has its design size. */
+.field__input {
+  margin: 0;
+  padding: calc(var(--space-3) - var(--border-width));
+  border: var(--border-width) solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  appearance: none;
+}
+
+/*
+ * The message shows only once the owner has changed the value and left the field, or tried to submit it:
+ * :user-invalid, unlike :invalid, does not match before then. No script runs, so the message is not referenced by
+ * aria-describedby, which would read it out while it is hidden; on submit the browser's own validation names the error.
+ */
+.field__message {
+  display: none;
+  color: var(--color-danger);
+}
+
+.field__input:user-invalid {
+  border-color: var(--color-danger);
+}
+
+.field__input:user-invalid + .field__message {
+  display: block;
+}
+
+/* button: the border sits inside the padding, as on the input; the primary's border is its background. */
+.button {
+  margin: 0;
+  padding: calc(var(--space-3) - var(--border-width)) calc(var(--space-5) - var(--border-width));
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.button--primary {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+.button--secondary {
+  border-color: var(--color-control-border);
+  background: transparent;
+  color: var(--color-text);
 }
