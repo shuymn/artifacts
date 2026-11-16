@@ -431,13 +431,17 @@ describe("PL-37: the consent form", () => {
     expect((await stranger.post(approve)).status).toBe(400);
     expect(await grantIds()).toEqual([]);
 
-    // The owner's browser, once.
+    // The owner's browser, once. A replay keeps the binding cookie the approval cleared, so only the transaction's
+    // consumption refuses it.
+    const replay = new Browser(world);
+    for (const [name, value] of owner.cookies) replay.cookies.set(name, value);
     const allowed = await owner.post(approve);
     expect(allowed.status).toBe(303);
     expect(redirectQuery(allowed)).toMatchObject({ target: REDIRECT, state: "state-1", iss: API });
     expect(await grantIds()).toHaveLength(1);
-    const again = await owner.post(approve);
+    const again = await replay.post(approve);
     expect(await errorPageOf(again)).toEqual({ status: 400, heading: "This sign-in can’t continue" });
+    expect(again.headers.has("Location")).toBe(false);
     expect(await grantIds()).toHaveLength(1);
   });
 
