@@ -13,6 +13,11 @@
   "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
   // File bytes, one object per distinct file per artifact (design.md section 3).
   "r2_buckets": [{ "binding": "FILES" }],
+  // The gallery's stylesheets and fonts are bundled with the Worker: stylesheets as text, fonts as bytes.
+  "rules": [
+    { "type": "Text", "globs": ["**/*.css"] },
+    { "type": "Data", "globs": ["**/*.woff2"] },
+  ],
   // Console output is kept. Invocation logs are off: they record the request, and API requests carry bearer tokens in
   // their Authorization header.
   "observability": {
