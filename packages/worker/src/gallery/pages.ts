@@ -28,6 +28,13 @@ export type Chrome = {
 
 const STYLESHEETS = ["/assets/fonts.css", "/assets/gallery.css"] as const;
 
+/**
+ * The icon (docs/gallery/design.md, "Icon"): the SVG where a browser takes one, the ICO elsewhere. The ICO's
+ * `sizes="32x32"` keeps Chrome from choosing it over the SVG.
+ */
+const ICONS = html`<link rel="icon" href="/favicon.ico" sizes="32x32" />
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />`;
+
 /** Each section's nav tab: its label and the list it links to. */
 const SECTIONS: Readonly<Record<Section, { readonly label: string; readonly href: string }>> = {
   active: { label: "Active", href: "/" },
@@ -56,7 +63,7 @@ function document(title: string, chrome: Chrome, current: Section, page: "list" 
         <meta name="viewport" content="width=device-width" />
         <meta name="text-scale" content="scale" />
         <title>${title} · artifacts</title>
-        ${STYLESHEETS.map((href) => html`<link rel="stylesheet" href="${href}" />`)}
+        ${STYLESHEETS.map((href) => html`<link rel="stylesheet" href="${href}" />`)} ${ICONS}
       </head>
       <body>
         <header class="site-header">

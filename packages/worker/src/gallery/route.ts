@@ -1,14 +1,14 @@
 /**
- * The gallery on the app host (design.md section 10): `/`, `/archived` and `/a/<id>`, and the stylesheets and fonts
- * they load. index.ts has checked the method (ISO-3) and Access (ACC-1) before this runs, and adds the gallery's CSP to
- * every app-host response, these included (`withGalleryPolicy`; ISO-5). Every response here carries the app host's
- * headers (`private, no-cache`, CORP, nosniff, no referrer; ISO-2). A deleted or unknown artifact, a malformed cursor
- * and any other path answer 404.
+ * The gallery on the app host (design.md section 10): `/`, `/archived` and `/a/<id>`, and the stylesheets, fonts and
+ * icon they load. index.ts has checked the method (ISO-3) and Access (ACC-1) before this runs, and adds the gallery's
+ * CSP to every app-host response, these included (`withGalleryPolicy`; ISO-5). Every response here carries the app
+ * host's headers (`private, no-cache`, CORP, nosniff, no referrer; ISO-2). A deleted or unknown artifact, a malformed
+ * cursor and any other path answer 404.
  */
 import type { OperationErrorCode } from "../errors.ts";
 import { getForGallery, listForGallery, type ArchiveCounts, type OperationDeps } from "../operations.ts";
-import { browserHeaders, matchesETag, plainResponse } from "../serve.ts";
-import { assetTag, ASSETS, type Asset } from "./assets.ts";
+import { browserHeaders, plainResponse, serveAsset } from "../serve.ts";
+import { ASSETS } from "./assets.ts";
 import type { Markup } from "./html.ts";
 import { artifactPage, listPage, type Chrome, type Section } from "./pages.ts";
 
@@ -16,9 +16,12 @@ import { artifactPage, listPage, type Chrome, type Section } from "./pages.ts";
 const PAGE_SIZE = 50;
 const DAY_MS = 86_400_000;
 
-/** ISO-5: nothing but the gallery's own stylesheets and fonts loads; no script runs, no form submits, no frame shows. */
+/**
+ * ISO-5: nothing but the gallery's own stylesheets, fonts and icon loads (Firefox checks a page's icon against
+ * `img-src`); no script runs, no form submits, no frame shows.
+ */
 const CONTENT_SECURITY_POLICY =
-  "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 const HEADERS = browserHeaders("private");
 
@@ -62,21 +65,11 @@ function page(request: Request, markup: Markup): Response {
   });
 }
 
-/** An asset revalidates like a stored file (`no-cache` with an ETag), so a deployment's new stylesheet shows at once. */
-async function asset(request: Request, file: Asset): Promise<Response> {
-  const etag = await assetTag(file);
-  const headers = { "Content-Type": file.contentType, ETag: etag, ...HEADERS };
-  if (matchesETag(request.headers.get("If-None-Match"), etag)) {
-    return new Response(null, { status: 304, headers: { ETag: etag, ...HEADERS } });
-  }
-  const body = typeof file.body === "string" ? new TextEncoder().encode(file.body) : file.body.slice(0);
-  return respond(request, body, headers);
-}
-
 export async function serveGallery(request: Request, url: URL, deps: OperationDeps): Promise<Response> {
   const path = url.pathname;
+  // An asset revalidates like a stored file (`no-cache` with an ETag), so a deployment's new stylesheet shows at once.
   const file = ASSETS.get(path);
-  if (file !== undefined) return asset(request, file);
+  if (file !== undefined) return serveAsset(request, file, "private");
 
   const chrome = (counts: ArchiveCounts): Chrome => ({
     counts,

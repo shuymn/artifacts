@@ -3,6 +3,7 @@
  * and HEAD only (ISO-3), set no cookie (ISO-4) and no `Access-Control-Allow-*` header (ISO-2). Every response of a
  * private content host and of the app host carries `Cross-Origin-Resource-Policy: same-origin` (ISO-2).
  */
+import { assetTag, type Asset } from "./gallery/assets.ts";
 import type { ArtifactId } from "./id.ts";
 import { lookupFile, openFile, type FileJson, type OperationDeps } from "./operations.ts";
 import { resolveRequestPath } from "./paths.ts";
@@ -63,6 +64,25 @@ export function matchesETag(header: string | null, etag: string): boolean {
   if (header === null) return false;
   if (header.trim() === "*") return true;
   return header.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag);
+}
+
+/**
+ * A file bundled with the Worker, with its host class's headers. It revalidates like a stored file (`no-cache` with an
+ * ETag), and HEAD answers GET's headers without the body.
+ */
+export async function serveAsset(request: Request, asset: Asset, kind: BrowserClass): Promise<Response> {
+  const etag = await assetTag(asset);
+  if (matchesETag(request.headers.get("If-None-Match"), etag)) {
+    return new Response(null, { status: 304, headers: { ETag: etag, ...browserHeaders(kind) } });
+  }
+  const body = typeof asset.body === "string" ? new TextEncoder().encode(asset.body) : asset.body.slice(0);
+  const headers = {
+    "Content-Type": asset.contentType,
+    "Content-Length": String(body.byteLength),
+    ETag: etag,
+    ...browserHeaders(kind),
+  };
+  return new Response(request.method === "HEAD" ? null : body, { headers });
 }
 
 /**

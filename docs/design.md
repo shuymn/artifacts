@@ -435,6 +435,12 @@ Server-rendered on `APP_HOST`, without script, forms or frames; the screens foll
 A deleted artifact and any other path answer 404. Artifact text is escaped and the CSP forbids scripts and framing
 (ISO-5). The gallery links to artifacts rather than framing them: Access's behavior in frames is not documented.
 
+Every page links the gallery's icon ([gallery/design.md](gallery/design.md), "Icon"): `/assets/icon.svg`, and
+`/favicon.ico` for browsers that take no SVG icon. `/favicon.ico` is a real ICO file rather than SVG content: Safari
+reads SVG icons only from version 26 ([caniuse](https://caniuse.com/link-icon-svg)), and no browser documents taking
+SVG at that path. Both are served as the other assets are; the CSP's `img-src 'self'` lets them load, since Firefox
+applies `img-src` to a page's icon.
+
 ## 11. Operations
 
 The steps are in [operations.md](operations.md).

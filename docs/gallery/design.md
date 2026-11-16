@@ -24,6 +24,21 @@ then the templates. Content and behavior of each page are in [design.md](../desi
   `ui-monospace` with `font-size-adjust: from-font`, so Japanese text falls back to the system font at the same
   x-height. The reference pages load the same fonts from Google Fonts instead, for previewing only.
 
+## Icon
+
+The gallery has one icon: the `a` of the monospace wordmark in `color.accent`, on a tile of `color.bg` with
+`radius.sm`. It is drawn by hand, not in Penpot; its source is
+[`icon.svg`](../../packages/worker/src/gallery/icon.svg), on a 32-unit grid with every edge on an even coordinate so
+it stays sharp at 16 px.
+
+- **Light and dark chrome.** The icon looks the same in both: the tile carries the gallery's own background, so the
+  glyph keeps its contrast whatever the tab strip's color, and the ICO, which cannot switch, matches the SVG. A
+  `prefers-color-scheme` variant would need a light palette the dark-only gallery does not have.
+- **Files.** Pages link `/assets/icon.svg` (`type="image/svg+xml"`) and `/favicon.ico` (`sizes="32x32"`, which keeps
+  Chrome from choosing the ICO over the SVG). [`favicon.ico`](../../packages/worker/src/gallery/favicon.ico) is
+  `icon.svg` rendered at 16 and 32 px and stored as PNG images; after a change to the SVG,
+  `uv run packages/worker/scripts/favicon.py` writes it again.
+
 ## Tokens
 
 `tokens.json` has the Design Tokens format's shape as Penpot exports it: `$type` and `$value` per token, dimensions as

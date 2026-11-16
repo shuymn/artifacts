@@ -20,6 +20,7 @@ import {
   TOKENS,
   World,
 } from "../test-support.ts";
+import iconSvg from "./icon.svg?raw";
 import { byClass, elements, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
 
 import css from "./gallery.css?raw";
@@ -381,7 +382,8 @@ describe("section 10: what answers 404", () => {
       "/a",
       "/archived/",
       "/index.html",
-      "/favicon.ico",
+      "/favicon.png",
+      "/assets/favicon.ico",
       "/assets/",
       "/assets/fonts/other.woff2",
       "/?cursor=",
@@ -494,6 +496,8 @@ describe("ISO-5: escaping artifact text", () => {
       expect(
         directives.filter((directive) => /^(script|frame|child|worker|connect|object)-src/.test(directive)),
       ).toEqual([]);
+      // Images, the icon among them, load from the app host only.
+      expect(directives.filter((directive) => directive.startsWith("img-src"))).toEqual(["img-src 'self'"]);
     }
   });
 });
@@ -503,7 +507,15 @@ describe("section 10: headers", () => {
   it("sends the app host's headers and no cookie on pages and assets", async () => {
     const world = new World();
     const id = await create(world, "Page");
-    for (const path of ["/", "/archived", `/a/${id}`, "/assets/gallery.css", "/assets/fonts.css"]) {
+    for (const path of [
+      "/",
+      "/archived",
+      `/a/${id}`,
+      "/assets/gallery.css",
+      "/assets/fonts.css",
+      "/favicon.ico",
+      "/assets/icon.svg",
+    ]) {
       const response = await app(world, path);
       expect({ path, status: response.status }).toEqual({ path, status: 200 });
       expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
@@ -519,7 +531,7 @@ describe("section 10: headers", () => {
   it("answers HEAD with GET's headers and no body", async () => {
     const world = new World();
     const id = await create(world, "Page");
-    for (const path of ["/", `/a/${id}`, "/assets/fonts/ibm-plex-sans-latin-400-normal.woff2"]) {
+    for (const path of ["/", `/a/${id}`, "/assets/fonts/ibm-plex-sans-latin-400-normal.woff2", "/favicon.ico"]) {
       const get = await app(world, path);
       const head = await app(world, path, { method: "HEAD" });
       expect(head.status).toBe(200);
@@ -535,7 +547,15 @@ describe("section 10: headers", () => {
     const db = new DatabaseProbe();
     const bucket = new BucketProbe();
     world.env = { ...world.env, DB: db.binding, FILES: bucket.binding };
-    for (const path of ["/", "/archived", `/a/${UNKNOWN_ID}`, "/assets/gallery.css", "/assets/fonts.css"]) {
+    for (const path of [
+      "/",
+      "/archived",
+      `/a/${UNKNOWN_ID}`,
+      "/assets/gallery.css",
+      "/assets/fonts.css",
+      "/favicon.ico",
+      "/assets/icon.svg",
+    ]) {
       expect((await app(world, path, { jwt: null })).status).toBe(403);
     }
     expect(db.batches).toBe(0);
@@ -555,7 +575,7 @@ describe("section 10: headers", () => {
   });
 });
 
-describe("docs/gallery/design.md: stylesheets and fonts", () => {
+describe("docs/gallery/design.md: stylesheets, fonts and icon", () => {
   it("serves gallery.css as it is in the repository", async () => {
     const world = new World();
     const response = await app(world, "/assets/gallery.css");
@@ -593,6 +613,47 @@ describe("docs/gallery/design.md: stylesheets and fonts", () => {
         expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe("wOF2");
       }
     }
+  });
+
+  it("links the icon on every page: the SVG, and the ICO with sizes, both from the app host", async () => {
+    const world = new World();
+    const id = await create(world, "Page");
+    for (const path of ["/", "/archived", `/a/${id}`]) {
+      const head = one(elements(await page(world, path)).filter((node) => node.tag === "head"));
+      const icons = elements(head)
+        .filter((node) => node.tag === "link" && node.attributes.get("rel") === "icon")
+        .map((node) => Object.fromEntries(node.attributes));
+      expect(icons).toEqual([
+        { rel: "icon", href: "/favicon.ico", sizes: "32x32" },
+        { rel: "icon", href: "/assets/icon.svg", type: "image/svg+xml" },
+      ]);
+    }
+  });
+
+  it("serves icon.svg as it is in the repository and favicon.ico as an ICO of 16 and 32 px PNG images", async () => {
+    const world = new World();
+    const svg = await app(world, "/assets/icon.svg");
+    expect(svg.headers.get("Content-Type")).toBe("image/svg+xml");
+    expect(await svg.text()).toBe(iconSvg);
+
+    const ico = await app(world, "/favicon.ico");
+    expect(ico.headers.get("Content-Type")).toBe("image/vnd.microsoft.icon");
+    const view = new DataView(await ico.arrayBuffer());
+    // ICONDIR: reserved 0, type 1 (icon), two images; each ICONDIRENTRY points at a PNG of its size.
+    expect([view.getUint16(0, true), view.getUint16(2, true), view.getUint16(4, true)]).toEqual([0, 1, 2]);
+    const images = [0, 1].map((index) => {
+      const entry = 6 + 16 * index;
+      const offset = view.getUint32(entry + 12, true);
+      const png = new Uint8Array(view.buffer, offset, view.getUint32(entry + 8, true));
+      expect(png.slice(0, 8)).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+      // The PNG's own IHDR width and height.
+      const header = new DataView(png.buffer, png.byteOffset + 16, 8);
+      return [view.getUint8(entry), view.getUint8(entry + 1), header.getUint32(0), header.getUint32(4)];
+    });
+    expect(images).toEqual([
+      [16, 16, 16, 16],
+      [32, 32, 32, 32],
+    ]);
   });
 
   it("revalidates an asset by its ETag", async () => {
