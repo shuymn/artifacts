@@ -302,7 +302,7 @@ export function createServer(deps: OperationDeps, token: TokenName): McpServer {
         "Publishes a new version on top of base_version: files replace or add paths, remove deletes paths, every other file is kept.",
       inputSchema: updateArguments,
       outputSchema: publishResult,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
     },
     guardTool(async (args) =>
       encode(
@@ -374,7 +374,7 @@ export function createServer(deps: OperationDeps, token: TokenName): McpServer {
       description: "Serves every version at public_url without sign-in, or makes the artifact private again.",
       inputSchema: publicArguments,
       outputSchema: settingsResult,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
     guardTool(async (args) => encode(await updateSettings(deps, token, { id: args.id, public: args.public }))),
   );
@@ -386,7 +386,7 @@ export function createServer(deps: OperationDeps, token: TokenName): McpServer {
       description: "Archives an artifact, keeps it out of the archive, or leaves it to the age of its latest version.",
       inputSchema: archiveArguments,
       outputSchema: settingsResult,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
     guardTool(async (args) => encode(await updateSettings(deps, token, { id: args.id, archive: args.archive }))),
   );

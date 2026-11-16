@@ -363,9 +363,11 @@ so REST's `invalid_request` for the same input has no exact MCP twin.
   the host, the token and the `Origin` first, removes the `Authorization` header, then builds the handler for the
   request with a factory whose closure holds the token name; the token never reaches the SDK (TOK-2). `McpAgent` from `agents` is not used: nothing needs
   sessions.
-- Every tool has input and output schemas. Annotations: reads are `readOnlyHint`; `delete_artifact` is
-  `destructiveHint` and `idempotentHint`; `set_public` and `set_archive` are `idempotentHint`. Whether a client asks
-  before a call is the owner's client configuration, not a control of this design.
+- Every tool has input and output schemas. Annotations: reads are `readOnlyHint`; `create_artifact` only adds, so it
+  is not `destructiveHint`; every other change is `destructiveHint`, since an update can remove files, `set_public` can
+  revoke public access, `set_archive` replaces a setting and `delete_artifact` deletes; `set_public`, `set_archive` and
+  `delete_artifact` are also `idempotentHint`. Whether a client asks before a call is the owner's client
+  configuration, not a control of this design.
 
 Server `instructions`:
 

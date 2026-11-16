@@ -101,13 +101,13 @@ describe("server instructions", () => {
 
 const TOOLS = {
   create_artifact: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
-  update_artifact: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  update_artifact: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
   list_artifacts: { readOnlyHint: true },
   get_artifact: { readOnlyHint: true },
   list_versions: { readOnlyHint: true },
   read_file: { readOnlyHint: true },
-  set_public: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
-  set_archive: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  set_public: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+  set_archive: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
   delete_artifact: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
 };
 
