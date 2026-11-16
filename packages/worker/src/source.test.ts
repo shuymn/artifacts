@@ -61,6 +61,13 @@ describe("DATA-2: wrangler.jsonc", () => {
     }
     expect(config).toHaveProperty("d1_databases", [{ binding: "DB", migrations_dir: "migrations" }]);
     expect(config).toHaveProperty("r2_buckets", [{ binding: "FILES" }]);
+    // PL-48: the namespace's ID is a deployment value.
+    expect(config).toHaveProperty("kv_namespaces", [{ binding: "OAUTH_KV" }]);
+  });
+
+  // OAUTH-6: the OAuth library's fetches of client documents stay on public addresses.
+  it("sets global_fetch_strictly_public", () => {
+    expect(config).toHaveProperty("compatibility_flags", ["global_fetch_strictly_public"]);
   });
 
   it("is reachable only on its routes and keeps invocation logs off", () => {
@@ -78,6 +85,7 @@ describe("DATA-2: wrangler.deploy.example.jsonc", () => {
     expect(example).toHaveProperty("account_id", "");
     expect(example).toHaveProperty("d1_databases", [{ binding: "DB", database_name: "", database_id: "" }]);
     expect(example).toHaveProperty("r2_buckets", [{ binding: "FILES", bucket_name: "" }]);
+    expect(example).toHaveProperty("kv_namespaces", [{ binding: "OAUTH_KV", id: "" }]);
     for (const variable of ["ACCESS_TEAM_DOMAIN", "ACCESS_APP_AUD", "ACCESS_CONTENT_AUD"]) {
       expect(example).toHaveProperty(["vars", variable], "");
     }

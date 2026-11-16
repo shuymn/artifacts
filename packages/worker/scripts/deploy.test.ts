@@ -1,5 +1,5 @@
 // The deployment script (design.md section 11): the checks and merge of the deployment values (HOST-2, ACC-2, DATA-2,
-// PL-2) and the order of its wrangler commands with wrangler stubbed. runner.test.ts covers the runner.
+// PL-2, PL-48) and the order of its wrangler commands with wrangler stubbed. runner.test.ts covers the runner.
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { checkDeployValues, isRecord, parseJsonc, type Json } from "./deploy-config.ts";
-import { deploy, type DeployIo } from "./deploy-run.ts";
-import type { RunResult, TerminationSignal } from "./runner.ts";
+import { deploy, MAX_NAMESPACE_LIST_BYTES, type DeployIo } from "./deploy-run.ts";
+import type { RunOptions, RunResult, TerminationSignal } from "./runner.ts";
 
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -25,6 +25,7 @@ const EXAMPLE = readJsonc("wrangler.deploy.example.jsonc");
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
 const ZONE_ID = "fedcba9876543210fedcba9876543210";
 const DATABASE_ID = "00000000-0000-4000-8000-000000000000";
+const NAMESPACE_ID = "0123456789abcdef0123456789abcdef".split("").toReversed().join("");
 
 function setIn(target: unknown, path: readonly (string | number)[], value: unknown): unknown {
   const [key, ...rest] = path;
@@ -61,6 +62,7 @@ function filled(): Json {
   values = set(values, ["d1_databases", 0, "database_name"], "artifacts");
   values = set(values, ["d1_databases", 0, "database_id"], DATABASE_ID);
   values = set(values, ["r2_buckets", 0, "bucket_name"], "artifacts-files");
+  values = set(values, ["kv_namespaces", 0, "id"], NAMESPACE_ID);
   values = set(values, ["vars", "ACCESS_TEAM_DOMAIN"], "team.cloudflareaccess.com");
   values = set(values, ["vars", "ACCESS_APP_AUD"], "a".repeat(64));
   return set(values, ["vars", "ACCESS_CONTENT_AUD"], "b".repeat(64));
@@ -146,6 +148,7 @@ describe("checkDeployValues", () => {
         { binding: "DB", migrations_dir: "migrations", database_name: "artifacts", database_id: DATABASE_ID },
       ],
       r2_buckets: [{ binding: "FILES", bucket_name: "artifacts-files" }],
+      kv_namespaces: [{ binding: "OAUTH_KV", id: NAMESPACE_ID }],
     });
   });
 
@@ -167,6 +170,7 @@ describe("checkDeployValues", () => {
       "d1_databases[0].database_name is empty",
       "d1_databases[0].database_id is empty",
       "r2_buckets[0].bucket_name is empty",
+      "kv_namespaces[0].id is empty",
     ]);
   });
 
@@ -288,6 +292,35 @@ describe("checkDeployValues", () => {
       "Files_Bucket",
       "r2_buckets[0].bucket_name is not a bucket_name",
     ],
+    // PL-48: wrangler would provision a new, empty namespace for a binding without an ID.
+    ["no KV namespace", ["kv_namespaces"], undefined, "kv_namespaces is missing; it names the resource of OAUTH_KV"],
+    ["no KV namespace for OAUTH_KV", ["kv_namespaces"], [], "kv_namespaces has no entry for OAUTH_KV"],
+    ["a KV namespace without an ID", ["kv_namespaces", 0, "id"], undefined, "kv_namespaces[0].id is missing"],
+    [
+      "a KV namespace ID that is not a string",
+      ["kv_namespaces", 0, "id"],
+      1,
+      "kv_namespaces[0].id is not a namespace ID",
+    ],
+    ...(
+      [
+        ["31 characters", NAMESPACE_ID.slice(1)],
+        ["33 characters", `${NAMESPACE_ID}0`],
+        ["uppercase", NAMESPACE_ID.toUpperCase()],
+        ["a character outside hexadecimal", `${NAMESPACE_ID.slice(1)}g`],
+        ["a D1-style UUID", DATABASE_ID],
+        ["a namespace title", "artifacts-oauth"],
+      ] as const
+    ).map(
+      ([form, id]) =>
+        [
+          `a KV namespace ID of ${form}`,
+          ["kv_namespaces", 0, "id"],
+          id,
+          "kv_namespaces[0].id is not a namespace ID (32 lowercase hexadecimal characters)",
+        ] as const,
+    ),
+    ["a KV setting from elsewhere", ["kv_namespaces", 0, "preview_id"], NAMESPACE_ID, "kv_namespaces[0].preview_id"],
   ] as const)("refuses %s", (_name, path, value, message) => {
     expect(problems(set(filled(), path, value))).toContainEqual(expect.stringContaining(message));
   });
@@ -406,11 +439,25 @@ describe("parseJsonc", () => {
 function expectedCalls(config: string): string[][] {
   return [
     ["r2", "bucket", "info", "artifacts-files", "--config", config],
+    ["kv", "namespace", "list", "--config", config],
     ["d1", "migrations", "apply", "DB", "--remote", "--config", config],
     ["deploy", "--config", config],
   ];
 }
-type Call = { readonly args: readonly string[]; readonly config: unknown };
+type Call = { readonly args: readonly string[]; readonly options: RunOptions | undefined; readonly config: unknown };
+
+/** What `wrangler kv namespace list` prints, for namespaces with these IDs. */
+function namespaceList(...ids: string[]): string {
+  return JSON.stringify(
+    ids.map((id, index) => ({ id, title: `namespace-${index}`, supports_url_encoding: true })),
+    null,
+    "  ",
+  );
+}
+
+/** The stubbed wrangler's default answer: success, and for the namespace listing, a list holding the namespace. */
+const listing = (call: Call): RunResult =>
+  call.args[0] === "kv" ? { ok: true, output: namespaceList("f".repeat(32), NAMESPACE_ID) } : { ok: true };
 
 describe("deploy", () => {
   let dir: string;
@@ -441,11 +488,15 @@ describe("deploy", () => {
       workerDir: dir,
       env: options.env ?? {},
       args: options.args ?? [],
-      run: async (args, signal) => {
+      run: async (args, signal, runOptions) => {
         const config = args[args.indexOf("--config") + 1] ?? "";
-        const call = { args, config: JSON.parse(readFileSync(join(dir, config), "utf8")) as unknown };
+        const call = {
+          args,
+          options: runOptions,
+          config: JSON.parse(readFileSync(join(dir, config), "utf8")) as unknown,
+        };
         calls.push(call);
-        return options.answer === undefined ? { ok: true } : options.answer(call, signal);
+        return options.answer === undefined ? listing(call) : options.answer(call, signal);
       },
       log: (line) => lines.push(line),
       onSignal: (listener) => {
@@ -462,7 +513,7 @@ describe("deploy", () => {
 
   const files = () => readdirSync(dir).toSorted();
 
-  it("checks the bucket, applies migrations, then deploys with the merged configuration, and removes it", async () => {
+  it("checks the bucket and the namespace, applies migrations, then deploys with the merged configuration, and removes it", async () => {
     writeValues(filled());
     const { status, calls } = await run();
     const config = calls[0]?.args.at(-1) ?? "";
@@ -470,15 +521,61 @@ describe("deploy", () => {
     expect(calls.map((call) => call.args)).toEqual(expectedCalls(config));
     const check = checkDeployValues(BASE, filled());
     for (const call of calls) expect(call.config).toEqual(check.ok && check.merged);
+    // Only the namespace listing is read; every other command's output goes to the build log.
+    expect(calls.map((call) => call.options?.captureBytes)).toEqual([
+      undefined,
+      MAX_NAMESPACE_LIST_BYTES,
+      undefined,
+      undefined,
+    ]);
     expect(status).toBe(0);
     expect(files()).toEqual(["wrangler.deploy.jsonc", "wrangler.jsonc"]);
     expect(listeners).toEqual([]);
   });
 
+  // PL-48: a namespace the account does not have would be a new, empty one, signing every OAuth client out.
+  it.each([
+    ["a listing without the ID", namespaceList("f".repeat(32)), "the account has no namespace with that ID"],
+    ["an empty listing", namespaceList(), "the account has no namespace with that ID"],
+    [
+      "a listing with the ID only in a title",
+      JSON.stringify([{ id: "f".repeat(32), title: NAMESPACE_ID }]),
+      "the account has no namespace with that ID",
+    ],
+    [
+      "a listing with the ID in another case",
+      namespaceList(NAMESPACE_ID.toUpperCase()),
+      "the account has no namespace with that ID",
+    ],
+    [
+      "output that is not JSON",
+      `Listing namespaces...\n${namespaceList(NAMESPACE_ID)}`,
+      "wrangler printed no JSON list of namespaces",
+    ],
+    ["JSON that is not a list", JSON.stringify({ id: NAMESPACE_ID }), "wrangler printed no JSON list of namespaces"],
+    [
+      "a list entry without an ID",
+      JSON.stringify([{ title: "x" }, { id: NAMESPACE_ID }]),
+      "wrangler printed no JSON list of namespaces",
+    ],
+    ["no output", "", "wrangler printed no JSON list of namespaces"],
+  ])("PL-48: stops before the migrations on %s", async (_name, output, message) => {
+    writeValues(filled());
+    const { status, calls } = await run({
+      answer: async (call) => (call.args[0] === "kv" ? { ok: true, output } : { ok: true }),
+    });
+    expect(status).toBe(1);
+    expect(calls.map((call) => call.args[0])).toEqual(["r2", "kv"]);
+    expect(lines.at(-1)).toContain(`deploy: checking that the KV namespace of OAUTH_KV exists failed: ${message}`);
+    expect(lines.at(-1)).toContain("nothing was changed");
+    expect(lines.join("\n")).not.toContain(NAMESPACE_ID);
+    expect(files()).toEqual(["wrangler.deploy.jsonc", "wrangler.jsonc"]);
+  });
+
   it("reads the build variable when there is no file", async () => {
     const { status, calls } = await run({ env: { ARTIFACTS_DEPLOY_JSONC: JSON.stringify(dedicated()) } });
-    expect(calls.map((call) => call.args[0])).toEqual(["r2", "d1", "deploy"]);
-    expect(calls[2]?.config).toMatchObject({ vars: { CONTENT_HOST_SUFFIX: "-p.example-content.net" } });
+    expect(calls.map((call) => call.args[0])).toEqual(["r2", "kv", "d1", "deploy"]);
+    expect(calls[3]?.config).toMatchObject({ vars: { CONTENT_HOST_SUFFIX: "-p.example-content.net" } });
     expect(status).toBe(0);
     expect(files()).toEqual(["wrangler.jsonc"]);
   });
@@ -525,12 +622,13 @@ describe("deploy", () => {
 
   it.each([
     ["the bucket check", "r2", ["r2"]],
-    ["the migrations", "d1", ["r2", "d1"]],
-    ["the deploy", "deploy", ["r2", "d1", "deploy"]],
+    ["the namespace listing", "kv", ["r2", "kv"]],
+    ["the migrations", "d1", ["r2", "kv", "d1"]],
+    ["the deploy", "deploy", ["r2", "kv", "d1", "deploy"]],
   ])("stops when %s fails and removes the configuration", async (_name, failing, ran) => {
     writeValues(filled());
     const { status, calls } = await run({
-      answer: async (call) => (call.args[0] === failing ? { ok: false, reason: "exited with code 1" } : { ok: true }),
+      answer: async (call) => (call.args[0] === failing ? { ok: false, reason: "exited with code 1" } : listing(call)),
     });
     expect(status).toBe(1);
     expect(calls.map((call) => call.args[0])).toEqual(ran);
@@ -542,7 +640,7 @@ describe("deploy", () => {
     let stopped = false;
     const { status, calls } = await run({
       answer: (call, signal) => {
-        if (call.args[0] !== "d1") return Promise.resolve({ ok: true });
+        if (call.args[0] !== "d1") return Promise.resolve(listing(call));
         // The migrations are running when the signal arrives; the runner stops them.
         queueMicrotask(() => listeners[0]?.("SIGTERM"));
         return new Promise((resolve) =>
@@ -554,7 +652,7 @@ describe("deploy", () => {
       },
     });
     expect(stopped).toBe(true);
-    expect(calls.map((call) => call.args[0])).toEqual(["r2", "d1"]);
+    expect(calls.map((call) => call.args[0])).toEqual(["r2", "kv", "d1"]);
     expect(status).toBe(143);
     expect(files()).toEqual(["wrangler.deploy.jsonc", "wrangler.jsonc"]);
     expect(listeners).toEqual([]);

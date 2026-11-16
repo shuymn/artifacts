@@ -42,14 +42,26 @@ describe("parseConfig", () => {
         contentAud: "content-aud",
       });
       expect(parsed.config.scheme).toBe("https");
+      expect(parsed.config.oauth).toBe(true);
       expect(parsed.config.archiveAfterMs).toBe(30 * 86_400_000);
     }
   });
 
-  // ACC-2: Access is skipped only when every configured host is a localhost name.
-  it("skips Access only for an all-localhost configuration", () => {
+  // ACC-2: Access is skipped only when every configured host is a localhost name; OAuth is off there (PL-47).
+  it("skips Access and turns OAuth off only for an all-localhost configuration", () => {
     const parsed = parseConfig(LOCAL);
-    expect(parsed).toMatchObject({ ok: true, config: { access: null, scheme: "http" } });
+    expect(parsed).toMatchObject({ ok: true, config: { access: null, oauth: false, scheme: "http" } });
+  });
+
+  // PL-46: a deployment turns API tokens off by deleting the secret or putting {}.
+  it.each([
+    ["missing", undefined],
+    ["{}", "{}"],
+  ])("takes API_TOKENS %s as no API token", (_name, value) => {
+    for (const input of [SHARED_DOMAIN, LOCAL]) {
+      const parsed = parseConfig({ ...input, API_TOKENS: value });
+      expect(parsed.ok && parsed.config.tokens).toEqual([]);
+    }
   });
 
   it("takes the team domain as a host or an https URL", () => {
@@ -122,7 +134,10 @@ describe("parseConfig", () => {
     ["ACCESS_TEAM_DOMAIN", "http://team.cloudflareaccess.com", "invalid"],
     ["ACCESS_APP_AUD", undefined, "missing"],
     ["ACCESS_CONTENT_AUD", "has space", "invalid"],
-    ["API_TOKENS", undefined, "missing"],
+    // PL-46: a malformed API_TOKENS, an empty one included, is refused, so a typo fails loudly.
+    ["API_TOKENS", "", "invalid"],
+    ["API_TOKENS", 1, "invalid"],
+    ["API_TOKENS", "null", "invalid"],
     ["API_TOKENS", "not json", "invalid"],
     ["API_TOKENS", "[]", "invalid"],
     ["API_TOKENS", JSON.stringify({ Codex: HASH }), "invalid"],

@@ -16,9 +16,10 @@
     { "pattern": "*-art.example.com/*", "zone_name": "example.com" },
     { "pattern": "*-pub.example.com/*", "zone_name": "example.com" },
   ],
-  // The D1 database and the private R2 bucket, created before the first deployment.
+  // The D1 database, the private R2 bucket and the KV namespace for OAuth storage, created before the first deployment.
   "d1_databases": [{ "binding": "DB", "database_name": "", "database_id": "" }],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "" }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "" }],
   "vars": {
     "APP_HOST": "artifacts.example.com",
     "API_HOST": "artifacts-api.example.com",
