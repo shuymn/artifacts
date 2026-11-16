@@ -20,6 +20,7 @@ import {
   TOKENS,
   World,
 } from "../test-support.ts";
+import { assetPath, fingerprintAssets, type AssetSources } from "./assets.ts";
 import iconSvg from "./icon.svg?raw";
 import { byClass, elements, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
 
@@ -354,7 +355,7 @@ describe("section 10: one snapshot per page", () => {
       "/archived",
       `/a/${id}`,
       `/a/${id}?versions_cursor=3`,
-      "/assets/gallery.css",
+      assetPath("gallery.css"),
     ]) {
       const before = db.batches;
       expect({ path, status: (await app(world, path)).status }).toEqual({ path, status: 200 });
@@ -386,6 +387,13 @@ describe("section 10: what answers 404", () => {
       "/assets/favicon.ico",
       "/assets/",
       "/assets/fonts/other.woff2",
+      // Assets only at their fingerprinted paths: not at their names, nor under another fingerprint.
+      "/assets/gallery.css",
+      "/assets/fonts.css",
+      "/assets/icon.svg",
+      "/assets/fonts/ibm-plex-sans-latin-400-normal.woff2",
+      assetPath("gallery.css").replace(/\.[0-9a-f]{16}\./, ".0000000000000000."),
+      `${assetPath("gallery.css")}x`,
       "/?cursor=",
       "/?cursor=bad",
       `/archived?cursor=1.${id}x`,
@@ -454,13 +462,13 @@ describe("ISO-5: escaping artifact text", () => {
   it("sends a CSP that forbids scripts, forms and framing on every response, refusals and failures included", async () => {
     const world = new World({ keyTimeoutMs: 50 });
     const id = await create(world, "Page");
-    const etag = (await app(world, "/assets/gallery.css")).headers.get("ETag") ?? "";
+    const etag = (await app(world, assetPath("gallery.css"))).headers.get("ETag") ?? "";
     const responses = [
       await app(world, "/"),
       await app(world, "/archived"),
       await app(world, `/a/${id}`),
-      await app(world, "/assets/gallery.css"),
-      await app(world, "/assets/gallery.css", { headers: { "If-None-Match": etag } }),
+      await app(world, assetPath("gallery.css")),
+      await app(world, assetPath("gallery.css"), { headers: { "If-None-Match": etag } }),
       await app(world, "/", { method: "HEAD" }),
       await app(world, "/nothing"),
       await app(world, "/", { method: "POST" }),
@@ -503,22 +511,25 @@ describe("ISO-5: escaping artifact text", () => {
 });
 
 describe("section 10: headers", () => {
-  // PL-10, ISO-2, ISO-4 on every gallery response; section 6's `private, no-cache` for the app host.
+  // PL-10, ISO-2, ISO-4 on every gallery response; section 6's `private, no-cache` for the app host, and its immutable
+  // cache for fingerprinted assets.
   it("sends the app host's headers and no cookie on pages and assets", async () => {
     const world = new World();
     const id = await create(world, "Page");
-    for (const path of [
-      "/",
-      "/archived",
-      `/a/${id}`,
-      "/assets/gallery.css",
-      "/assets/fonts.css",
-      "/favicon.ico",
-      "/assets/icon.svg",
-    ]) {
+    const IMMUTABLE = "private, max-age=31536000, immutable";
+    for (const [path, cache] of [
+      ["/", "private, no-cache"],
+      ["/archived", "private, no-cache"],
+      [`/a/${id}`, "private, no-cache"],
+      ["/favicon.ico", "private, no-cache"],
+      [assetPath("gallery.css"), IMMUTABLE],
+      [assetPath("fonts.css"), IMMUTABLE],
+      [assetPath("icon.svg"), IMMUTABLE],
+      [assetPath("fonts/ibm-plex-mono-latin-500-normal.woff2"), IMMUTABLE],
+    ] as const) {
       const response = await app(world, path);
       expect({ path, status: response.status }).toEqual({ path, status: 200 });
-      expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
+      expect({ path, cache: response.headers.get("Cache-Control") }).toEqual({ path, cache });
       expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
       expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
       expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
@@ -531,7 +542,7 @@ describe("section 10: headers", () => {
   it("answers HEAD with GET's headers and no body", async () => {
     const world = new World();
     const id = await create(world, "Page");
-    for (const path of ["/", `/a/${id}`, "/assets/fonts/ibm-plex-sans-latin-400-normal.woff2", "/favicon.ico"]) {
+    for (const path of ["/", `/a/${id}`, assetPath("fonts/ibm-plex-sans-latin-400-normal.woff2"), "/favicon.ico"]) {
       const get = await app(world, path);
       const head = await app(world, path, { method: "HEAD" });
       expect(head.status).toBe(200);
@@ -551,10 +562,10 @@ describe("section 10: headers", () => {
       "/",
       "/archived",
       `/a/${UNKNOWN_ID}`,
-      "/assets/gallery.css",
-      "/assets/fonts.css",
+      assetPath("gallery.css"),
+      assetPath("fonts.css"),
       "/favicon.ico",
-      "/assets/icon.svg",
+      assetPath("icon.svg"),
     ]) {
       expect((await app(world, path, { jwt: null })).status).toBe(403);
     }
@@ -575,22 +586,31 @@ describe("section 10: headers", () => {
   });
 });
 
+/** A page's preload link for a font, by the font's file name without `ibm-plex-` and `-normal.woff2`. */
+const preloadOf = (name: string) => ({
+  rel: "preload",
+  href: assetPath(`fonts/ibm-plex-${name}-normal.woff2`),
+  as: "font",
+  type: "font/woff2",
+  crossorigin: "",
+});
+
 describe("docs/gallery/design.md: stylesheets, fonts and icon", () => {
   it("serves gallery.css as it is in the repository", async () => {
     const world = new World();
-    const response = await app(world, "/assets/gallery.css");
+    const response = await app(world, assetPath("gallery.css"));
     expect(response.headers.get("Content-Type")).toBe("text/css; charset=utf-8");
     expect(await response.text()).toBe(css);
   });
 
-  it("declares IBM Plex Sans and Mono with font-display: swap, each font served as woff2", async () => {
+  it("declares IBM Plex Sans and Mono with font-display: optional, each font at its fingerprinted path as woff2", async () => {
     const world = new World();
-    const fonts = await (await app(world, "/assets/fonts.css")).text();
+    const fonts = await (await app(world, assetPath("fonts.css"))).text();
     const faces = [...fonts.matchAll(/@font-face\s*\{([^}]*)\}/g)].map((match) => match[1] ?? "");
     const families = faces.map((face) => {
       const family = /font-family:\s*"([^"]+)"/.exec(face)?.[1];
       const weight = /font-weight:\s*(\d+)/.exec(face)?.[1];
-      expect(face).toMatch(/font-display:\s*swap;/);
+      expect(face).toMatch(/font-display:\s*optional;/);
       return `${family} ${weight}`;
     });
     expect(families).toEqual([
@@ -603,7 +623,8 @@ describe("docs/gallery/design.md: stylesheets, fonts and icon", () => {
     ]);
     for (const face of faces) {
       const src = /url\("([^"]+)"\) format\("woff2"\)/.exec(face)?.[1] ?? "";
-      const path = new URL(src, `https://${APP_HOST}/assets/fonts.css`).pathname;
+      const path = new URL(src, `https://${APP_HOST}${assetPath("fonts.css")}`).pathname;
+      expect(path).toMatch(/^\/assets\/fonts\/ibm-plex-(sans|mono)-latin-[456]00-normal\.[0-9a-f]{16}\.woff2$/);
       for (let attempt = 0; attempt < 2; attempt++) {
         const response = await app(world, path);
         expect({ path, status: response.status }).toEqual({ path, status: 200 });
@@ -625,14 +646,14 @@ describe("docs/gallery/design.md: stylesheets, fonts and icon", () => {
         .map((node) => Object.fromEntries(node.attributes));
       expect(icons).toEqual([
         { rel: "icon", href: "/favicon.ico", sizes: "32x32" },
-        { rel: "icon", href: "/assets/icon.svg", type: "image/svg+xml" },
+        { rel: "icon", href: assetPath("icon.svg"), type: "image/svg+xml" },
       ]);
     }
   });
 
   it("serves icon.svg as it is in the repository and favicon.ico as an ICO of 16 and 32 px PNG images", async () => {
     const world = new World();
-    const svg = await app(world, "/assets/icon.svg");
+    const svg = await app(world, assetPath("icon.svg"));
     expect(svg.headers.get("Content-Type")).toBe("image/svg+xml");
     expect(await svg.text()).toBe(iconSvg);
 
@@ -656,16 +677,88 @@ describe("docs/gallery/design.md: stylesheets, fonts and icon", () => {
     ]);
   });
 
-  it("revalidates an asset by its ETag", async () => {
+  // favicon.ico keeps its URL, so it revalidates rather than being cached as immutable.
+  it("revalidates the icon at /favicon.ico by its ETag", async () => {
     const world = new World();
-    const first = await app(world, "/assets/gallery.css");
+    const first = await app(world, "/favicon.ico");
     const etag = first.headers.get("ETag") ?? "";
     expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
-    const again = await app(world, "/assets/gallery.css", { headers: { "If-None-Match": etag } });
+    const again = await app(world, "/favicon.ico", { headers: { "If-None-Match": etag } });
     expect(again.status).toBe(304);
     expect(again.headers.get("ETag")).toBe(etag);
+    expect(again.headers.get("Cache-Control")).toBe("private, no-cache");
     expect(again.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
-    const other = await app(world, "/assets/fonts.css", { headers: { "If-None-Match": etag } });
+    const other = await app(world, assetPath("fonts.css"), { headers: { "If-None-Match": etag } });
     expect(other.status).toBe(200);
+  });
+
+  it("links the stylesheets at their fingerprinted paths and preloads the fonts the pages use", async () => {
+    const world = new World();
+    const id = await create(world, "Page");
+    for (const path of ["/", "/archived", `/a/${id}`]) {
+      const head = one(elements(await page(world, path)).filter((node) => node.tag === "head"));
+      const links = elements(head).filter((node) => node.tag === "link");
+      const stylesheets = links.filter((node) => node.attributes.get("rel") === "stylesheet");
+      expect(stylesheets.map((node) => node.attributes.get("href"))).toEqual([
+        assetPath("fonts.css"),
+        assetPath("gallery.css"),
+      ]);
+      for (const href of [assetPath("fonts.css"), assetPath("gallery.css"), assetPath("icon.svg")]) {
+        expect(href).toMatch(/^\/assets\/[a-z]+\.[0-9a-f]{16}\.(css|svg)$/);
+      }
+      const preloads = links
+        .filter((node) => node.attributes.get("rel") === "preload")
+        .map((node) => Object.fromEntries(node.attributes));
+      expect(preloads).toEqual([
+        preloadOf("sans-latin-400"),
+        preloadOf("sans-latin-600"),
+        preloadOf("mono-latin-400"),
+        { ...preloadOf("sans-latin-500"), fetchpriority: "low" },
+        { ...preloadOf("mono-latin-600"), fetchpriority: "low" },
+      ]);
+      // Each preload is a file fonts.css names, so the font loads once.
+      const fonts = await (await app(world, assetPath("fonts.css"))).text();
+      for (const preload of preloads) expect(fonts).toContain(`url("${preload.href}")`);
+    }
+  });
+});
+
+describe("design.md section 6: fingerprinted asset paths", () => {
+  const FONT = "fonts/ibm-plex-sans-latin-400-normal.woff2";
+  const sources = (change: Partial<AssetSources> = {}): AssetSources => ({
+    galleryCss: "body { color: red; }",
+    fontsCss: `@font-face { src: url("${FONT}") format("woff2"); }`,
+    iconSvg: "<svg></svg>",
+    fonts: new Map([[FONT, new Uint8Array([1, 2, 3]).buffer]]),
+    ...change,
+  });
+
+  it("changes a file's path when its bytes change, and fonts.css's when a font's do", async () => {
+    const base = await fingerprintAssets(sources());
+    const paths = (assets: typeof base) => Object.fromEntries(assets.paths);
+    expect(paths(base)).toEqual({
+      [FONT]: expect.stringMatching(/^\/assets\/fonts\/ibm-plex-sans-latin-400-normal\.[0-9a-f]{16}\.woff2$/),
+      "fonts.css": expect.stringMatching(/^\/assets\/fonts\.[0-9a-f]{16}\.css$/),
+      "gallery.css": expect.stringMatching(/^\/assets\/gallery\.[0-9a-f]{16}\.css$/),
+      "icon.svg": expect.stringMatching(/^\/assets\/icon\.[0-9a-f]{16}\.svg$/),
+    });
+    // The same bytes, the same paths.
+    expect(paths(await fingerprintAssets(sources()))).toEqual(paths(base));
+
+    const restyled = await fingerprintAssets(sources({ galleryCss: "body { color: blue; }" }));
+    expect(restyled.paths.get("gallery.css")).not.toBe(base.paths.get("gallery.css"));
+    expect(paths(restyled)).toEqual({ ...paths(base), "gallery.css": restyled.paths.get("gallery.css") });
+
+    const font = await fingerprintAssets(sources({ fonts: new Map([[FONT, new Uint8Array([1, 2, 4]).buffer]]) }));
+    expect(font.paths.get(FONT)).not.toBe(base.paths.get(FONT));
+    expect(font.paths.get("fonts.css")).not.toBe(base.paths.get("fonts.css"));
+    expect(font.paths.get("gallery.css")).toBe(base.paths.get("gallery.css"));
+    // fonts.css names the font's new path.
+    const fontsCss = font.files.get(font.paths.get("fonts.css") ?? "")?.body;
+    expect(fontsCss).toBe(`@font-face { src: url("${font.paths.get(FONT)}") format("woff2"); }`);
+  });
+
+  it("refuses a fonts.css that names a font not bundled", async () => {
+    await expect(fingerprintAssets(sources({ fonts: new Map() }))).rejects.toThrow(/not bundled/);
   });
 });

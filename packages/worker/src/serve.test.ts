@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { assetPath } from "./gallery/assets.ts";
 import favicon from "./gallery/favicon.ico";
 import { APP_HOST, CONTENT_SUFFIX, objectKeys, PUBLIC_SUFFIX, World } from "./test-support.ts";
 
@@ -191,12 +192,12 @@ describe("ISO-2: cross-origin headers", () => {
     const id = await threeVersions(world);
     const app = (path: string, init: RequestInit = {}) => world.fetch(`https://${APP_HOST}${path}`, init);
     const jwt = { "Cf-Access-Jwt-Assertion": await world.jwt({ aud: "app-audience" }) };
-    const etag = (await app("/assets/gallery.css", { headers: jwt })).headers.get("ETag") ?? "";
+    const etag = (await app(assetPath("gallery.css"), { headers: jwt })).headers.get("ETag") ?? "";
     const responses = [
       await app("/", { headers: jwt }),
       await app("/archived", { headers: jwt }),
       await app(`/a/${id}`, { headers: jwt }),
-      await app("/assets/gallery.css", { headers: { ...jwt, "If-None-Match": etag } }),
+      await app(assetPath("gallery.css"), { headers: { ...jwt, "If-None-Match": etag } }),
       await app("/"),
       await app("/a/x", { headers: jwt }),
       await app("/", { method: "DELETE" }),
