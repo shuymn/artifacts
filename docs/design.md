@@ -263,6 +263,11 @@ no limit on versions.
   deployments' files would need storage that outlives a deployment. A `fonts.css` answered this way names the current
   fonts' paths, which are immutable. A path that names no current asset answers 404. `/favicon.ico` keeps its fixed URL,
   which browsers request on their own, and revalidates with the app host's `private, no-cache` and its `ETag`.
+- `Vary: Accept-Encoding` on every response with a body or a validator, 200 and 304 alike: artifact files, the fallback
+  icon, gallery pages and gallery assets. The Workers runtime and Cloudflare compress by the request's
+  `Accept-Encoding`, and the runtime adds no `Vary` itself (checked with `wrangler dev`), so without it a cache between
+  the browser and Cloudflare could hand one client an encoding it did not ask for. Refusals, redirects and errors carry
+  neither a body worth caching nor a validator, and go without it.
 - `Cross-Origin-Resource-Policy: same-origin` on every response of a private content host and of the app host,
   including 304, 308 and 404, so another origin cannot load private content as a script, image, stylesheet or media
   with the owner's cookie (ISO-2). Public hosts omit it: their content needs no credential, and other sites may embed

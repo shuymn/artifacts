@@ -59,6 +59,13 @@ export async function entityTag(file: FileJson): Promise<string> {
   return `"${hex}"`;
 }
 
+/**
+ * On every response with a body or a validator (design.md section 6): the runtime and Cloudflare compress by the
+ * request's `Accept-Encoding`, and the runtime adds no `Vary` of its own, so a cache would otherwise hand one client
+ * the encoding another asked for. Refusals, redirects and errors carry neither and go without it.
+ */
+const VARY = { Vary: "Accept-Encoding" } as const;
+
 /** RFC 9110 section 13.1.2: weak comparison against any listed tag, or `*`. */
 export function matchesETag(header: string | null, etag: string): boolean {
   if (header === null) return false;
@@ -79,13 +86,14 @@ export async function serveAsset(
 ): Promise<Response> {
   const etag = await assetTag(asset);
   if (matchesETag(request.headers.get("If-None-Match"), etag)) {
-    return new Response(null, { status: 304, headers: { ETag: etag, ...hostHeaders } });
+    return new Response(null, { status: 304, headers: { ETag: etag, ...VARY, ...hostHeaders } });
   }
   const body = typeof asset.body === "string" ? new TextEncoder().encode(asset.body) : asset.body.slice(0);
   const headers = {
     "Content-Type": asset.contentType,
     "Content-Length": String(body.byteLength),
     ETag: etag,
+    ...VARY,
     ...hostHeaders,
   };
   return new Response(request.method === "HEAD" ? null : body, { headers });
@@ -126,12 +134,13 @@ export async function serveArtifact(
   const file = lookup.value.file;
   const etag = await entityTag(file);
   if (matchesETag(request.headers.get("If-None-Match"), etag)) {
-    return new Response(null, { status: 304, headers: { ETag: etag, ...browserHeaders(kind) } });
+    return new Response(null, { status: 304, headers: { ETag: etag, ...VARY, ...browserHeaders(kind) } });
   }
   const headers = {
     "Content-Type": file.content_type,
     "Content-Length": String(file.size),
     ETag: etag,
+    ...VARY,
     ...browserHeaders(kind),
   };
   // A HEAD has the GET's headers and no body, so the object is not read.
