@@ -11,7 +11,8 @@ with the reason.
 ## Status and pinning
 
 **Enforced (main):** the cited source and test exist on `main`. **Planned (first release):** not implemented; required
-before the first release ships. Every invariant below is _Planned (first release)_. A **Gap** note names a part no test
+before the first release ships. Each invariant below states its status; source and test paths are under
+`packages/worker/`. A **Gap** note names a part no test
 pins yet; that part does not count as enforced.
 
 Each invariant names how it is pinned:
@@ -84,13 +85,15 @@ adversaries below, not untrusted users.
 
 - **HOST-1: a request is classified by exact host.** The host is the app host, the API host, or a 26-character ID
   followed by exactly the content or public suffix; anything else answers 404 without reading D1 or R2. `workers_dev`
-  and `preview_urls` are false. _Planned._ Pinned by behavior (hosts with an extra label, uppercase letters, prefixes of
-  25 and 27 characters, a port) and source check (`wrangler.jsonc`).
+  and `preview_urls` are false. _Enforced (main)_ in `src/hosts.ts`. Pinned by behavior (`src/config.test.ts`,
+  `src/routing.test.ts`: hosts with an extra label, uppercase letters, prefixes of 25 and 27 characters, a port; no D1
+  or R2 call) and source check (`src/source.test.ts`: `wrangler.jsonc`).
 - **HOST-2: a configuration that would weaken a boundary is refused.** Refused: a public suffix that ends with the
   content suffix (the content Access wildcard would cover public hosts), an app or API host under either suffix, a
   suffix that makes an artifact label longer than 63 characters, and a mix of `localhost` and other hosts. The Worker
-  answers 503 `unavailable`; the deployment script refuses the same values with the same parser. _Planned._ Pinned by
-  behavior (one test per refusal, for the Worker and the script).
+  answers 503 `unavailable`; the deployment script refuses the same values with the same parser. _Enforced (main)_ in
+  `src/config.ts`. Pinned by behavior (`src/config.test.ts`: one test per refusal; `src/routing.test.ts`: 503 without
+  storage). **Gap:** the deployment script does not exist yet, so its refusals are not pinned.
 - **HOST-3: `/mcp` refuses a foreign `Origin`.** A request that carries an `Origin` other than the API host's origin
   answers 403 before the MCP handler; agents send none. _Planned._ Pinned by behavior.
 
@@ -100,12 +103,15 @@ adversaries below, not untrusted users.
   `Cf-Access-Jwt-Assertion` (never a cookie) and verifies it with jose: RS256 only, the team domain's issuer, the
   audience of the host's class (app or content), `exp` required, 60 s clock tolerance, a key set reused for at most 7
   days. An invalid JWT answers 403; a key set that cannot be fetched within 5 s answers 503 `unavailable`; both log a
-  reason code only. _Planned._ Pinned by behavior (a local key set: missing JWT, bad signature, other issuer, the other
-  class's audience, missing `exp`, expired and the tolerance edges, an algorithm other than RS256, an unknown `kid`
-  that refreshes the set once, an unreachable key endpoint, a valid JWT sent only as a cookie).
+  reason code only. _Enforced (main)_ in `src/access.ts`. Pinned by behavior (`src/access.test.ts`,
+  `src/routing.test.ts`; a local key set: missing JWT, bad signature, other issuer, the other class's audience, missing
+  `exp`, expired and the tolerance edges, an algorithm other than RS256, an unknown `kid` that refreshes the set once,
+  an unreachable key endpoint, a valid JWT sent only as a cookie).
 - **ACC-2: Access verification is skipped only for a `localhost` configuration.** Every configured host must be a
   `localhost` name; no variable turns verification off, and the deployment script refuses `localhost` hosts and ports.
-  _Planned._ Pinned by behavior (production-shaped hosts without a JWT answer 403; the script refuses `localhost`).
+  _Enforced (main)_ in `src/config.ts`. Pinned by behavior (`src/routing.test.ts`: production-shaped hosts without a
+  JWT answer 403; `src/config.test.ts`: a mix of `localhost` and other hosts is refused). **Gap:** the deployment script
+  does not exist yet, so its refusal of `localhost` is not pinned.
 - **ACC-3: the Access applications admit only the owner, and their cookie is HttpOnly.** The content application covers
   exactly `*` + the content suffix. HttpOnly is set explicitly because the documented default is inconsistent; without
   it, artifact JavaScript could read its host's JWT, which names the application's audience rather than the host and so
@@ -116,20 +122,25 @@ adversaries below, not untrusted users.
 
 - **TOK-1: every request to the API host needs a known bearer token.** REST routes and `/mcp` alike: the SHA-256 of the
   presented token is compared with every entry of `API_TOKENS` in constant time, before any storage is read; a failure
-  answers 401 `unauthorized`. _Planned._ Pinned by behavior (each route: no header, another scheme, unknown and removed
-  tokens, nothing changed) and review (the constant-time comparison).
+  answers 401 `unauthorized`. _Enforced (main)_ in `src/tokens.ts`. Pinned by behavior (`src/routing.test.ts`: each
+  REST route and `/mcp`: no header, another scheme, unknown and removed tokens, nothing changed) and review (the
+  constant-time comparison).
 - **TOK-2: a token is never stored, returned, logged or handed to the MCP SDK.** The secret holds hashes; D1 holds
-  token names; no response echoes the `Authorization` header; the per-request MCP factory captures the token name, and the request it serves has no `Authorization` header.
-  _Planned._ Pinned by log redaction and behavior (responses hold no marker token).
+  token names; no response echoes the `Authorization` header; the per-request MCP factory captures the token name, and
+  the request it serves has no `Authorization` header. _Enforced (main)_ for storage, responses and logs. Pinned by log
+  redaction and behavior (`src/log-redaction.test.ts`: responses hold no marker token). **Gap:** the MCP handler does
+  not exist yet, so the factory boundary is not pinned.
 - **TOK-3: every version and every change records its token.** A version stores `published_by`; create, publish,
-  public, archive and delete changes log the token name. _Planned._ Pinned by behavior and log redaction.
+  public, archive and delete changes log the token name. _Enforced (main)_ in `src/operations.ts`. Pinned by behavior
+  and log redaction (`src/publish.test.ts`).
 
 ### Origin isolation (ISO)
 
 - **ISO-1: an artifact host serves only that artifact, and an ID is never reused.** File lookups are keyed by the ID
   from the host; a deleted artifact keeps a tombstone row, and the primary key refuses an ID that existed, so no new
-  artifact inherits an old origin's storage or service worker. _Planned._ Pinned by behavior (two artifacts with the
-  same path and different bytes each serve their own; create with a generator stubbed to a deleted ID is refused).
+  artifact inherits an old origin's storage or service worker. _Enforced (main)_ in `src/db.ts`. Pinned by behavior
+  (`src/serve.test.ts`: two artifacts with the same path and different bytes each serve their own; create with a
+  generator stubbed to a deleted ID is refused).
 - **ISO-2: private content cannot be read or loaded as a subresource from another origin.** No host sends
   `Access-Control-Allow-*`, and `OPTIONS` answers 405, so a cross-origin `fetch` cannot read a response. Every response
   of a private content host and of the app host carries `Cross-Origin-Resource-Policy: same-origin` (200, 304, 308,
@@ -137,12 +148,16 @@ adversaries below, not untrusted users.
   observe it. CORP does not govern navigation: another origin can still frame a private page, which shows it to the
   owner without giving the framer its content; for one owner, no framing policy is added. Public hosts do not send
   CORP: their content needs no credential, so loading it reveals nothing a direct request does not.
-  _Planned._ Pinned by behavior (every route and status, both host classes) and deployed check (design AC-8: artifact
-  A's `<script src>` to artifact B fails, B loads its own).
+  _Enforced (main)_ in `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`, `src/routing.test.ts`: every route
+  and status, both host classes) and deployed check (design AC-8: artifact A's `<script src>` to artifact B fails, B
+  loads its own). **Gap:** the gallery's pages are not served yet, so only the app host's 403, 404 and 405 are pinned;
+  the deployed check has not run.
 - **ISO-3: browsers can only read.** The app host and content hosts answer `GET` and `HEAD` only; every change is on the
-  API host with a bearer token, so no request authenticated by a cookie changes state. _Planned._ Pinned by behavior.
-- **ISO-4: the Worker sets no cookie and decides nothing on one.** _Planned._ Pinned by behavior (no `Set-Cookie` on
-  any route; a valid Access JWT sent only as a cookie is refused, ACC-1).
+  API host with a bearer token, so no request authenticated by a cookie changes state. _Enforced (main)_ in
+  `src/serve.ts`. Pinned by behavior (`src/routing.test.ts`).
+- **ISO-4: the Worker sets no cookie and decides nothing on one.** _Enforced (main)._ Pinned by behavior
+  (`src/routing.test.ts`, `src/serve.test.ts`: no `Set-Cookie` on any route; `src/access.test.ts`: a valid Access JWT
+  sent only as a cookie is refused, ACC-1).
 - **ISO-5: the gallery runs no artifact-supplied markup.** Titles, descriptions and paths are escaped; the response's
   `Content-Security-Policy` forbids scripts and framing. _Planned._ Pinned by behavior (markup and attribute breakouts
   in each field; the header).
@@ -150,64 +165,74 @@ adversaries below, not untrusted users.
 ### Serving (SRV)
 
 - **SRV-1: content responses do not reinterpret bytes or leak the host.** Each carries the stored `Content-Type`,
-  `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. _Planned._ Pinned by behavior.
+  `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. _Enforced (main)_ in `src/serve.ts`. Pinned by
+  behavior (`src/serve.test.ts`).
 - **SRV-2: a request path selects a file of the requested artifact and version only.** The Worker resolves the pathname
   it receives: one strict percent-decoding per segment, an encoded `/` refused, lookup inside the selected version's
-  file list. _Planned._ Pinned by behavior (decoder tests over strings; Worker tests over `Request` objects asserting
-  the selected version and file).
+  file list. _Enforced (main)_ in `src/paths.ts`. Pinned by behavior (`src/paths.test.ts`: decoder tests over strings;
+  `src/serve.test.ts`: Worker tests over `Request` objects asserting the selected version and file).
 - **SRV-3: a 304 never skips a check.** Access (ACC-1), the public flag (PUB-1) and the artifact's existence are checked
   before `If-None-Match` is compared, for latest and pinned versions alike, and every content response revalidates
-  (`no-cache`). _Planned._ Pinned by behavior (a matching `If-None-Match` after the artifact was made private or
-  deleted answers 404; without a valid JWT, 403).
+  (`no-cache`). _Enforced (main)_ in `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`: a matching
+  `If-None-Match` after the artifact was made private or deleted answers 404; without a valid JWT, 403).
 
 ### Public links (PUB)
 
 - **PUB-1: a public host serves an artifact only while it is public, and then every version.** The flag is read on
   every request; a private, deleted or unknown artifact answers the same 404. Making an artifact public exposes its
-  latest and all pinned versions. A public host never serves the gallery or the API. _Planned._ Pinned by behavior
-  (the three 404s are identical; pinned versions are served while public; the next request after making it private
-  answers 404).
+  latest and all pinned versions. A public host never serves the gallery or the API. _Enforced (main)_ in
+  `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`: the three 404s are identical; pinned versions are served
+  while public; the next request after making it private answers 404).
 - **PUB-2: only the API changes the flag**, with a token (TOK-1); the flag is off when an artifact is created.
-  _Planned._ Pinned by behavior.
+  _Enforced (main)._ Pinned by behavior (`src/serve.test.ts`, `src/routing.test.ts`).
 
 ### Versions (VER)
 
 - **VER-1: a stored version never changes.** No operation rewrites a version's rows; an object's key is the SHA-256
-  the Worker computed from its bytes. _Planned._ Pinned by behavior (after publishes that share and change files,
-  earlier versions' rows and bytes are unchanged and every key matches its bytes).
+  the Worker computed from its bytes. _Enforced (main)_ in `src/operations.ts`, `src/objects.ts`. Pinned by behavior
+  (`src/publish.test.ts`: after publishes that share and change files, earlier versions' rows and bytes are unchanged
+  and every key matches its bytes).
 - **VER-2: a publish becomes visible only through its single commit.** Bytes are uploaded first; the version appears
   in one D1 batch, which rolls back as a whole. A failure before the commit, or a commit that rolls back, leaves no
   version. The commit has no timeout of its own, since a timed-out commit could still apply; when a disconnect cancels
-  the request, the outcome is learned by reading, as [design.md](design.md#publish) describes. _Planned._ Pinned by
-  behavior (a failure at each upload, an upload timeout, a failing batch).
+  the request, the outcome is learned by reading, as [design.md](design.md#publish) describes. _Enforced (main)_ in
+  `src/operations.ts`, `src/db.ts`. Pinned by behavior (`src/publish.test.ts`: a failure at each upload, an upload
+  timeout, a failing batch).
 - **VER-3: an update commits only on top of the latest version.** A `base_version` that is not the latest, or an
-  artifact deleted meanwhile, commits nothing. _Planned._ Pinned by behavior (stale base; two concurrent updates from
-  one base commit exactly one; a delete between upload and commit).
+  artifact deleted meanwhile, commits nothing. _Enforced (main)_ in `src/operations.ts`, `src/db.ts`. Pinned by behavior
+  (`src/publish.test.ts`: stale base; two concurrent updates from one base commit exactly one; a delete between upload
+  and commit).
 - **VER-4: objects belong to one artifact, and deletion is logical first.** Keys are `a/<id>/<sha256>`; no version
   references another artifact's object. Deleting commits the tombstone and removes the rows at once, so every URL
-  answers 404; removing the prefix's objects follows, best effort, and a repeated delete retries it. _Planned._ Pinned
-  by behavior (URLs 404 right after delete; the prefix is empty after a cleanup that succeeded; a failed cleanup
-  completes on the repeated delete).
+  answers 404; removing the prefix's objects follows, best effort, and a repeated delete retries it. _Enforced (main)_
+  in `src/operations.ts`, `src/objects.ts`. Pinned by behavior (`src/rest.test.ts`: URLs 404 right after delete; the
+  prefix is empty after a cleanup that succeeded; a failed cleanup completes on the repeated delete).
 
 ### Resources (RES)
 
 - **RES-1: input is bounded before it is used.** The bounds of [design.md](design.md#limits), each in its unit;
-  request bodies are counted while they are read. _Planned._ Pinned by behavior (at and one past each bound; a chunked
-  body without `Content-Length`).
+  request bodies are counted while they are read. _Enforced (main)_ in `src/body.ts`, `src/schemas.ts`, `src/paths.ts`.
+  Pinned by behavior (`src/schemas.test.ts`, `src/paths.test.ts`, `src/publish.test.ts`: at and one past each bound; a
+  chunked body without `Content-Length`). **Gap:** the MCP request bound and the `read_file` bound belong to the MCP
+  adapter, which does not exist yet.
 - **RES-2: waits are bounded where the outcome stays known.** Fetching Access keys, each R2 call and each D1 read have a
   timeout and answer 503 `unavailable`; a publish that times out before its commit leaves no version. The D1 commit
-  has none: a timed-out commit could still apply. _Planned._ Pinned by behavior (slow key endpoint, R2 and D1 reads).
+  has none: a timed-out commit could still apply. _Enforced (main)_ in `src/timeout.ts`, `src/objects.ts`, `src/db.ts`,
+  `src/access.ts`. Pinned by behavior (`src/access.test.ts`, `src/publish.test.ts`: slow key endpoint, R2 and D1
+  reads; a slow commit still applies).
 
 ### Data (DATA)
 
 - **DATA-1: logs carry no secret and no artifact content.** Only `logEvent` writes to the console, with fields from
   closed sets (event names, reason codes, error classes, token names, artifact IDs, version numbers, counts): never a
   token, an `Authorization` header, an Access JWT or cookie, file bytes, a title, a description or a path. Invocation
-  logs are off. _Planned._ Pinned by log redaction (every route and failure path) and source check (`console` only in
-  the logging module; `wrangler.jsonc`).
+  logs are off. _Enforced (main)_ in `src/log.ts`. Pinned by log redaction (`src/log-redaction.test.ts`: every route and
+  failure path) and source check (`src/source.test.ts`: `console` only in the logging module; `wrangler.jsonc`).
+  **Gap:** the MCP and gallery routes do not exist yet; their paths join the redaction markers when they land.
 - **DATA-2: deployment values stay out of the repository.** `wrangler.jsonc` sets no variable, route or identifier;
-  the deployment file is gitignored, and `API_TOKENS` is a secret. _Planned._ Pinned by source check of
-  `wrangler.jsonc` and the deployment example.
+  the deployment file is gitignored, and `API_TOKENS` is a secret. _Enforced (main)_ for `wrangler.jsonc`. Pinned by
+  source check (`src/source.test.ts`) of `wrangler.jsonc` and the deployment example. **Gap:** the deployment example
+  does not exist yet.
 
 ## IDs to check by change type
 
