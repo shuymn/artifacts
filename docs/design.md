@@ -444,9 +444,9 @@ The steps are in [operations.md](operations.md).
   the account, routes, custom domains, database and bucket identifiers, and the variables `APP_HOST`, `API_HOST`,
   `CONTENT_HOST_SUFFIX`, `PUBLIC_HOST_SUFFIX`, `ARCHIVE_AFTER_DAYS`, `ACCESS_TEAM_DOMAIN`, `ACCESS_APP_AUD` and
   `ACCESS_CONTENT_AUD`; they live in the build variable `ARTIFACTS_DEPLOY_JSONC` on Workers Builds or in the gitignored
-  `wrangler.deploy.jsonc` on the owner's machine. `API_TOKENS` is a secret. The deployment script (`pnpm run deploy`)
-  checks the values with the Worker's own parser, merges them, checks that the bucket exists, applies the D1
-  migrations on every deploy and runs `wrangler deploy` (DATA-2).
+  `wrangler.deploy.jsonc` on the owner's machine. `API_TOKENS` is a secret. The deployment script
+  (`scripts/deploy.ts`) checks the values with the Worker's own parser, merges them, checks that the bucket exists,
+  applies the D1 migrations on every deploy and runs `wrangler deploy` (DATA-2).
 - **Releases:** `main` is never deployed. release-please keeps a release PR open; merging it tags a version, a
   workflow fast-forwards the `release` branch to it, and Workers Builds deploys `release` only.
 - **Cloudflare setup by the owner:** the proxied wildcard DNS record, the two Access applications, the D1 database and a
