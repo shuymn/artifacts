@@ -2,13 +2,17 @@
 // full local sign-in through the Worker, and the replacement of a client's grants on approval (OAUTH-5). Access is
 // stubbed with the test key set as everywhere else; every other step runs through the Worker.
 import { OAuthAuthorizationServer } from "@cloudflare/workers-oauth-provider";
+import { createExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AccessVerifier, type AccessOutcome } from "./access.ts";
 import { formActionOrigin } from "./consent.ts";
 import { assetPath } from "./gallery/assets.ts";
 import { proposedPublisher } from "./gallery/pages.ts";
 import { byClass, elements, parseHtml, textOf, type HtmlNode } from "./gallery/test-html.ts";
 import { OWNER } from "./grants.ts";
+import { newArtifactId } from "./id.ts";
+import { createWorker } from "./index.ts";
 import {
   challengeOf,
   faulty,
@@ -52,6 +56,13 @@ const MCP = `${API}/mcp`;
 const V1 = `${API}/v1`;
 const ID = "abcdefghijklmnopqrstuvwxyz";
 const CIMD_ID = "https://client.example.org/oauth/client.json";
+
+/** An Access verifier that throws, for the outer handler's 500. */
+class ThrowingVerifier extends AccessVerifier {
+  override verify(): Promise<AccessOutcome> {
+    return Promise.reject(new Error("verifier failed"));
+  }
+}
 
 type Client = { readonly clientId: string; readonly secret?: string };
 
@@ -681,18 +692,37 @@ describe("PL-38: the page", () => {
     expect(formActionOrigin(redirect)).toBe(origin);
   });
 
-  it("answers error pages and redirects no-store and unframeable, without ETag, Vary or another cookie", async () => {
+  it("answers every refusal, error page and redirect no-store and unframeable, without ETag, Vary or another cookie", async () => {
     const world = new World();
     const { clientId } = await register(world);
     const browser = new Browser(world);
     const handle = await handleOf(await browser.open(await params(clientId)));
+    // Access's key set cannot be fetched: 503 before the consent code runs.
+    const unreachable = new World({ keyTimeoutMs: 50 });
+    unreachable.keys.mode = "hang";
+    // Access verification itself throws: the outer handler's 500.
+    const failing = createWorker({
+      now: () => Date.now(),
+      newId: newArtifactId,
+      sleep: async () => {},
+      timeouts: { r2Ms: 2_000, d1ReadMs: 2_000, kvReadMs: 2_000 },
+      access: new ThrowingVerifier({ fetch: world.keys.fetch, now: () => Date.now() }),
+    });
+    captureLogs();
     const answers = [
       await new Browser(world).open(await params("https://artifacts.example.com/client.json")),
       await new Browser(world).open(await params(clientId, { code_challenge: null })),
       await browser.post({ handle, decision: "approve", publisher: "NO" }),
       await browser.post({ handle, decision: "approve", publisher: "agent" }),
+      await new Browser(world).open(await params(clientId), { jwt: null }),
+      await new Browser(world).post({ handle, decision: "deny" }, { jwt: await world.jwt() }),
+      await world.fetch(`${AUTHORIZE}?${(await params(clientId)).toString()}`, { method: "HEAD" }),
+      await world.fetch(AUTHORIZE, { method: "PUT", body: "decision=approve" }),
+      await world.fetch(AUTHORIZE, { method: "OPTIONS" }),
+      await new Browser(unreachable).open(await params(clientId)),
+      await failing.fetch(new Request(AUTHORIZE), world.env, createExecutionContext()),
     ];
-    expect(answers.map((response) => response.status)).toEqual([400, 302, 400, 303]);
+    expect(answers.map((response) => response.status)).toEqual([400, 302, 400, 303, 403, 403, 405, 405, 405, 503, 500]);
     for (const response of answers) {
       expect(response.headers.get("Cache-Control")).toBe("no-store");
       expect(response.headers.get("X-Frame-Options")).toBe("DENY");

@@ -75,14 +75,27 @@ export type ConsentDeps = {
   readonly kvReadMs: number;
 };
 
-/** The headers of every answer, before index.ts adds the CSP: the app host's, but never stored and never framed. */
+/**
+ * What sets the endpoint's answers apart from the app host's (design.md section 10): never stored, so the handle stays
+ * out of every cache, and never framed (OAUTH-1). With nothing stored, no answer carries `ETag` or `Vary`.
+ */
+const CONSENT_HEADERS = { "Cache-Control": "no-store", "X-Frame-Options": "DENY" } as const;
+
+/**
+ * Every answer of `/oauth/authorize`, the refusals before this module runs included (405, Access's 403 and 503, a
+ * failure): index.ts applies it at its outer boundary, then the CSP.
+ */
+export function withConsentHeaders(response: Response): Response {
+  const answer = new Response(response.body, response);
+  for (const [name, value] of Object.entries(CONSENT_HEADERS)) answer.headers.set(name, value);
+  answer.headers.delete("ETag");
+  answer.headers.delete("Vary");
+  return answer;
+}
+
+/** The headers of every answer here, before index.ts adds the CSP: the app host's, with the endpoint's own. */
 function consentHeaders(cookies: Headers | undefined, extra: Record<string, string> = {}): Headers {
-  const headers = new Headers({
-    ...browserHeaders("private"),
-    "Cache-Control": "no-store",
-    "X-Frame-Options": "DENY",
-    ...extra,
-  });
+  const headers = new Headers({ ...browserHeaders("private"), ...CONSENT_HEADERS, ...extra });
   // Only the library's binding cookie is taken from its headers; its CSP and cache headers are this module's.
   for (const cookie of cookies?.getSetCookie() ?? []) headers.append("Set-Cookie", cookie);
   return headers;

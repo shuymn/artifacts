@@ -7,7 +7,7 @@
  */
 import { AccessVerifier, type AccessSettings } from "./access.ts";
 import { parseConfig, type Config } from "./config.ts";
-import { serveConsent, type ConsentAnswer } from "./consent.ts";
+import { serveConsent, withConsentHeaders, type ConsentAnswer } from "./consent.ts";
 import { serveGallery, withGalleryPolicy } from "./gallery/route.ts";
 import { classifyHost } from "./hosts.ts";
 import { newArtifactId, type ArtifactId } from "./id.ts";
@@ -125,7 +125,8 @@ async function browser(
 
 /**
  * The authorization endpoint on the app host (design.md section 7): the consent page on `GET`, its form on `POST`, any
- * other method 405 (ISO-3), then Access with the app audience (ACC-1), as for the gallery.
+ * other method 405 (ISO-3), then Access with the app audience (ACC-1), as for the gallery. Every answer, these refusals
+ * included, gets the endpoint's headers (`withConsentHeaders`) where `fetch` returns it.
  */
 async function authorize(
   request: Request,
@@ -179,7 +180,7 @@ export function createWorker(deps: WorkerDeps): Worker {
           case "app": {
             if (url.pathname === AUTHORIZE_PATH) {
               const answer = await authorize(request, url, env, config, deps);
-              return withGalleryPolicy(answer.response, answer.formAction);
+              return withGalleryPolicy(withConsentHeaders(answer.response), answer.formAction);
             }
             return withGalleryPolicy(await browser(request, url, env, config, deps, "app", undefined));
           }
@@ -198,7 +199,8 @@ export function createWorker(deps: WorkerDeps): Worker {
         });
         if (route.kind === "api") return jsonResponse(500, { error: { code: "internal", message: "internal error" } });
         const failure = plainResponse(route.kind === "public" ? "public" : "private", 500);
-        return route.kind === "app" ? withGalleryPolicy(failure) : failure;
+        if (route.kind !== "app") return failure;
+        return withGalleryPolicy(url.pathname === AUTHORIZE_PATH ? withConsentHeaders(failure) : failure);
       }
     },
   };
