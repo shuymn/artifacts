@@ -572,8 +572,8 @@ Logs below are the Worker's Workers Logs in the dashboard, kept 7 days on Worker
    every private page down meanwhile. `src/access.test.ts` pins it (PL-3), and `access.unavailable` in the logs shows it
    if it happens.
 
-4. **Production waits** (R2 30 s, D1 reads 10 s, the key set 5 s). They cannot be provoked on the platform; check that
-   the deployed release holds them, in the checkout:
+4. **Production waits** (R2 30 s, D1 reads 10 s, KV reads 10 s, the key set 5 s). They cannot be provoked on the
+   platform; check that the deployed release holds them, in the checkout:
 
    ```sh
    git fetch origin release && git show origin/release:packages/worker/src/timeout.ts | grep -E 'Ms: [0-9]'

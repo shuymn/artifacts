@@ -74,17 +74,15 @@ function encode<T>(result: Result<T>, status = 200): Response {
   return result.ok ? jsonResponse(status, result.value) : operationError(result.error);
 }
 
-type Handler = (request: Request) => Promise<Response>;
+type Handler = (request: Request, deps: OperationDeps, token: TokenName) => Promise<Response>;
 const METHODS = ["GET", "POST", "PATCH", "DELETE"] as const;
+type Handlers = Partial<Record<(typeof METHODS)[number], Handler>>;
 
-/** Answers `request` with the handler of its method, 405 with `Allow` otherwise. A `HEAD` takes the `GET` handler. */
-function byMethod(request: Request, handlers: Partial<Record<(typeof METHODS)[number], Handler>>) {
-  const requested = request.method === "HEAD" ? "GET" : request.method;
-  const method = METHODS.find((known) => known === requested);
-  const handler = method === undefined ? undefined : handlers[method];
-  if (handler !== undefined) return handler(request);
-  const allow = Object.keys(handlers).flatMap((name) => (name === "GET" ? ["GET", "HEAD"] : [name]));
-  return Promise.resolve(transportError("method_not_allowed", { Allow: allow.join(", ") }));
+/** The methods a route takes, for `Allow`; a `HEAD` takes the `GET` handler. */
+function allowOf(handlers: Handlers): string {
+  return Object.keys(handlers)
+    .flatMap((name) => (name === "GET" ? ["GET", "HEAD"] : [name]))
+    .join(", ");
 }
 
 /** The `meta` JSON and the `file` parts, in order, of a multipart publish body. */
@@ -262,40 +260,55 @@ async function file(
   return new Response(object.value.body, { headers });
 }
 
-/** Routes a request on the API host under `/v1/`, matched on the raw pathname's segments. */
-export function handleRest(request: Request, url: URL, deps: OperationDeps, token: TokenName): Promise<Response> {
+/** The handlers of the route a path under `/v1/` names, matched on the raw pathname's segments; none for no route. */
+function route(url: URL): Handlers | undefined {
   const segments = url.pathname.split("/");
-  if (segments[1] !== "v1" || segments[2] !== "artifacts") return Promise.resolve(notFound());
+  if (segments[1] !== "v1" || segments[2] !== "artifacts") return undefined;
   if (segments.length === 3) {
-    return byMethod(request, {
-      GET: () => list(url, deps),
-      POST: (r) => create(r, deps, token),
-    });
+    return {
+      GET: (_r, deps) => list(url, deps),
+      POST: (r, deps, token) => create(r, deps, token),
+    };
   }
   const id = segments[3] ?? "";
   if (segments.length === 4) {
-    return byMethod(request, {
-      GET: async () => encode(await getArtifact(deps, { id })),
-      PATCH: (r) => patch(r, deps, token, id),
-      DELETE: async () => {
+    return {
+      GET: async (_r, deps) => encode(await getArtifact(deps, { id })),
+      PATCH: (r, deps, token) => patch(r, deps, token, id),
+      DELETE: async (_r, deps, token) => {
         const result = await deleteArtifact(deps, token, { id });
         return result.ok ? new Response(null, { status: 204, headers: API_HEADERS }) : operationError(result.error);
       },
-    });
+    };
   }
-  if (segments[4] !== "versions") return Promise.resolve(notFound());
+  if (segments[4] !== "versions") return undefined;
   if (segments.length === 5) {
-    return byMethod(request, {
-      GET: () => versions(url, deps, id),
-      POST: (r) => update(r, deps, token, id),
-    });
+    return {
+      GET: (_r, deps) => versions(url, deps, id),
+      POST: (r, deps, token) => update(r, deps, token, id),
+    };
   }
   const version = parseVersionNumber(segments[5] ?? "");
-  if (version === undefined) return Promise.resolve(notFound());
-  if (segments.length === 6) {
-    return byMethod(request, { GET: async () => encode(await getArtifact(deps, { id, version })) });
-  }
-  if (segments[6] !== "files" || segments.length < 8) return Promise.resolve(notFound());
+  if (version === undefined) return undefined;
+  if (segments.length === 6) return { GET: async (_r, deps) => encode(await getArtifact(deps, { id, version })) };
+  if (segments[6] !== "files" || segments.length < 8) return undefined;
   const rawPath = segments.slice(7).join("/");
-  return byMethod(request, { GET: (r) => file(r, url, deps, id, version, rawPath) });
+  return { GET: (r, deps) => file(r, url, deps, id, version, rawPath) };
+}
+
+/** The methods the route `url` names takes, for an `OPTIONS` refused before the token (ISO-2); none for no route. */
+export function restAllow(url: URL): string | undefined {
+  const handlers = route(url);
+  return handlers === undefined ? undefined : allowOf(handlers);
+}
+
+/** Routes a request on the API host under `/v1/`: the handler of its method, 405 with `Allow` otherwise. */
+export function handleRest(request: Request, url: URL, deps: OperationDeps, token: TokenName): Promise<Response> {
+  const handlers = route(url);
+  if (handlers === undefined) return Promise.resolve(notFound());
+  const requested = request.method === "HEAD" ? "GET" : request.method;
+  const method = METHODS.find((known) => known === requested);
+  const handler = method === undefined ? undefined : handlers[method];
+  if (handler !== undefined) return handler(request, deps, token);
+  return Promise.resolve(transportError("method_not_allowed", { Allow: allowOf(handlers) }));
 }

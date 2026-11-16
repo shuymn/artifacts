@@ -196,7 +196,7 @@ function testDeps(overrides: Partial<OperationDeps> = {}): OperationDeps {
     now: () => START,
     newId: newArtifactId,
     sleep: async () => {},
-    timeouts: { r2Ms: 2_000, d1ReadMs: 2_000 },
+    timeouts: { r2Ms: 2_000, d1ReadMs: 2_000, kvReadMs: 2_000 },
     ...overrides,
   };
 }
@@ -723,7 +723,7 @@ describe("read_file", () => {
 
   // RES-2: the object fetch and the read of its body each have the R2 timeout; the stream is cancelled.
   it("answers unavailable when the object or its body stalls, and cancels the body", async () => {
-    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000 } });
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
     const id = await published(world, { "a.txt": "abc" });
     const bucket = new BucketProbe();
     world.env = { ...world.env, FILES: bucket.binding };
@@ -758,7 +758,7 @@ describe("read_file", () => {
 
   // RES-2: a get that answers after its timeout is not used, and the body it brings is cancelled.
   it("cancels the body of an object that arrives after the timeout", async () => {
-    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000 } });
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
     const id = await published(world, { "a.txt": "abc" });
     const bucket = new BucketProbe();
     world.env = { ...world.env, FILES: bucket.binding };
