@@ -2,16 +2,27 @@
 // full local sign-in through the Worker, and the replacement of a client's grants on approval (OAUTH-5). Access is
 // stubbed with the test key set as everywhere else; every other step runs through the Worker.
 import { OAuthAuthorizationServer } from "@cloudflare/workers-oauth-provider";
-import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseConfig } from "./config.ts";
-import { formActionOrigin, OWNER } from "./consent.ts";
+import { formActionOrigin } from "./consent.ts";
 import { assetPath } from "./gallery/assets.ts";
 import { proposedPublisher } from "./gallery/pages.ts";
 import { byClass, elements, parseHtml, textOf, type HtmlNode } from "./gallery/test-html.ts";
-import { authorizationServer } from "./oauth.ts";
-import { recordingKv, revocationKey } from "./revocation.ts";
+import { OWNER } from "./grants.ts";
+import {
+  challengeOf,
+  faulty,
+  FORM,
+  helpers,
+  oauthKv,
+  REDIRECT,
+  refresh,
+  REGISTER_URL,
+  tokenRequest,
+  tokensOf,
+  VERIFIER,
+} from "./oauth-test-support.ts";
+import { revocationKey } from "./revocation.ts";
 import {
   API,
   API_HOST,
@@ -21,7 +32,6 @@ import {
   captureLogs,
   clearOAuthStorage,
   CONTENT_SUFFIX,
-  faulty,
   gate,
   logEvents,
   PUBLIC_SUFFIX,
@@ -38,44 +48,14 @@ afterEach(() => {
 });
 
 const AUTHORIZE = `https://${APP_HOST}/oauth/authorize`;
-const TOKEN_URL = `${API}/oauth/token`;
-const REGISTER_URL = `${API}/oauth/register`;
-const REDIRECT = "http://127.0.0.1:33418/callback";
 const MCP = `${API}/mcp`;
 const V1 = `${API}/v1`;
-const VERIFIER = "verifier-0123456789-0123456789-0123456789-0123456789";
-const FORM = { "Content-Type": "application/x-www-form-urlencoded" };
 const ID = "abcdefghijklmnopqrstuvwxyz";
 const CIMD_ID = "https://client.example.org/oauth/client.json";
 
-function oauthKv(): KVNamespace {
-  if (env.OAUTH_KV === undefined) throw new Error("the test configuration binds OAUTH_KV");
-  return env.OAUTH_KV;
-}
-
-function helpers(world: World) {
-  const parsed = parseConfig(world.env);
-  if (!parsed.ok) throw new Error("invalid test configuration");
-  return authorizationServer(parsed.config).getOAuthApi({
-    ...world.env,
-    OAUTH_KV: recordingKv(oauthKv(), () => Date.now()).kv,
-  });
-}
-
-function base64url(bytes: Uint8Array): string {
-  return btoa(String.fromCodePoint(...bytes))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/, "");
-}
-
-async function challengeOf(verifier: string): Promise<string> {
-  return base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-}
-
 type Client = { readonly clientId: string; readonly secret?: string };
 
-/** A client registered through the Worker's DCR endpoint. */
+/** A client registered through the Worker's DCR endpoint, with its secret when it is confidential. */
 async function register(world: World, metadata: Record<string, unknown> = {}): Promise<Client> {
   const response = await world.fetch(REGISTER_URL, {
     method: "POST",
@@ -221,21 +201,6 @@ async function signIn(
   return stringAt(redirectQuery(response), "code");
 }
 
-function tokenRequest(world: World, values: Record<string, string>, headers: Record<string, string> = {}) {
-  return world.fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { ...FORM, ...headers },
-    body: new URLSearchParams(values),
-  });
-}
-
-type Tokens = { access_token: string; refresh_token: string; resource?: string };
-
-async function tokensOf(response: Response): Promise<Tokens> {
-  if (response.status !== 200) throw new Error(`token endpoint answered ${response.status}: ${await response.text()}`);
-  return response.json();
-}
-
 /** The code exchange; a confidential client authenticates with Basic, a public one names itself in the body. */
 const exchange = (world: World, client: Client, code: string, verifier = VERIFIER, redirect = REDIRECT) =>
   tokenRequest(
@@ -249,9 +214,6 @@ const exchange = (world: World, client: Client, code: string, verifier = VERIFIE
     },
     client.secret === undefined ? {} : { Authorization: `Basic ${btoa(`${client.clientId}:${client.secret}`)}` },
   );
-
-const refresh = (world: World, client: Client, refreshToken: string) =>
-  tokenRequest(world, { grant_type: "refresh_token", refresh_token: refreshToken, client_id: client.clientId });
 
 const grantIdOf = (code: string) => code.split(":")[1] ?? "";
 
@@ -815,13 +777,13 @@ describe("the whole sign-in through the Worker", () => {
     const code = stringAt(query, "code");
     // 4. The code exchange, with the verifier.
     const tokens = await tokensOf(await exchange(world, client, code));
-    expect(tokens.resource).toBe(MCP);
+    expect(tokens).toMatchObject({ resource: MCP });
     const unwrapped = await helpers(world).unwrapToken<{ publisher: string }>(tokens.access_token);
     expect(unwrapped?.grant.props).toEqual({ publisher: "gemini-cli" });
     // 5. Refresh, with rotation.
-    const refreshed = await tokensOf(await refresh(world, client, tokens.refresh_token));
+    const refreshed = await tokensOf(await refresh(world, client.clientId, tokens.refresh_token));
     expect(refreshed.refresh_token).not.toBe(tokens.refresh_token);
-    expect(refreshed.resource).toBe(MCP);
+    expect(refreshed).toMatchObject({ resource: MCP });
 
     const grantId = grantIdOf(code);
     const { items } = await helpers(world).listUserGrants(OWNER);
@@ -846,7 +808,7 @@ describe("the whole sign-in through the Worker", () => {
     const allowed = await browser.post({ handle, decision: "approve", publisher: "claude-code" });
     const code = stringAt(redirectQuery(allowed), "code");
     const tokens = await tokensOf(await exchange(world, { clientId: CIMD_ID }, code));
-    expect(tokens.resource).toBe(V1);
+    expect(tokens).toMatchObject({ resource: V1 });
     expect(logEvents(logs.lines)).toEqual([
       { event: "grant.created", publisher: "claude-code", grant: grantIdOf(code), resource: "v1", client: "cimd" },
     ]);
@@ -881,7 +843,7 @@ describe("OAUTH-5: grant replacement on approval", () => {
     expect(await oauthKv().get(revocationKey(replaced))).not.toBeNull();
     expect(logEvents(logs.lines).map((line) => line.event)).toEqual(["grant.revoked", "grant.created"]);
     // The replaced grant's tokens are refused; the new one works.
-    const refused = await refresh(world, first, replacedTokens.refresh_token);
+    const refused = await refresh(world, first.clientId, replacedTokens.refresh_token);
     expect(refused.status).toBe(400);
     expect(await refused.json()).toMatchObject({ error: "invalid_grant" });
     await tokensOf(await exchange(world, first, code));
@@ -968,7 +930,7 @@ describe("OAUTH-5: grant replacement on approval", () => {
     expect(failed.headers.has("Location")).toBe(false);
     world.env = { ...world.env, OAUTH_KV: oauthKv() };
     expect(await grantIds()).toEqual([old]);
-    const refused = await refresh(world, client, oldTokens.refresh_token);
+    const refused = await refresh(world, client.clientId, oldTokens.refresh_token);
     expect(await refused.json()).toEqual({ error: "invalid_grant", error_description: "Grant not found" });
   });
 
@@ -991,7 +953,7 @@ describe("OAUTH-5: grant replacement on approval", () => {
         return held.promise;
       }),
     };
-    const racing = refresh(racingWorld, client, tokens.refresh_token);
+    const racing = refresh(racingWorld, client.clientId, tokens.refresh_token);
     await reached.promise;
     await signIn(browser, client.clientId);
     expect(await oauthKv().get(grantKey)).toBeNull();
@@ -999,7 +961,7 @@ describe("OAUTH-5: grant replacement on approval", () => {
     const raced = await tokensOf(await racing);
     // The library wrote the grant back after its deletion; only the record still refuses it.
     expect(await oauthKv().get(grantKey)).not.toBeNull();
-    const after = await refresh(world, client, raced.refresh_token);
+    const after = await refresh(world, client.clientId, raced.refresh_token);
     expect(after.status).toBe(400);
     expect(await after.json()).toEqual({ error: "invalid_grant", error_description: "Grant not found" });
   });

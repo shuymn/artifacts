@@ -1,5 +1,6 @@
 // OAuth helpers for the Worker's tests: a registered client, an approval through the library's helper standing in for
-// the consent page (a later step), the token requests, and a KV namespace with failures, holds and barriers.
+// the consent page where a test is not about it, the token requests, and a KV namespace with failures, holds and
+// barriers.
 import { OAuthAuthorizationServer } from "@cloudflare/workers-oauth-provider";
 import { env } from "cloudflare:workers";
 
@@ -38,7 +39,7 @@ function base64url(bytes: Uint8Array): string {
     .replace(/=+$/, "");
 }
 
-async function challengeOf(verifier: string): Promise<string> {
+export async function challengeOf(verifier: string): Promise<string> {
   return base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
 }
 

@@ -67,20 +67,23 @@ function helpers(deps: OperationDeps, recording: RecordingKv): OAuthHelpers {
   return authorizationServer(deps.config).getOAuthApi({ OAUTH_KV: recording.kv });
 }
 
-/** Every grant the library's listing holds, a page at a time, each page under the KV-read timeout (RES-2). */
-async function libraryGrants(deps: OperationDeps): Promise<GrantSummary[]> {
-  const library = helpers(deps, recordingKv(oauthKv(deps), deps.now));
+/**
+ * Every grant the library's listing holds, a page at a time, each page under the KV-read timeout (RES-2). The consent
+ * page reads it too, to replace a client's grants on approval.
+ */
+export async function everyGrant(library: OAuthHelpers, kvReadMs: number): Promise<GrantSummary[]> {
   const grants: GrantSummary[] = [];
   let cursor: string | undefined;
   do {
-    const page = await withTimeout(
-      library.listUserGrants(OWNER, cursor === undefined ? {} : { cursor }),
-      deps.timeouts.kvReadMs,
-    );
+    const page = await withTimeout(library.listUserGrants(OWNER, cursor === undefined ? {} : { cursor }), kvReadMs);
     grants.push(...page.items);
     cursor = page.cursor;
   } while (cursor !== undefined);
   return grants;
+}
+
+function libraryGrants(deps: OperationDeps): Promise<GrantSummary[]> {
+  return everyGrant(helpers(deps, recordingKv(oauthKv(deps), deps.now)), deps.timeouts.kvReadMs);
 }
 
 /** A failed or timed-out read of OAuth storage is `unavailable` (section 8); the log carries the class only. */

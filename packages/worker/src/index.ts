@@ -143,7 +143,7 @@ async function authorize(
   }
   const refusal = await refuseWithoutAccess(request, config, deps, "app");
   if (refusal !== undefined) return { response: refusal };
-  return serveConsent(request, url, env, env.OAUTH_KV, config, { now: deps.now, kvReadMs: deps.timeouts.kvReadMs });
+  return serveConsent(request, url, env.OAUTH_KV, config, { now: deps.now, kvReadMs: deps.timeouts.kvReadMs });
 }
 
 /** The Worker's fetch handler; the execution context goes to the OAuth library only, and `cf` is not used. */

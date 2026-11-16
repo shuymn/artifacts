@@ -22,16 +22,14 @@ import {
 import { readBytes } from "./body.ts";
 import type { Config } from "./config.ts";
 import { consentErrorPage, consentPage, proposedPublisher, type ConsentErrorKind } from "./gallery/pages.ts";
+import { everyGrant, OWNER, type GrantMetadata } from "./grants.ts";
 import { apiOrigin } from "./hosts.ts";
 import { errorName, logEvent } from "./log.ts";
 import { authorizationServer, OAUTH_ERROR_CODES, type OAuthErrorCode } from "./oauth.ts";
 import { grantOf, isGrantId, recordingKv, type RecordingKv } from "./revocation.ts";
 import { browserHeaders } from "./serve.ts";
-import { TimeoutError, withTimeout } from "./timeout.ts";
+import { TimeoutError } from "./timeout.ts";
 import { isTokenName } from "./tokens.ts";
-
-/** The user ID of every grant: the Access policy is the one place that names the owner. */
-export const OWNER = "owner";
 
 /** RES-1: the consent form holds a handle, a decision and a publisher name, well under 1 KiB. */
 const CONSENT_FORM_BYTES = 4 * 1024;
@@ -252,17 +250,10 @@ async function replaceGrants(
   cimd: boolean,
   kvReadMs: number,
 ): Promise<void> {
-  const replaced: string[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await withTimeout(helpers.listUserGrants(OWNER, cursor === undefined ? {} : { cursor }), kvReadMs);
-    for (const grant of page.items) {
-      if (grant.clientId !== request.clientId || grant.resource !== request.resource) continue;
-      if (cimd && grant.redirectUri !== request.redirectUri) continue;
-      replaced.push(grant.id);
-    }
-    cursor = page.cursor;
-  } while (cursor !== undefined);
+  const replaced = (await everyGrant(helpers, kvReadMs))
+    .filter((grant) => grant.clientId === request.clientId && grant.resource === request.resource)
+    .filter((grant) => !cimd || grant.redirectUri === request.redirectUri)
+    .map((grant) => grant.id);
   for (const id of replaced) {
     try {
       await helpers.revokeGrant(id, OWNER);
@@ -320,15 +311,16 @@ async function decide(
   const cimd = description.clientDomain !== undefined;
   await replaceGrants(helpers, approved.request, cimd, deps.kvReadMs);
   const resource = resourceOf(approved.request.resource, config);
+  // For listing grants (design.md section 8); the library describes a client without a name by its client ID.
+  const metadata: GrantMetadata = {
+    publisher,
+    clientName: description.clientName === approved.request.clientId ? null : description.clientName,
+    redirectHost: description.redirectHost,
+  };
   const { redirectTo } = await helpers.completeAuthorization({
     request: approved.request,
     userId: OWNER,
-    // For listing grants (design.md section 8); the library describes a client without a name by its client ID.
-    metadata: {
-      publisher,
-      clientName: description.clientName === approved.request.clientId ? null : description.clientName,
-      redirectHost: description.redirectHost,
-    },
+    metadata,
     // No scopes are checked: a grant records the ones the client asked for.
     scope: approved.request.scope,
     props: { publisher },
@@ -354,14 +346,13 @@ async function decide(
 export async function serveConsent(
   request: Request,
   url: URL,
-  env: Env,
   kv: KVNamespace,
   config: Config,
   deps: ConsentDeps,
 ): Promise<ConsentAnswer> {
   const recording: RecordingKv = recordingKv(kv, deps.now);
   try {
-    const helpers = authorizationServer(config).getOAuthApi({ ...env, OAUTH_KV: recording.kv });
+    const helpers = authorizationServer(config).getOAuthApi({ OAUTH_KV: recording.kv });
     return request.method === "POST"
       ? await decide(request, helpers, config, deps)
       : await begin(request, url, helpers, config);
