@@ -121,7 +121,21 @@ export async function uploadObjects(
 }
 
 export async function getObject(store: ObjectStore, id: ArtifactId, sha256: string): Promise<R2ObjectBody> {
-  const object = await call(store, () => store.bucket.get(objectKey(id, sha256)));
+  let pending: Promise<R2ObjectBody | null> | undefined;
+  let object: R2ObjectBody | null;
+  try {
+    object = await call(store, () => {
+      pending = store.bucket.get(objectKey(id, sha256));
+      return pending;
+    });
+  } catch (error) {
+    // A get that answers after its timeout is not used: its body is cancelled, so no stream is left open.
+    void pending?.then(
+      (late) => late?.body.cancel().catch(() => {}),
+      () => {},
+    );
+    throw error;
+  }
   if (object === null) throw new StorageError("object_missing");
   return object;
 }

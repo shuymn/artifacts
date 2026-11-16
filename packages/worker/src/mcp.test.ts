@@ -733,6 +733,32 @@ describe("read_file", () => {
     expect(cancelled).toBe(true);
   });
 
+  // RES-2: a get that answers after its timeout is not used, and the body it brings is cancelled.
+  it("cancels the body of an object that arrives after the timeout", async () => {
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000 } });
+    const id = await published(world, { "a.txt": "abc" });
+    const bucket = new BucketProbe();
+    world.env = { ...world.env, FILES: bucket.binding };
+    const client = await mcpClient(world);
+    const cancelled = Promise.withResolvers<void>();
+    const late = new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({ body: new ReadableStream<Uint8Array>({ cancel: () => cancelled.resolve() }) });
+      }, 150);
+    });
+    bucket.behave = (op) => (op === "get" ? late : undefined);
+    expect(await callTool(client, "read_file", { id, version: 1, path: "a.txt" })).toMatchObject({
+      ok: false,
+      value: { error: { code: "unavailable" } },
+    });
+    await late;
+    const outcome = await Promise.race([
+      cancelled.promise.then(() => "cancelled"),
+      new Promise((resolve) => setTimeout(() => resolve("left open"), 500)),
+    ]);
+    expect(outcome).toBe("cancelled");
+  });
+
   it("answers internal when the body holds other bytes than its stored size", async () => {
     const world = new World();
     const id = await published(world, { "a.txt": "abc" });
