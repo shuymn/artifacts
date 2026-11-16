@@ -1,7 +1,7 @@
 // The templates produce the reference pages' markup (docs/gallery/design.md: the reference pages are "the markup the
 // Worker's templates must produce"). Each page is rendered from the data its reference page shows and compared element
-// by element: tag, classes and every attribute but `href` and `datetime`. Text is compared separately, so a change of
-// copy or format shows on its own.
+// by element: tag, every attribute (links and times included) and the element's own text. Only the differences that
+// are on purpose are rewritten first: the stylesheet links and the placeholder cursors.
 import { describe, expect, it } from "vitest";
 
 import archivedHtml from "../../../../docs/gallery/reference/archived.html?raw";
@@ -9,7 +9,7 @@ import artifactHtml from "../../../../docs/gallery/reference/artifact.html?raw";
 import indexHtml from "../../../../docs/gallery/reference/index.html?raw";
 import type { ArtifactJson, GalleryArtifact, GalleryList, ListedArtifact, VersionJson } from "../operations.ts";
 import { artifactPage, listPage, type Chrome } from "./pages.ts";
-import { elements, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
+import { decodeEntities, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
 
 /** The time the reference pages' relative times count from: "2 hours ago" for 09:12. */
 const CHROME: Chrome = {
@@ -202,41 +202,84 @@ const ARTIFACT: GalleryArtifact = {
   },
 };
 
-/** What the structure comparison sees of an element: its tag, its classes, and its other attributes but links and times. */
-type Shape = { tag: string; attributes: Record<string, string>; children: Shape[] };
+/** The reference pages load Google Fonts and the repository's gallery.css; the Worker serves both itself. */
+const STYLESHEETS = new Map([
+  [
+    "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap",
+    "/assets/fonts.css",
+  ],
+  ["../../../packages/worker/src/gallery/gallery.css", "/assets/gallery.css"],
+]);
 
-function shape(node: HtmlNode): Shape {
+/**
+ * What the comparison sees of an element: its tag, its attributes (classes sorted), its own text runs (whitespace
+ * collapsed, entities decoded) and its child elements. `hrefs` rewrites the links that differ on purpose.
+ */
+type Shape = { tag: string; attributes: Record<string, string>; text: string[]; children: Shape[] };
+
+function shape(node: HtmlNode, hrefs: ReadonlyMap<string, string>): Shape {
   const attributes: Record<string, string> = {};
   for (const [name, value] of [...node.attributes].toSorted(([a], [b]) => a.localeCompare(b))) {
-    if (name === "href" || name === "datetime") continue;
-    attributes[name] = name === "class" ? value.split(/\s+/).toSorted().join(" ") : value;
+    if (name === "class") attributes[name] = value.split(/\s+/).toSorted().join(" ");
+    else if (name === "href") attributes[name] = hrefs.get(value) ?? value;
+    else attributes[name] = value;
   }
-  return { tag: node.tag, attributes, children: node.children.filter((child) => child.tag !== "#text").map(shape) };
+  const text: string[] = [];
+  let run = "";
+  const flush = () => {
+    const collapsed = decodeEntities(run).replace(/\s+/g, " ").trim();
+    if (collapsed !== "") text.push(collapsed);
+    run = "";
+  };
+  const children: Shape[] = [];
+  for (const child of node.children) {
+    if (child.tag === "#text") {
+      run += child.text;
+      continue;
+    }
+    flush();
+    children.push(shape(child, hrefs));
+  }
+  flush();
+  return { tag: node.tag, attributes, text, children };
 }
 
+/**
+ * Each page with its reference and the hrefs that differ on purpose: the reference's placeholder cursors (`…`) are the
+ * data's cursors here, and the version pager also lands on the version history (`#versions`). The data uses the
+ * reference's IDs and origins, and CHROME.now makes the relative times the reference's, so nothing else is rewritten.
+ */
 const PAGES = [
-  ["index.html", indexHtml, () => listPage(CHROME, "active", INDEX)],
-  ["archived.html", archivedHtml, () => listPage(CHROME, "archived", ARCHIVED)],
-  ["artifact.html", artifactHtml, () => artifactPage(CHROME, ARTIFACT)],
+  ["index.html", indexHtml, () => listPage(CHROME, "active", INDEX), [[`?cursor=${INDEX.next_cursor}`, "?cursor=…"]]],
+  [
+    "archived.html",
+    archivedHtml,
+    () => listPage(CHROME, "archived", ARCHIVED),
+    [[`?cursor=${ARCHIVED.next_cursor}`, "?cursor=…"]],
+  ],
+  [
+    "artifact.html",
+    artifactHtml,
+    () => artifactPage(CHROME, ARTIFACT),
+    [[`?versions_cursor=${ARTIFACT.versions.next_cursor}#versions`, "?versions_cursor=…"]],
+  ],
 ] as const;
 
 describe("templates and reference pages", () => {
-  it.each(PAGES)("renders the elements, classes and attributes of %s", async (_name, reference, render) => {
+  it.each(PAGES)("renders the elements, attributes and text of %s", async (_name, reference, render, cursors) => {
     const [want, got] = await Promise.all([parseHtml(reference), parseHtml(render().text)]);
     // The parse keeps nesting: the document is one `html` element with `head` and `body`, not a flat list.
-    expect(shape(want).children.map((html) => html.children.map((child) => child.tag))).toEqual([["head", "body"]]);
-    expect(shape(got)).toEqual(shape(want));
+    expect(shape(want, STYLESHEETS).children.map((html) => html.children.map((child) => child.tag))).toEqual([
+      ["head", "body"],
+    ]);
+    expect(shape(got, new Map(cursors))).toEqual(shape(want, STYLESHEETS));
   });
 
-  it.each(PAGES)("renders the text of %s", async (_name, reference, render) => {
-    const [want, got] = await Promise.all([parseHtml(reference), parseHtml(render().text)]);
-    // The stylesheet links differ by design (the reference loads Google Fonts); everything else is compared.
-    expect(textOf(got)).toEqual(textOf(want));
-  });
-
-  it("links to the gallery's own stylesheets, fonts first", async () => {
-    const page = await parseHtml(listPage(CHROME, "active", INDEX).text);
-    const links = elements(page).filter((element) => element.tag === "link");
-    expect(links.map((link) => link.attributes.get("href"))).toEqual(["/assets/fonts.css", "/assets/gallery.css"]);
-  });
+  it.each(PAGES)(
+    "renders the text of %s as a reader sees it, spaces between elements included",
+    async (_name, reference, render) => {
+      const [want, got] = await Promise.all([parseHtml(reference), parseHtml(render().text)]);
+      expect(textOf(got)).toEqual(textOf(want));
+    },
+  );
 });
