@@ -297,9 +297,21 @@ artifacts grants                                    # id, publisher, client, red
 artifacts revoke <grant>                            # one grant and its tokens
 ```
 
-- **Sign a client out:** `artifacts logout` for the CLI; `claude mcp logout artifacts` for Claude Code, which revokes
-  at the server ([MCP](https://code.claude.com/docs/en/mcp)). Removing a server from a client's configuration only
-  forgets its tokens: revoke its grant here as well.
+Until the CLI has these commands (design.md, "OAuth delivery", step 8), the same through REST, with an API token in
+`TOKEN`:
+
+```sh
+API=https://artifacts-api.example.com
+curl -s "$API/v1/grants" -H "Authorization: Bearer $TOKEN" | jq '.grants[] | {id, publisher, client_name, redirect_host}'
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE "$API/v1/grants/<grant>" -H "Authorization: Bearer $TOKEN"
+```
+
+- **Revocation is final** once it answers 204. A 503 may have revoked part: run it again until it answers 204, or 404
+  when the earlier call had finished after all.
+- **Sign a client out:** `artifacts logout` for the CLI, which revokes its grant as above. `claude mcp logout
+  artifacts` revokes at the server ([MCP](https://code.claude.com/docs/en/mcp)) through RFC 7009, which a refresh of
+  the same grant at that moment can undo (design.md section 7): for a client whose tokens may have leaked, revoke its
+  grant here. Removing a server from a client's configuration only forgets its tokens: revoke its grant here as well.
 - **A grant expires** after 30 days without a refresh; a client in use refreshes it. Signing a client in again
   replaces its grant only when it returns with the same client and redirect URI: Claude Code and Codex pick a new
   loopback port each time, so revoke the grant they leave behind.
@@ -404,7 +416,9 @@ artifacts login                                     # opens the consent page; st
    variable and in `wrangler.deploy.jsonc` if you keep one. Without it the deploy stops at the values check, and the
    previous release keeps serving.
 2. After the release that accepts OAuth tokens deploys: run checks 9 to 13 of section 7, then move each client to OAuth
-   (section 5) and its API token out of `API_TOKENS`.
+   (section 5) and its API token out of `API_TOKENS`. From this release a token of the form `<a>:<b>:<c>`, which only
+   a token made by hand can have, is read as an OAuth token and refused (design.md section 7): replace it with one
+   from `artifacts token`.
 3. Once no client needs one, turn API tokens off (section 4) and run check 15, or keep one for automation.
 
 ### Restrict pushes to `release`
@@ -533,7 +547,7 @@ CLI signs in, and 15 when API tokens are turned off.
    Pass: `issuer` is `$API`, `authorization_endpoint` `https://artifacts.example.com/oauth/authorize`,
    `client_id_metadata_document_supported` `true`, `["S256"]`; the resource is `$API/mcp` with `["$API"]`; the
    `POST` answers 401 with `Bearer resource_metadata="$API/.well-known/oauth-protected-resource/mcp"`; no
-   `access-control-*` header (`0`); the public host answers `404`.
+   `access-control-*` header (`0`); the public host answers `404`, as for any path the probe lacks.
 
 10. **Real clients** (AC-14, AC-15). Sign in Claude Code, Codex CLI, claude.ai and Gemini CLI (section 5). Pass: each
     consent page names the client, with `claude.ai` or `chatgpt.com` as the domain of a CIMD client and "registered
@@ -550,19 +564,37 @@ CLI signs in, and 15 when API tokens are turned off.
     gallery; its `artifact.created` line carries that name and the grant's ID, and `grant.created` names the same
     grant. A search of the logs for `owner:`, the start of every OAuth token, finds nothing.
 
-13. **Revocation** (AC-20). `artifacts grants`, then `artifacts revoke <grant>` for Claude Code's grant, then a tool
-    call every 10 s. Pass: refused within 5 minutes, after which `/mcp` asks to sign in again; note the delay.
+13. **Revocation** (AC-20). List the grants and revoke Claude Code's with the check token, as section 4 shows
+    (`artifacts grants` and `artifacts revoke <grant>` once the CLI has them), then have Claude Code call a tool every
+    10 s. Pass: the `DELETE` answers `204`; the calls are refused within 5 minutes, this project's threshold, since
+    Cloudflare documents no bound on KV's propagation; afterwards `/mcp` asks to sign in again, and the grant stays out
+    of the listing. Note the delay.
 
 14. **The CLI's sign-in** (AC-16). `artifacts login`; `ls -l ~/.config/artifacts/credentials.json` shows
-    `-rw-------`; `artifacts list` works without `ARTIFACTS_TOKEN`; more than an hour later, two
-    `artifacts publish --id "$ID" ./probe` at once both succeed; `artifacts logout`; `artifacts list` fails, naming
-    `artifacts login`.
+    `-rw-------`; `artifacts list` works without `ARTIFACTS_TOKEN`. Publish a second probe, so the two publishes below
+    cannot conflict:
+
+    ```sh
+    mkdir -p probe2 && echo '<p>probe 2</p>' > probe2/index.html
+    ID2=$(artifacts publish ./probe2 --title probe2 --json | jq -r .artifact.id)
+    ```
+
+    More than an hour later, when the stored access token has expired, start both publishes from one command line, so
+    both read the expired token before either refreshes:
+
+    ```sh
+    artifacts publish --id "$ID" ./probe & artifacts publish --id "$ID2" ./probe2 & wait
+    ```
+
+    Pass: both print a new version; another hour later `artifacts list` still works without signing in again, so the
+    file kept the token the server holds. Then `artifacts logout`; `artifacts list` fails, naming `artifacts login`;
+    the grant listing (section 4) no longer shows the CLI's grant.
 
 15. **API tokens off** (AC-18). The `curl` of section 5 with the check token answers 401, and a signed-in client still
     works.
 
-Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"`, revoke the check token, and revoke the grants made only
-for the checks.
+Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"` (and `"$ID2"` after check 14), revoke the check token,
+and revoke the grants made only for the checks.
 
 ## 8. Backups and restore
 
