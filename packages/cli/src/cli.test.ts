@@ -68,6 +68,10 @@ const oneFile: Fetch = async (input) =>
     ? new Response("x")
     : json(200, { artifact: artifact(ID), version: version([{ path: "index.html", body: "x" }]) });
 
+/** `oneFile`, except that a POST gets no answer. */
+const postLost: Fetch = async (input, init) =>
+  init.method === "POST" ? Promise.reject(new TypeError("fetch failed")) : oneFile(input, init);
+
 /** A listing whose every page names the same next cursor; past ten pages it stops answering, so a loop ends. */
 function looping(): Fetch {
   let pages = 0;
@@ -293,6 +297,19 @@ function api(post: (response: Parameters<RequestListener>[1]) => void) {
   };
   return { seen, handler };
 }
+
+describe("an update whose answer is lost", () => {
+  it("advises checking the latest version before publishing again", async () => {
+    const root = await tempDir();
+    await writeTree(root, { "index.html": "new" });
+    const { status, stderr } = await cli(["publish", root, "--id", ID], { env: ENV, fetch: postLost });
+    expect(status).toBe(1);
+    expect(stderr).toBe(
+      "artifacts: the update got no answer; it may have applied. Check the latest version with " +
+        `\`artifacts get ${ID}\` before publishing again (this publish read version 1)\n`,
+    );
+  });
+});
 
 describe("a create answered with a broken body", () => {
   it("treats a 201 whose connection drops mid-body as lost, and lists before creating again", async () => {

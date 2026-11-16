@@ -201,9 +201,10 @@ export async function update(api: Api, files: readonly LocalFile[], options: Upd
       );
     }
     if (isLost(error)) {
+      // A rerun reads the latest version again, so it would not notice that this update applied.
       throw new CliError(
-        `the update got no answer; it may have applied. Publishing again answers version_conflict if it did ` +
-          `(base version ${baseVersion})`,
+        "the update got no answer; it may have applied. Check the latest version with " +
+          `\`artifacts get ${options.id}\` before publishing again (this publish read version ${baseVersion})`,
       );
     }
     throw error;
