@@ -1,7 +1,16 @@
 pre-commit:
   commands:
+    # Runs first, so that the secret scan below reads the staged design files without Pencil's fileToken. It rewrites
+    # the staged copies only; the working files keep the member. So no job with `stage_fixed` may take `.pen` files:
+    # lefthook stages the working copies of its files after the last job, which would put the member back unscanned.
+    pen-file-token:
+      glob: "*.pen"
+      run: mise exec -- node scripts/strip-pen-file-token.mjs {staged_files}
+      priority: 1
     oxfmt:
       run: pnpm exec oxfmt --no-error-on-unmatched-pattern {staged_files}
+      exclude:
+        - "*.pen"
       stage_fixed: true
     oxlint:
       glob: "*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"

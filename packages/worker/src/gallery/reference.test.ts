@@ -1,12 +1,14 @@
 // The templates produce the reference pages' markup (docs/gallery/design.md: the reference pages are "the markup the
 // Worker's templates must produce"). Each page is rendered from the data its reference page shows and compared element
 // by element: tag, every attribute (links and times included) and the element's own text. Only the differences that
-// are on purpose are rewritten first: the stylesheet and icon links, the font preloads and the placeholder cursors.
+// are on purpose are rewritten first: the stylesheet and icon links, the font preloads, the placeholder cursors and the
+// version.
 import { describe, expect, it } from "vitest";
 
 import archivedHtml from "../../../../docs/gallery/reference/archived.html?raw";
 import artifactHtml from "../../../../docs/gallery/reference/artifact.html?raw";
 import indexHtml from "../../../../docs/gallery/reference/index.html?raw";
+import rootPackage from "../../../../package.json" with { type: "json" };
 import type { ArtifactJson, GalleryArtifact, GalleryList, ListedArtifact, VersionJson } from "../operations.ts";
 import { assetPath } from "./assets.ts";
 import { artifactPage, listPage, type Chrome } from "./pages.ts";
@@ -204,8 +206,8 @@ const ARTIFACT: GalleryArtifact = {
 };
 
 /**
- * The reference pages load Google Fonts and the repository's gallery.css and icons; the Worker serves them itself, at
- * their fingerprinted paths.
+ * The reference pages load Google Fonts and the repository's gallery.css and icons, and show the icon from the
+ * repository; the Worker serves them itself, at their fingerprinted paths.
  */
 const ASSET_LINKS = new Map([
   [
@@ -225,23 +227,36 @@ function withoutPreloads(node: HtmlNode): HtmlNode {
 }
 
 /**
+ * The reference pages show the version they were drawn with; the Worker shows the root package's, which every release
+ * changes.
+ */
+const REFERENCE_VERSION = "v0.3.0";
+const VERSION = `v${rootPackage.version}`;
+const VERSIONS = new Map([[VERSION, REFERENCE_VERSION]]);
+
+/**
  * What the comparison sees of an element: its tag, its attributes (classes sorted), its own text runs (whitespace
- * collapsed, entities decoded) and its child elements. `hrefs` rewrites the links that differ on purpose.
+ * collapsed, entities decoded) and its child elements. `urls` rewrites the `href`s and `src`s that differ on purpose,
+ * `texts` the text runs.
  */
 type Shape = { tag: string; attributes: Record<string, string>; text: string[]; children: Shape[] };
 
-function shape(node: HtmlNode, hrefs: ReadonlyMap<string, string>): Shape {
+function shape(
+  node: HtmlNode,
+  urls: ReadonlyMap<string, string>,
+  texts: ReadonlyMap<string, string> = new Map(),
+): Shape {
   const attributes: Record<string, string> = {};
   for (const [name, value] of [...node.attributes].toSorted(([a], [b]) => a.localeCompare(b))) {
     if (name === "class") attributes[name] = value.split(/\s+/).toSorted().join(" ");
-    else if (name === "href") attributes[name] = hrefs.get(value) ?? value;
+    else if (name === "href" || name === "src") attributes[name] = urls.get(value) ?? value;
     else attributes[name] = value;
   }
   const text: string[] = [];
   let run = "";
   const flush = () => {
     const collapsed = decodeEntities(run).replace(/\s+/g, " ").trim();
-    if (collapsed !== "") text.push(collapsed);
+    if (collapsed !== "") text.push(texts.get(collapsed) ?? collapsed);
     run = "";
   };
   const children: Shape[] = [];
@@ -251,7 +266,7 @@ function shape(node: HtmlNode, hrefs: ReadonlyMap<string, string>): Shape {
       continue;
     }
     flush();
-    children.push(shape(child, hrefs));
+    children.push(shape(child, urls, texts));
   }
   flush();
   return { tag: node.tag, attributes, text, children };
@@ -285,14 +300,14 @@ describe("templates and reference pages", () => {
     expect(shape(want, ASSET_LINKS).children.map((html) => html.children.map((child) => child.tag))).toEqual([
       ["head", "body"],
     ]);
-    expect(shape(withoutPreloads(got), new Map(cursors))).toEqual(shape(want, ASSET_LINKS));
+    expect(shape(withoutPreloads(got), new Map(cursors), VERSIONS)).toEqual(shape(want, ASSET_LINKS));
   });
 
   it.each(PAGES)(
     "renders the text of %s as a reader sees it, spaces between elements included",
     async (_name, reference, render) => {
       const [want, got] = await Promise.all([parseHtml(reference), parseHtml(render().text)]);
-      expect(textOf(got)).toEqual(textOf(want));
+      expect(textOf(got).replace(VERSION, REFERENCE_VERSION)).toEqual(textOf(want));
     },
   );
 });

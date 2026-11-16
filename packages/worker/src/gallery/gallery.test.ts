@@ -2,6 +2,7 @@
 // headers of every response and the escaping of artifact text.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import rootPackage from "../../../../package.json" with { type: "json" };
 import { AccessVerifier, type AccessOutcome } from "../access.ts";
 import { newArtifactId } from "../id.ts";
 import { createWorker } from "../index.ts";
@@ -104,6 +105,9 @@ const tableOf = (doc: HtmlNode, id: string) => {
         .map(textOf),
     );
 };
+
+/** An element's tag and attributes. */
+const attributesOf = (node: HtmlNode) => ({ tag: node.tag, ...Object.fromEntries(node.attributes) });
 
 const navOf = (doc: HtmlNode) =>
   byClass(doc, "nav-tab").map((tab) => ({ text: textOf(tab), current: tab.attributes.get("aria-current") ?? null }));
@@ -421,7 +425,11 @@ describe("ISO-5: escaping artifact text", () => {
 
   function expectInert(doc: HtmlNode) {
     const found = elements(doc);
-    expect(found.map((node) => node.tag).filter((tag) => !ALLOWED.has(tag))).toEqual([]);
+    // The one image is the header's icon: an image from artifact text would be a second.
+    expect(found.filter((node) => node.tag === "img").map((node) => node.attributes.get("src"))).toEqual([
+      assetPath("icon.svg"),
+    ]);
+    expect(found.map((node) => node.tag).filter((tag) => tag !== "img" && !ALLOWED.has(tag))).toEqual([]);
     expect(found.flatMap((node) => [...node.attributes.keys()]).filter((name) => name.startsWith("on"))).toEqual([]);
   }
 
@@ -647,6 +655,31 @@ describe("docs/gallery/design.md: stylesheets, fonts and icon", () => {
         { rel: "icon", href: "/favicon.ico", sizes: "32x32" },
         { rel: "icon", href: assetPath("icon.svg"), type: "image/svg+xml" },
       ]);
+    }
+  });
+
+  it("shows the icon and the wordmark in one link home, then the release version, in every page's header", async () => {
+    const world = new World();
+    const id = await create(world, "Page");
+    for (const path of ["/", "/archived", `/a/${id}`]) {
+      const brand = one(byClass(one(byClass(await page(world, path), "site-header")), "brand"));
+      const [link = one([]), version = one([]), ...rest] = brand.children.filter((child) => child.tag !== "#text");
+      expect(rest).toEqual([]);
+      expect({ ...attributesOf(link), text: textOf(link) }).toEqual({
+        tag: "a",
+        class: "brand__link",
+        href: "/",
+        text: "artifacts",
+      });
+      // The icon at its fingerprinted path, sized before it loads, and named by the link's text rather than its own.
+      expect(elements(link).map(attributesOf)).toEqual([
+        { tag: "img", class: "brand__icon", src: assetPath("icon.svg"), alt: "", width: "16", height: "16" },
+      ]);
+      expect({ ...attributesOf(version), text: textOf(version) }).toEqual({
+        tag: "span",
+        class: "brand__version",
+        text: `v${rootPackage.version}`,
+      });
     }
   });
 

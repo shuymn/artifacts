@@ -1,0 +1,2307 @@
+{
+  "version": "2.22",
+  "children": [
+    {
+      "type": "frame",
+      "id": "jp7v1",
+      "x": 0,
+      "y": 0,
+      "name": "Typography",
+      "fill": "$color.bg",
+      "layout": "vertical",
+      "gap": "$space.4",
+      "padding": "$space.7",
+      "children": [
+        {
+          "type": "text",
+          "id": "uEfLU",
+          "name": "Board title",
+          "fill": "$color.text-muted",
+          "content": "Typography: one reusable text per type.* token",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.mono",
+          "fontSize": "$font.size.xs",
+          "fontWeight": "$font.weight.regular"
+        },
+        {
+          "type": "text",
+          "id": "ksPem",
+          "name": "type.page-title",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.page-title",
+          "lineHeight": 1.25,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.xl",
+          "fontWeight": "$font.weight.semibold"
+        },
+        {
+          "type": "text",
+          "id": "koMgf",
+          "name": "type.section-title",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.section-title",
+          "lineHeight": 1.25,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.lg",
+          "fontWeight": "$font.weight.semibold"
+        },
+        {
+          "type": "text",
+          "id": "ZPnIY",
+          "name": "type.row-title",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.row-title",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.lg",
+          "fontWeight": "$font.weight.semibold"
+        },
+        {
+          "type": "text",
+          "id": "xBEXT",
+          "name": "type.body",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.body",
+          "lineHeight": 1.5,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.md",
+          "fontWeight": "$font.weight.regular"
+        },
+        {
+          "type": "text",
+          "id": "pnwzV",
+          "name": "type.body-sm",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.body-sm",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.sm",
+          "fontWeight": "$font.weight.regular"
+        },
+        {
+          "type": "text",
+          "id": "ULCeS",
+          "name": "type.link",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.link",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.sm",
+          "fontWeight": "$font.weight.medium"
+        },
+        {
+          "type": "text",
+          "id": "H6Vu7p",
+          "name": "type.nav",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.nav",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.md",
+          "fontWeight": "$font.weight.regular"
+        },
+        {
+          "type": "text",
+          "id": "L5QrYm",
+          "name": "type.nav-current",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.nav-current",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.md",
+          "fontWeight": "$font.weight.semibold"
+        },
+        {
+          "type": "text",
+          "id": "E8AuAJ",
+          "name": "type.label",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.label",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.sans",
+          "fontSize": "$font.size.xs",
+          "fontWeight": "$font.weight.medium"
+        },
+        {
+          "type": "text",
+          "id": "XeCAN",
+          "name": "type.meta",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.meta",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.mono",
+          "fontSize": "$font.size.xs",
+          "fontWeight": "$font.weight.regular"
+        },
+        {
+          "type": "text",
+          "id": "qE94S",
+          "name": "type.code",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.code",
+          "lineHeight": 1.4,
+          "fontFamily": "$font.family.mono",
+          "fontSize": "$font.size.sm",
+          "fontWeight": "$font.weight.regular"
+        },
+        {
+          "type": "text",
+          "id": "bTsuV",
+          "name": "type.brand",
+          "reusable": true,
+          "fill": "$color.text",
+          "content": "type.brand",
+          "lineHeight": 1.25,
+          "fontFamily": "$font.family.mono",
+          "fontSize": "$font.size.lg",
+          "fontWeight": "$font.weight.semibold"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "V1Gmk",
+      "x": 476,
+      "y": 0,
+      "name": "Components",
+      "fill": "$color.bg",
+      "layout": "vertical",
+      "gap": "$space.8",
+      "padding": "$space.7",
+      "children": [
+        {
+          "type": "frame",
+          "id": "V2bgV",
+          "name": "badge",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "k7XOTE",
+              "name": "badge/kind=public",
+              "reusable": true,
+              "fill": "$color.badge.public.bg",
+              "cornerRadius": "$radius.pill",
+              "padding": [
+                "$space.0-5",
+                "$space.2"
+              ],
+              "children": [
+                {
+                  "id": "ZjGlV",
+                  "type": "ref",
+                  "ref": "E8AuAJ",
+                  "name": "Label",
+                  "content": "Public",
+                  "fill": "$color.badge.public.fg"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "uI6XR",
+              "name": "badge/kind=archived",
+              "reusable": true,
+              "fill": "$color.badge.neutral.bg",
+              "cornerRadius": "$radius.pill",
+              "padding": [
+                "$space.0-5",
+                "$space.2"
+              ],
+              "children": [
+                {
+                  "id": "JeWpL",
+                  "type": "ref",
+                  "ref": "E8AuAJ",
+                  "name": "Label",
+                  "content": "Archived",
+                  "fill": "$color.badge.neutral.fg"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "XbSpc",
+              "name": "badge/kind=latest",
+              "reusable": true,
+              "fill": "$color.badge.neutral.bg",
+              "cornerRadius": "$radius.pill",
+              "padding": [
+                "$space.0-5",
+                "$space.2"
+              ],
+              "children": [
+                {
+                  "id": "H6DQrl",
+                  "type": "ref",
+                  "ref": "E8AuAJ",
+                  "name": "Label",
+                  "content": "Latest",
+                  "fill": "$color.badge.neutral.fg"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "xspvF",
+          "name": "nav-tab",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "n2c13S",
+              "name": "nav-tab/state=default",
+              "reusable": true,
+              "cornerRadius": "$radius.sm",
+              "gap": "$space.2",
+              "padding": [
+                "$space.1",
+                "$space.3"
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "KIcnd",
+                  "type": "ref",
+                  "ref": "H6Vu7p",
+                  "name": "Label",
+                  "content": "Active",
+                  "fill": "$color.text-muted"
+                },
+                {
+                  "id": "l0AmTr",
+                  "type": "ref",
+                  "ref": "XeCAN",
+                  "name": "Count",
+                  "content": "24",
+                  "fill": "$color.text-muted"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "mBii0",
+              "name": "nav-tab/state=current",
+              "reusable": true,
+              "fill": "$color.surface",
+              "cornerRadius": "$radius.sm",
+              "stroke": "$color.border",
+              "strokeWidth": "$border.width",
+              "strokeAlignment": "inner",
+              "gap": "$space.2",
+              "padding": [
+                "$space.1",
+                "$space.3"
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "FYq93",
+                  "type": "ref",
+                  "ref": "L5QrYm",
+                  "name": "Label",
+                  "content": "Active",
+                  "fill": "$color.text"
+                },
+                {
+                  "id": "BuuJw",
+                  "type": "ref",
+                  "ref": "XeCAN",
+                  "name": "Count",
+                  "content": "24",
+                  "fill": "$color.text-muted"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "GNoOu",
+          "name": "back-link",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "tgq32",
+              "name": "back-link",
+              "reusable": true,
+              "children": [
+                {
+                  "id": "xqd31",
+                  "type": "ref",
+                  "ref": "ULCeS",
+                  "name": "Label",
+                  "content": "← Artifacts",
+                  "fill": "$color.accent"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "A0c7A",
+          "name": "pager",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "H8Z06b",
+              "name": "pager",
+              "reusable": true,
+              "width": 960,
+              "justifyContent": "end",
+              "children": [
+                {
+                  "id": "dLH6Z",
+                  "type": "ref",
+                  "ref": "ULCeS",
+                  "name": "Label",
+                  "content": "Older →",
+                  "fill": "$color.accent"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "yS8LK",
+          "name": "section-heading",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "q8UpY",
+              "name": "section-heading",
+              "reusable": true,
+              "gap": "$space.2",
+              "alignItems": "end",
+              "children": [
+                {
+                  "id": "ZUzhM",
+                  "type": "ref",
+                  "ref": "koMgf",
+                  "name": "Title",
+                  "content": "Versions",
+                  "fill": "$color.text"
+                },
+                {
+                  "id": "oXvHc",
+                  "type": "ref",
+                  "ref": "XeCAN",
+                  "name": "Count",
+                  "content": "3",
+                  "fill": "$color.text-muted"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "t8cisB",
+          "name": "site-header",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "z6iAY",
+              "name": "site-header",
+              "reusable": true,
+              "width": 1280,
+              "fill": "$color.bg",
+              "stroke": "$color.border",
+              "strokeWidth": {
+                "bottom": "$border.width"
+              },
+              "strokeAlignment": "inner",
+              "padding": [
+                "$space.3",
+                "$space.7"
+              ],
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "H1XQT",
+                  "name": "brand",
+                  "gap": "$space.2",
+                  "alignItems": "end",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "gGvtU",
+                      "name": "brand__link",
+                      "gap": "$space.1",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "TphTx",
+                          "name": "brand__icon",
+                          "padding": [
+                            "$space.0-5",
+                            0,
+                            0,
+                            0
+                          ],
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "QpsY2",
+                              "name": "Tile",
+                              "clip": true,
+                              "width": 16,
+                              "height": 16,
+                              "fill": "$color.bg",
+                              "cornerRadius": 3,
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "B2Tg6",
+                                  "name": "Glyph",
+                                  "geometry": "M10 6h10v4h-10z m10 4h4v16h-4z m-10 4h10v4h-10z m-2 2h4v8h-4z m2 6h10v4h-10z",
+                                  "viewBox": [
+                                    0,
+                                    0,
+                                    32,
+                                    32
+                                  ],
+                                  "fill": "$color.accent",
+                                  "width": 16,
+                                  "height": 16
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "gAMUU",
+                          "type": "ref",
+                          "ref": "bTsuV",
+                          "name": "Wordmark",
+                          "content": "artifacts",
+                          "fill": "$color.text"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "OZFb4",
+                      "type": "ref",
+                      "ref": "XeCAN",
+                      "name": "Version",
+                      "content": "v0.3.0",
+                      "fill": "$color.text-muted"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "PlBqI",
+                  "name": "site-nav",
+                  "gap": "$space.2",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "id": "TPDBZ",
+                      "type": "ref",
+                      "ref": "mBii0",
+                      "name": "Active tab",
+                      "descendants": {
+                        "FYq93": {
+                          "content": "Active"
+                        },
+                        "BuuJw": {
+                          "content": "24"
+                        }
+                      }
+                    },
+                    {
+                      "id": "u9c5T",
+                      "type": "ref",
+                      "ref": "n2c13S",
+                      "name": "Archived tab",
+                      "descendants": {
+                        "KIcnd": {
+                          "content": "Archived"
+                        },
+                        "l0AmTr": {
+                          "content": "7"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "v5zbW",
+          "name": "info-row",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "HJDOQ",
+              "name": "info-row/value=text",
+              "reusable": true,
+              "gap": "$space.4",
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "VbdJD",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Term",
+                  "content": "Latest",
+                  "fill": "$color.text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 120
+                },
+                {
+                  "id": "kqZe5",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Value",
+                  "content": "v3 · 2026-11-16 09:12 by codex",
+                  "fill": "$color.text"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "a175i",
+              "name": "info-row/value=link",
+              "reusable": true,
+              "gap": "$space.4",
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "g6bvSG",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Term",
+                  "content": "Artifact URL",
+                  "fill": "$color.text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 120
+                },
+                {
+                  "id": "fC3ak",
+                  "type": "ref",
+                  "ref": "qE94S",
+                  "name": "Value",
+                  "content": "https://ak2x7m4q9wz3c5v8b2n6r4t7y1-art.example.com/ ↗",
+                  "fill": "$color.accent"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "b1LeOo",
+          "name": "table-cell",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "FsF5o",
+              "name": "table-cell/style=head",
+              "reusable": true,
+              "fill": "$color.surface",
+              "padding": [
+                "$space.2",
+                "$space.4"
+              ],
+              "children": [
+                {
+                  "id": "GeoOv",
+                  "type": "ref",
+                  "ref": "E8AuAJ",
+                  "name": "Content",
+                  "content": "Version",
+                  "fill": "$color.text-muted"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "d4KVE",
+              "name": "table-cell/style=text",
+              "reusable": true,
+              "stroke": "$color.border",
+              "strokeWidth": {
+                "top": "$border.width"
+              },
+              "strokeAlignment": "inner",
+              "padding": [
+                "$space.2",
+                "$space.4"
+              ],
+              "children": [
+                {
+                  "id": "sCFTy",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Content",
+                  "content": "codex",
+                  "fill": "$color.text"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "fuhhs",
+              "name": "table-cell/style=mono",
+              "reusable": true,
+              "stroke": "$color.border",
+              "strokeWidth": {
+                "top": "$border.width"
+              },
+              "strokeAlignment": "inner",
+              "padding": [
+                "$space.2",
+                "$space.4"
+              ],
+              "children": [
+                {
+                  "id": "xDU9W",
+                  "type": "ref",
+                  "ref": "qE94S",
+                  "name": "Content",
+                  "content": "v3",
+                  "fill": "$color.text"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Hjn64",
+              "name": "table-cell/style=muted",
+              "reusable": true,
+              "stroke": "$color.border",
+              "strokeWidth": {
+                "top": "$border.width"
+              },
+              "strokeAlignment": "inner",
+              "padding": [
+                "$space.2",
+                "$space.4"
+              ],
+              "children": [
+                {
+                  "id": "lc1tn",
+                  "type": "ref",
+                  "ref": "qE94S",
+                  "name": "Content",
+                  "content": "2026-11-16 09:12",
+                  "fill": "$color.text-muted"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "IVLUH",
+              "name": "table-cell/style=link",
+              "reusable": true,
+              "stroke": "$color.border",
+              "strokeWidth": {
+                "top": "$border.width"
+              },
+              "strokeAlignment": "inner",
+              "padding": [
+                "$space.2",
+                "$space.4"
+              ],
+              "children": [
+                {
+                  "id": "M5PrK",
+                  "type": "ref",
+                  "ref": "ULCeS",
+                  "name": "Content",
+                  "content": "View ↗",
+                  "fill": "$color.accent"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "GppL8",
+          "name": "artifact-row",
+          "layout": "vertical",
+          "gap": "$space.4",
+          "children": [
+            {
+              "type": "frame",
+              "id": "XfGXN",
+              "name": "artifact-row",
+              "reusable": true,
+              "width": 960,
+              "stroke": "$color.border",
+              "strokeAlignment": "inner",
+              "gap": "$space.6",
+              "padding": [
+                "$space.3",
+                "$space.4"
+              ],
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "xbsQl",
+                  "name": "summary",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": "$space.1",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "A4gWNk",
+                      "name": "title-line",
+                      "gap": "$space.2",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "id": "VQGMr",
+                          "type": "ref",
+                          "ref": "ZPnIY",
+                          "name": "Title",
+                          "content": "Quarterly revenue chart",
+                          "fill": "$color.text"
+                        },
+                        {
+                          "id": "Gvv5b",
+                          "type": "ref",
+                          "ref": "uI6XR",
+                          "name": "Archived badge",
+                          "enabled": false
+                        },
+                        {
+                          "id": "NUktf",
+                          "type": "ref",
+                          "ref": "k7XOTE",
+                          "name": "Public badge"
+                        }
+                      ]
+                    },
+                    {
+                      "id": "Y0PLl",
+                      "type": "ref",
+                      "ref": "pnwzV",
+                      "name": "Description",
+                      "content": "Interactive bar chart of Q3 revenue by region, with a toggle for year-over-year.",
+                      "fill": "$color.text-muted",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    },
+                    {
+                      "id": "f7lci1",
+                      "type": "ref",
+                      "ref": "XeCAN",
+                      "name": "Meta",
+                      "content": "v3 · updated 2 hours ago by codex",
+                      "fill": "$color.text-muted",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  ]
+                },
+                {
+                  "id": "RSI8z",
+                  "type": "ref",
+                  "ref": "ULCeS",
+                  "name": "Open",
+                  "content": "Open ↗",
+                  "fill": "$color.accent"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "fQSJC",
+      "x": 0,
+      "y": 842,
+      "name": "index",
+      "clip": true,
+      "width": 1280,
+      "fill": "$color.bg",
+      "layout": "vertical",
+      "alignItems": "center",
+      "children": [
+        {
+          "id": "g9APe",
+          "type": "ref",
+          "ref": "z6iAY",
+          "name": "site-header",
+          "width": "fill_container"
+        },
+        {
+          "type": "frame",
+          "id": "po8UJ",
+          "name": "page",
+          "width": 960,
+          "layout": "vertical",
+          "gap": "$space.5",
+          "padding": [
+            "$space.8",
+            0,
+            "$space.9",
+            0
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "lyAfg",
+              "name": "page-heading",
+              "layout": "vertical",
+              "gap": "$space.1",
+              "children": [
+                {
+                  "id": "g8jVlW",
+                  "type": "ref",
+                  "ref": "ksPem",
+                  "name": "Title",
+                  "content": "Artifacts",
+                  "fill": "$color.text"
+                },
+                {
+                  "id": "leUGE",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Subtitle",
+                  "content": "Most recently updated first",
+                  "fill": "$color.text-muted"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "O1hvjY",
+              "name": "artifact-list",
+              "clip": true,
+              "width": "fill_container",
+              "cornerRadius": "$radius.md",
+              "stroke": "$color.border",
+              "strokeWidth": "$border.width",
+              "strokeAlignment": "inner",
+              "layout": "vertical",
+              "children": [
+                {
+                  "id": "M1pPcp",
+                  "type": "ref",
+                  "ref": "XfGXN",
+                  "name": "artifact-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "VQGMr": {
+                      "content": "Quarterly revenue chart"
+                    },
+                    "Gvv5b": {
+                      "enabled": false
+                    },
+                    "NUktf": {
+                      "enabled": true
+                    },
+                    "Y0PLl": {
+                      "content": "Interactive bar chart of Q3 revenue by region, with a toggle for year-over-year."
+                    },
+                    "f7lci1": {
+                      "content": "v3 · updated 2 hours ago by codex"
+                    }
+                  }
+                },
+                {
+                  "id": "C95d1s",
+                  "type": "ref",
+                  "ref": "XfGXN",
+                  "name": "artifact-row",
+                  "width": "fill_container",
+                  "strokeWidth": {
+                    "top": "$border.width"
+                  },
+                  "descendants": {
+                    "VQGMr": {
+                      "content": "Tokyo trip itinerary"
+                    },
+                    "Gvv5b": {
+                      "enabled": false
+                    },
+                    "NUktf": {
+                      "enabled": false
+                    },
+                    "Y0PLl": {
+                      "content": "Day-by-day plan with a map and a budget table."
+                    },
+                    "f7lci1": {
+                      "content": "v7 · updated 5 hours ago by claude-code"
+                    }
+                  }
+                },
+                {
+                  "id": "c7JtV",
+                  "type": "ref",
+                  "ref": "XfGXN",
+                  "name": "artifact-row",
+                  "width": "fill_container",
+                  "strokeWidth": {
+                    "top": "$border.width"
+                  },
+                  "descendants": {
+                    "VQGMr": {
+                      "content": "Regex playground"
+                    },
+                    "Gvv5b": {
+                      "enabled": false
+                    },
+                    "NUktf": {
+                      "enabled": false
+                    },
+                    "Y0PLl": {
+                      "content": "Paste a pattern and test strings; matches highlight as you type."
+                    },
+                    "f7lci1": {
+                      "content": "v1 · updated yesterday by gemini-cli"
+                    }
+                  }
+                },
+                {
+                  "id": "skB6R",
+                  "type": "ref",
+                  "ref": "XfGXN",
+                  "name": "artifact-row",
+                  "width": "fill_container",
+                  "strokeWidth": {
+                    "top": "$border.width"
+                  },
+                  "descendants": {
+                    "VQGMr": {
+                      "content": "家計簿の月次サマリー（2026年10月）"
+                    },
+                    "Gvv5b": {
+                      "enabled": false
+                    },
+                    "NUktf": {
+                      "enabled": false
+                    },
+                    "Y0PLl": {
+                      "content": "カテゴリ別の支出グラフと前月比の表。"
+                    },
+                    "f7lci1": {
+                      "content": "v4 · updated 3 days ago by claude-code"
+                    }
+                  }
+                },
+                {
+                  "id": "nu2kG",
+                  "type": "ref",
+                  "ref": "XfGXN",
+                  "name": "artifact-row",
+                  "width": "fill_container",
+                  "strokeWidth": {
+                    "top": "$border.width"
+                  },
+                  "descendants": {
+                    "VQGMr": {
+                      "content": "MCP latency dashboard"
+                    },
+                    "Gvv5b": {
+                      "enabled": false
+                    },
+                    "NUktf": {
+                      "enabled": true
+                    },
+                    "Y0PLl": {
+                      "content": "p50/p95 latency per tool call from the last 24 hours of logs, grouped by client and tool name, with a toggle for errors only."
+                    },
+                    "f7lci1": {
+                      "content": "v12 · updated 6 days ago by codex"
+                    }
+                  }
+                },
+                {
+                  "id": "yCdw4",
+                  "type": "ref",
+                  "ref": "XfGXN",
+                  "name": "artifact-row",
+                  "width": "fill_container",
+                  "strokeWidth": {
+                    "top": "$border.width"
+                  },
+                  "descendants": {
+                    "VQGMr": {
+                      "content": "Untitled sketch"
+                    },
+                    "Gvv5b": {
+                      "enabled": false
+                    },
+                    "NUktf": {
+                      "enabled": false
+                    },
+                    "Y0PLl": {
+                      "enabled": false
+                    },
+                    "f7lci1": {
+                      "content": "v2 · updated 12 days ago by script"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "bPUEH",
+              "type": "ref",
+              "ref": "H8Z06b",
+              "name": "pager",
+              "width": "fill_container",
+              "descendants": {
+                "dLH6Z": {
+                  "content": "Older →"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "wldkd",
+      "x": 1440,
+      "y": 842,
+      "name": "archived",
+      "clip": true,
+      "width": 1280,
+      "fill": "$color.bg",
+      "layout": "vertical",
+      "alignItems": "center",
+      "children": [
+        {
+          "id": "g0XaO",
+          "type": "ref",
+          "ref": "z6iAY",
+          "name": "site-header",
+          "width": "fill_container",
+          "descendants": {
+            "TPDBZ": {
+              "id": "UEuZE",
+              "type": "ref",
+              "ref": "n2c13S",
+              "name": "Active tab",
+              "descendants": {
+                "KIcnd": {
+                  "content": "Active"
+                },
+                "l0AmTr": {
+                  "content": "24"
+                }
+              }
+            },
+            "u9c5T": {
+              "id": "mOFYr",
+              "type": "ref",
+              "ref": "mBii0",
+              "name": "Archived tab",
+              "descendants": {
+                "FYq93": {
+                  "content": "Archived"
+                },
+                "BuuJw": {
+                  "content": "7"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "d1KerL",
+          "name": "page",
+          "width": 960,
+          "layout": "vertical",
+          "gap": "$space.5",
+          "padding": [
+            "$space.8",
+            0,
+            "$space.9",
+            0
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "NgOdr",
+              "name": "page-heading",
+              "layout": "vertical",
+              "gap": "$space.1",
+              "children": [
+                {
+                  "id": "REY4R",
+                  "type": "ref",
+                  "ref": "ksPem",
+                  "name": "Title",
+                  "content": "Archived",
+                  "fill": "$color.text"
+                },
+                {
+                  "id": "lRsAH",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Subtitle",
+                  "content": "Archived by hand, or not updated for 30 days. Every link still works.",
+                  "fill": "$color.text-muted"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "S1elbE",
+              "name": "artifact-list",
+              "clip": true,
+              "width": "fill_container",
+              "cornerRadius": "$radius.md",
+              "stroke": "$color.border",
+              "strokeWidth": "$border.width",
+              "strokeAlignment": "inner",
+              "layout": "vertical",
+              "children": [
+                {
+                  "id": "B2huw5",
+                  "type": "ref",
+                  "ref": "XfGXN",
+                  "name": "artifact-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "VQGMr": {
+                      "content": "Conference talk notes"
+                    },
+                    "Gvv5b": {
+                      "enabled": true
+                    },
+                    "NUktf": {
+                      "enabled": false
+                    },
+                    "Y0PLl": {
+                      "content": "Slides outline and speaker notes for the October meetup."
+                    },
+                    "f7lci1": {
+                      "content": "v5 · updated 41 days ago by claude-code · archived: no updates for 30 days"
+                    }
+                  }
+                },
+                {
+                  "id": "r1FxI",
+                  "type": "ref",
+                  "ref": "XfGXN",
+                  "name": "artifact-row",
+                  "width": "fill_container",
+                  "strokeWidth": {
+                    "top": "$border.width"
+                  },
+                  "descendants": {
+                    "VQGMr": {
+                      "content": "Color palette explorer"
+                    },
+                    "Gvv5b": {
+                      "enabled": true
+                    },
+                    "NUktf": {
+                      "enabled": true
+                    },
+                    "Y0PLl": {
+                      "content": "Generates accessible palettes from one seed color."
+                    },
+                    "f7lci1": {
+                      "content": "v2 · updated 9 days ago by codex · archived by hand"
+                    }
+                  }
+                },
+                {
+                  "id": "B5CtWD",
+                  "type": "ref",
+                  "ref": "XfGXN",
+                  "name": "artifact-row",
+                  "width": "fill_container",
+                  "strokeWidth": {
+                    "top": "$border.width"
+                  },
+                  "descendants": {
+                    "VQGMr": {
+                      "content": "Old landing page draft"
+                    },
+                    "Gvv5b": {
+                      "enabled": true
+                    },
+                    "NUktf": {
+                      "enabled": false
+                    },
+                    "Y0PLl": {
+                      "enabled": false
+                    },
+                    "f7lci1": {
+                      "content": "v9 · updated 3 months ago by gemini-cli · archived: no updates for 30 days"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "yA6Rh",
+              "type": "ref",
+              "ref": "H8Z06b",
+              "name": "pager",
+              "width": "fill_container",
+              "descendants": {
+                "dLH6Z": {
+                  "content": "Older →"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "hs1cY",
+      "x": 2880,
+      "y": 842,
+      "name": "artifact",
+      "clip": true,
+      "width": 1280,
+      "fill": "$color.bg",
+      "layout": "vertical",
+      "alignItems": "center",
+      "children": [
+        {
+          "id": "k6c4Cs",
+          "type": "ref",
+          "ref": "z6iAY",
+          "name": "site-header",
+          "width": "fill_container"
+        },
+        {
+          "type": "frame",
+          "id": "IGwM0",
+          "name": "page page--detail",
+          "width": 960,
+          "layout": "vertical",
+          "gap": "$space.7",
+          "padding": [
+            "$space.7",
+            0,
+            "$space.9",
+            0
+          ],
+          "children": [
+            {
+              "id": "i4hwe",
+              "type": "ref",
+              "ref": "tgq32",
+              "name": "back-link",
+              "descendants": {
+                "xqd31": {
+                  "content": "← Artifacts"
+                }
+              }
+            },
+            {
+              "type": "frame",
+              "id": "VRAmt",
+              "name": "artifact-heading",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space.2",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "DxtTo",
+                  "name": "artifact-heading__title",
+                  "gap": "$space.2",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "id": "eBoEo",
+                      "type": "ref",
+                      "ref": "ksPem",
+                      "name": "Title",
+                      "content": "Quarterly revenue chart",
+                      "fill": "$color.text"
+                    },
+                    {
+                      "id": "H1hgSY",
+                      "type": "ref",
+                      "ref": "k7XOTE",
+                      "name": "Public badge"
+                    }
+                  ]
+                },
+                {
+                  "id": "ZQbQi",
+                  "type": "ref",
+                  "ref": "xBEXT",
+                  "name": "Description",
+                  "content": "Interactive bar chart of Q3 revenue by region, with a toggle for year-over-year. Data comes from the finance export of October 31.",
+                  "fill": "$color.text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 720
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "AMClf",
+              "name": "info",
+              "width": "fill_container",
+              "fill": "$color.surface",
+              "cornerRadius": "$radius.md",
+              "stroke": "$color.border",
+              "strokeWidth": "$border.width",
+              "strokeAlignment": "inner",
+              "layout": "vertical",
+              "gap": "$space.3",
+              "padding": [
+                "$space.4",
+                "$space.5"
+              ],
+              "children": [
+                {
+                  "id": "G9Bsc8",
+                  "type": "ref",
+                  "ref": "a175i",
+                  "name": "info-row",
+                  "descendants": {
+                    "g6bvSG": {
+                      "content": "Artifact URL"
+                    },
+                    "fC3ak": {
+                      "content": "https://ak2x7m4q9wz3c5v8b2n6r4t7y1-art.example.com/ ↗"
+                    }
+                  }
+                },
+                {
+                  "id": "g01Ka",
+                  "type": "ref",
+                  "ref": "a175i",
+                  "name": "info-row",
+                  "descendants": {
+                    "g6bvSG": {
+                      "content": "Public URL"
+                    },
+                    "fC3ak": {
+                      "content": "https://ak2x7m4q9wz3c5v8b2n6r4t7y1-pub.example.com/ ↗"
+                    }
+                  }
+                },
+                {
+                  "id": "Z4TCvF",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "Latest"
+                    },
+                    "kqZe5": {
+                      "content": "v3 · 2026-11-16 09:12 by codex"
+                    }
+                  }
+                },
+                {
+                  "id": "qPrGT",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "Created"
+                    },
+                    "kqZe5": {
+                      "content": "2026-11-14 18:40 by claude-code"
+                    }
+                  }
+                },
+                {
+                  "id": "ujGgu",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "Archive"
+                    },
+                    "kqZe5": {
+                      "content": "Active · archives automatically after 30 days without updates"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "QI6fu",
+              "name": "section",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space.3",
+              "children": [
+                {
+                  "id": "fbEgH",
+                  "type": "ref",
+                  "ref": "q8UpY",
+                  "name": "section-heading",
+                  "descendants": {
+                    "ZUzhM": {
+                      "content": "Versions"
+                    },
+                    "oXvHc": {
+                      "content": "3"
+                    }
+                  }
+                },
+                {
+                  "type": "frame",
+                  "id": "i23umX",
+                  "name": "data-table",
+                  "clip": true,
+                  "width": "fill_container",
+                  "cornerRadius": "$radius.md",
+                  "stroke": "$color.border",
+                  "strokeWidth": "$border.width",
+                  "strokeAlignment": "inner",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "FpsXK",
+                      "name": "head row",
+                      "width": "fill_container",
+                      "children": [
+                        {
+                          "id": "QEr4l",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": 73,
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "Version"
+                            }
+                          }
+                        },
+                        {
+                          "id": "Alp06",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": 157,
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "Published"
+                            }
+                          }
+                        },
+                        {
+                          "id": "V1qh5",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": 105,
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "By"
+                            }
+                          }
+                        },
+                        {
+                          "id": "PWJwu",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": "fill_container",
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "Title"
+                            }
+                          }
+                        },
+                        {
+                          "id": "BSd0u",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": 58,
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "Files"
+                            }
+                          }
+                        },
+                        {
+                          "id": "mfynN",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": 87,
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "Size"
+                            }
+                          }
+                        },
+                        {
+                          "id": "xO8AY",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": 74,
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "Pinned"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "p47XK",
+                      "name": "row",
+                      "width": "fill_container",
+                      "children": [
+                        {
+                          "id": "hIH8D",
+                          "type": "ref",
+                          "ref": "fuhhs",
+                          "name": "table-cell",
+                          "width": 73,
+                          "descendants": {
+                            "xDU9W": {
+                              "content": "v3"
+                            }
+                          }
+                        },
+                        {
+                          "id": "PH1AU",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 157,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "2026-11-16 09:12"
+                            }
+                          }
+                        },
+                        {
+                          "id": "Q81Eei",
+                          "type": "ref",
+                          "ref": "d4KVE",
+                          "name": "table-cell",
+                          "width": 105,
+                          "descendants": {
+                            "sCFTy": {
+                              "content": "codex"
+                            }
+                          }
+                        },
+                        {
+                          "id": "lxoRU",
+                          "type": "ref",
+                          "ref": "d4KVE",
+                          "name": "table-cell",
+                          "width": "fill_container",
+                          "descendants": {
+                            "sCFTy": {
+                              "content": "Quarterly revenue chart"
+                            }
+                          }
+                        },
+                        {
+                          "id": "wGLtr",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 58,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "4"
+                            }
+                          }
+                        },
+                        {
+                          "id": "R3C1T",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 87,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "48.2 KB"
+                            }
+                          }
+                        },
+                        {
+                          "id": "eeGV3",
+                          "type": "ref",
+                          "ref": "IVLUH",
+                          "name": "table-cell",
+                          "width": 74,
+                          "descendants": {
+                            "M5PrK": {
+                              "content": "View ↗"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "koJXR",
+                      "name": "row",
+                      "width": "fill_container",
+                      "children": [
+                        {
+                          "id": "b1pT9",
+                          "type": "ref",
+                          "ref": "fuhhs",
+                          "name": "table-cell",
+                          "width": 73,
+                          "descendants": {
+                            "xDU9W": {
+                              "content": "v2"
+                            }
+                          }
+                        },
+                        {
+                          "id": "nufKT",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 157,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "2026-11-15 21:03"
+                            }
+                          }
+                        },
+                        {
+                          "id": "l2juP",
+                          "type": "ref",
+                          "ref": "d4KVE",
+                          "name": "table-cell",
+                          "width": 105,
+                          "descendants": {
+                            "sCFTy": {
+                              "content": "codex"
+                            }
+                          }
+                        },
+                        {
+                          "id": "sTOGn",
+                          "type": "ref",
+                          "ref": "d4KVE",
+                          "name": "table-cell",
+                          "width": "fill_container",
+                          "descendants": {
+                            "sCFTy": {
+                              "content": "Quarterly revenue chart"
+                            }
+                          }
+                        },
+                        {
+                          "id": "RElsw",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 58,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "4"
+                            }
+                          }
+                        },
+                        {
+                          "id": "laPJK",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 87,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "47.9 KB"
+                            }
+                          }
+                        },
+                        {
+                          "id": "eYbGW",
+                          "type": "ref",
+                          "ref": "IVLUH",
+                          "name": "table-cell",
+                          "width": 74,
+                          "descendants": {
+                            "M5PrK": {
+                              "content": "View ↗"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "mq1EL",
+                      "name": "row",
+                      "width": "fill_container",
+                      "children": [
+                        {
+                          "id": "KOVQD",
+                          "type": "ref",
+                          "ref": "fuhhs",
+                          "name": "table-cell",
+                          "width": 73,
+                          "descendants": {
+                            "xDU9W": {
+                              "content": "v1"
+                            }
+                          }
+                        },
+                        {
+                          "id": "xitAy",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 157,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "2026-11-14 18:40"
+                            }
+                          }
+                        },
+                        {
+                          "id": "PRmps",
+                          "type": "ref",
+                          "ref": "d4KVE",
+                          "name": "table-cell",
+                          "width": 105,
+                          "descendants": {
+                            "sCFTy": {
+                              "content": "claude-code"
+                            }
+                          }
+                        },
+                        {
+                          "id": "xgcsW",
+                          "type": "ref",
+                          "ref": "d4KVE",
+                          "name": "table-cell",
+                          "width": "fill_container",
+                          "descendants": {
+                            "sCFTy": {
+                              "content": "Q3 revenue (draft)"
+                            }
+                          }
+                        },
+                        {
+                          "id": "X7Hjo",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 58,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "2"
+                            }
+                          }
+                        },
+                        {
+                          "id": "aMtt7",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 87,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "12.4 KB"
+                            }
+                          }
+                        },
+                        {
+                          "id": "vFNxd",
+                          "type": "ref",
+                          "ref": "IVLUH",
+                          "name": "table-cell",
+                          "width": 74,
+                          "descendants": {
+                            "M5PrK": {
+                              "content": "View ↗"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "eZiP2",
+                  "type": "ref",
+                  "ref": "H8Z06b",
+                  "name": "pager",
+                  "width": "fill_container",
+                  "descendants": {
+                    "dLH6Z": {
+                      "content": "Older versions →"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ibspJ",
+              "name": "section",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space.3",
+              "children": [
+                {
+                  "id": "xpSxT",
+                  "type": "ref",
+                  "ref": "q8UpY",
+                  "name": "section-heading",
+                  "descendants": {
+                    "ZUzhM": {
+                      "content": "Files in v3"
+                    },
+                    "oXvHc": {
+                      "content": "4"
+                    }
+                  }
+                },
+                {
+                  "type": "frame",
+                  "id": "GUnDp",
+                  "name": "data-table",
+                  "clip": true,
+                  "width": "fill_container",
+                  "cornerRadius": "$radius.md",
+                  "stroke": "$color.border",
+                  "strokeWidth": "$border.width",
+                  "strokeAlignment": "inner",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ufF8l",
+                      "name": "head row",
+                      "width": "fill_container",
+                      "children": [
+                        {
+                          "id": "ldUDo",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": "fill_container",
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "Path"
+                            }
+                          }
+                        },
+                        {
+                          "id": "cWJ6p",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": 274,
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "Type"
+                            }
+                          }
+                        },
+                        {
+                          "id": "qaQik",
+                          "type": "ref",
+                          "ref": "FsF5o",
+                          "name": "table-cell",
+                          "width": 87,
+                          "descendants": {
+                            "GeoOv": {
+                              "content": "Size"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ii4wY",
+                      "name": "row",
+                      "width": "fill_container",
+                      "children": [
+                        {
+                          "id": "l0Rp8",
+                          "type": "ref",
+                          "ref": "fuhhs",
+                          "name": "table-cell",
+                          "width": "fill_container",
+                          "descendants": {
+                            "xDU9W": {
+                              "content": "index.html"
+                            }
+                          }
+                        },
+                        {
+                          "id": "yaZGS",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 274,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "text/html; charset=utf-8"
+                            }
+                          }
+                        },
+                        {
+                          "id": "qTRXc",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 87,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "3.1 KB"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "C9hdoh",
+                      "name": "row",
+                      "width": "fill_container",
+                      "children": [
+                        {
+                          "id": "v3sHO",
+                          "type": "ref",
+                          "ref": "fuhhs",
+                          "name": "table-cell",
+                          "width": "fill_container",
+                          "descendants": {
+                            "xDU9W": {
+                              "content": "chart.js"
+                            }
+                          }
+                        },
+                        {
+                          "id": "emLze",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 274,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "text/javascript; charset=utf-8"
+                            }
+                          }
+                        },
+                        {
+                          "id": "T4pIo5",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 87,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "38.7 KB"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "U5cNAs",
+                      "name": "row",
+                      "width": "fill_container",
+                      "children": [
+                        {
+                          "id": "T4ep0",
+                          "type": "ref",
+                          "ref": "fuhhs",
+                          "name": "table-cell",
+                          "width": "fill_container",
+                          "descendants": {
+                            "xDU9W": {
+                              "content": "style.css"
+                            }
+                          }
+                        },
+                        {
+                          "id": "Usgux",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 274,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "text/css; charset=utf-8"
+                            }
+                          }
+                        },
+                        {
+                          "id": "dYFlq",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 87,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "1.9 KB"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "g9W4Cn",
+                      "name": "row",
+                      "width": "fill_container",
+                      "children": [
+                        {
+                          "id": "tCile",
+                          "type": "ref",
+                          "ref": "fuhhs",
+                          "name": "table-cell",
+                          "width": "fill_container",
+                          "descendants": {
+                            "xDU9W": {
+                              "content": "data/q3.json"
+                            }
+                          }
+                        },
+                        {
+                          "id": "Rpgce",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 274,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "application/json; charset=utf-8"
+                            }
+                          }
+                        },
+                        {
+                          "id": "oQnYU",
+                          "type": "ref",
+                          "ref": "Hjn64",
+                          "name": "table-cell",
+                          "width": 87,
+                          "descendants": {
+                            "lc1tn": {
+                              "content": "4.5 KB"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "border.width": {
+      "type": "number",
+      "value": 1
+    },
+    "color.accent": {
+      "type": "color",
+      "value": "#8FA8FF"
+    },
+    "color.badge.neutral.bg": {
+      "type": "color",
+      "value": "#22262D"
+    },
+    "color.badge.neutral.fg": {
+      "type": "color",
+      "value": "#9AA1AC"
+    },
+    "color.badge.public.bg": {
+      "type": "color",
+      "value": "#173322"
+    },
+    "color.badge.public.fg": {
+      "type": "color",
+      "value": "#7DD3A0"
+    },
+    "color.bg": {
+      "type": "color",
+      "value": "#111317"
+    },
+    "color.border": {
+      "type": "color",
+      "value": "#2A2F37"
+    },
+    "color.focus": {
+      "type": "color",
+      "value": "$color.accent"
+    },
+    "color.surface": {
+      "type": "color",
+      "value": "#181B21"
+    },
+    "color.text": {
+      "type": "color",
+      "value": "#E8EAED"
+    },
+    "color.text-muted": {
+      "type": "color",
+      "value": "#9AA1AC"
+    },
+    "focus.width": {
+      "type": "number",
+      "value": 2
+    },
+    "font.family.mono": {
+      "type": "string",
+      "value": "IBM Plex Mono"
+    },
+    "font.family.sans": {
+      "type": "string",
+      "value": "IBM Plex Sans"
+    },
+    "font.size.xs": {
+      "type": "number",
+      "value": 12
+    },
+    "font.size.sm": {
+      "type": "number",
+      "value": 13
+    },
+    "font.size.md": {
+      "type": "number",
+      "value": 14
+    },
+    "font.size.lg": {
+      "type": "number",
+      "value": 16
+    },
+    "font.size.xl": {
+      "type": "number",
+      "value": 24
+    },
+    "font.weight.regular": {
+      "type": "string",
+      "value": "400"
+    },
+    "font.weight.medium": {
+      "type": "string",
+      "value": "500"
+    },
+    "font.weight.semibold": {
+      "type": "string",
+      "value": "600"
+    },
+    "radius.sm": {
+      "type": "number",
+      "value": 6
+    },
+    "radius.md": {
+      "type": "number",
+      "value": 8
+    },
+    "radius.pill": {
+      "type": "number",
+      "value": 999
+    },
+    "size.page": {
+      "type": "number",
+      "value": 1280
+    },
+    "size.content": {
+      "type": "number",
+      "value": 960
+    },
+    "size.prose": {
+      "type": "number",
+      "value": 720
+    },
+    "size.label": {
+      "type": "number",
+      "value": 120
+    },
+    "space.0-5": {
+      "type": "number",
+      "value": 2
+    },
+    "space.1": {
+      "type": "number",
+      "value": 4
+    },
+    "space.2": {
+      "type": "number",
+      "value": 8
+    },
+    "space.3": {
+      "type": "number",
+      "value": 12
+    },
+    "space.4": {
+      "type": "number",
+      "value": 16
+    },
+    "space.5": {
+      "type": "number",
+      "value": 20
+    },
+    "space.6": {
+      "type": "number",
+      "value": 24
+    },
+    "space.7": {
+      "type": "number",
+      "value": 32
+    },
+    "space.8": {
+      "type": "number",
+      "value": 40
+    },
+    "space.9": {
+      "type": "number",
+      "value": 64
+    }
+  }
+}
