@@ -81,27 +81,31 @@ async function unlinkQuietly(path: string): Promise<void> {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const deadLink = (path: string, token: string) => `${path}.${token}.dead`;
+
 /**
  * Removes the lock at `path` if `owner` held it and is gone. The waiter that links the lock to
  * `<path>.<owner token>.dead` first is the only one that may remove it: the link fails for every other waiter while it
  * exists. It removes the lock only if the link holds `owner`'s token, since the lock may have been released and taken
  * again since it was read; a gone holder releases nothing and no other waiter removes its lock, so the lock cannot
- * change between the link and the removal.
+ * change between the link and the removal. A link that already exists is `blocked`: another waiter is removing the
+ * lock, or one that stopped midway left the link, which only the owner may remove.
  */
-async function recover(path: string, owner: Owner, options: LockOptions): Promise<boolean> {
+async function recover(path: string, owner: Owner, options: LockOptions): Promise<"removed" | "kept" | "blocked"> {
   await options.barriers.beforeRecover?.(owner.token);
-  const dead = `${path}.${owner.token}.dead`;
+  const dead = deadLink(path, owner.token);
   try {
     await link(path, dead);
   } catch (error) {
     const code = codeOf(error);
-    if (code === "EEXIST" || code === "ENOENT") return false;
+    if (code === "EEXIST") return "blocked";
+    if (code === "ENOENT") return "kept";
     throw error;
   }
   try {
-    if ((await readOwner(dead))?.token !== owner.token) return false;
+    if ((await readOwner(dead))?.token !== owner.token) return "kept";
     await unlink(path);
-    return true;
+    return "removed";
   } finally {
     await unlinkQuietly(dead);
   }
@@ -124,8 +128,20 @@ export async function withLock<T>(path: string, options: LockOptions, body: () =
       }
       const owner = await readOwner(path);
       const gone = owner !== undefined && owner.host === host && !mayBeRunning(owner.pid);
-      if (gone && (await recover(path, owner, options))) continue;
+      // The `.dead` link that kept this waiter from removing a gone holder's lock.
+      let blocking: string | undefined;
+      if (gone) {
+        const recovery = await recover(path, owner, options);
+        if (recovery === "removed") continue;
+        if (recovery === "blocked") blocking = deadLink(path, owner.token);
+      }
       if (Date.now() >= deadline) {
+        if (blocking !== undefined) {
+          throw new CliError(
+            `the lock ${path} belongs to a process that is gone, and ${blocking}, left by an interrupted removal, ` +
+              "keeps it; if no artifacts command is running, remove both files",
+          );
+        }
         throw new CliError(
           `another artifacts command holds the lock ${path}; if no artifacts command is running, remove that file`,
         );

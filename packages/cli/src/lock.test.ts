@@ -4,7 +4,7 @@
 // real processes of the CLI.
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { readFile, writeFile } from "node:fs/promises";
+import { link, readFile, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -190,6 +190,25 @@ describe("PL-50: a gone holder's lock", () => {
     expect((await list(env)).status).toBe(0);
     expect(standIn.count("POST /oauth/token refresh_token")).toBe(1);
     expect(await exists(lock)).toBe(false);
+  });
+
+  it("is kept with the link of a recoverer that stopped midway, and the waiter fails naming both", async () => {
+    const { standIn, env, lock } = await expired();
+    const written = lockOf(OWNER, await gonePid());
+    await writeFile(lock, written);
+    // A waiter linked the lock to its `.dead` name and stopped before removing either.
+    const dead = `${lock}.${OWNER}.dead`;
+    await link(lock, dead);
+    const ran = await list(env, { lockWaitMs: 300 });
+    expect(ran).toMatchObject({
+      status: 1,
+      stderr:
+        `artifacts: the lock ${lock} belongs to a process that is gone, and ${dead}, left by an interrupted ` +
+        "removal, keeps it; if no artifacts command is running, remove both files\n",
+    });
+    expect(await readFile(lock, "utf8")).toBe(written);
+    expect(await readFile(dead, "utf8")).toBe(written);
+    expect(standIn.count("POST /oauth/token refresh_token")).toBe(0);
   });
 
   it("is removed by exactly one of two waiters at once; the other never removes the lock taken after it", async () => {
