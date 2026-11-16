@@ -1,4 +1,6 @@
-// The Worker's public configuration. Bindings are added as the design decides them.
+// The Worker's public configuration (DATA-2): bindings, migrations and observability only. Deployment values (account,
+// routes, custom domains, the database and bucket identifiers, the variables of design.md section 11) live in the
+// gitignored wrangler.deploy.jsonc; local development takes the variables from .dev.vars (see .dev.vars.example).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "artifacts",
@@ -7,6 +9,10 @@
   // The Worker is reached only on its routes: no workers.dev URL and no preview URLs.
   "workers_dev": false,
   "preview_urls": false,
+  // Metadata (design.md section 3).
+  "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
+  // File bytes, one object per distinct file per artifact (design.md section 3).
+  "r2_buckets": [{ "binding": "FILES" }],
   // Console output is kept. Invocation logs are off: they record the request, and API requests carry bearer tokens in
   // their Authorization header.
   "observability": {

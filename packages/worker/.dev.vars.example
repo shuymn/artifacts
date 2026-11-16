@@ -1,0 +1,9 @@
+# Local development values for `wrangler dev` (design.md section 1): copy to .dev.vars. Every host is a localhost
+# name, so Access is not verified (ACC-2); the deployment refuses localhost hosts.
+APP_HOST=app.localhost:8787
+API_HOST=api.localhost:8787
+CONTENT_HOST_SUFFIX=-art.localhost:8787
+PUBLIC_HOST_SUFFIX=-pub.localhost:8787
+ARCHIVE_AFTER_DAYS=30
+# The token art_localdevelopmentonlyaaaaaaaaaaaa, for local use only: name -> hex SHA-256 of the token.
+API_TOKENS='{"local":"8499935240339b4ef7c8be5029889166d6a314da0c8cb9af9fcf16d1bc07fe0f"}'
