@@ -35,6 +35,7 @@ export const ISSUE_REASONS = [
   "unknown_part",
   "duplicate_part",
   "count_mismatch",
+  "not_a_file",
 ] as const;
 export type IssueReason = (typeof ISSUE_REASONS)[number];
 export type Issue = { readonly field: string; readonly reason: IssueReason };
@@ -63,6 +64,7 @@ const ISSUE_MESSAGES: Record<IssueReason, string> = {
   unknown_part: 'a multipart part is named other than "meta" or "file"',
   duplicate_part: 'the "meta" part is given twice',
   count_mismatch: 'the number of "file" parts differs from meta.files',
+  not_a_file: 'a "file" part has no file name, so its bytes would arrive decoded as text',
 };
 
 export type OperationError =

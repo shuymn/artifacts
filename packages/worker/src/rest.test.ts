@@ -8,6 +8,7 @@ import {
   DAY_MS,
   gate,
   objectKeys,
+  snapshot,
   START,
   World,
   type PublishJson,
@@ -227,7 +228,7 @@ describe("REST contract", () => {
     const form = new FormData();
     form.append("meta", JSON.stringify({ title: "t", files: [{ path: "index.html" }, { path: "b.txt" }] }));
     form.append("file", new File(["page"], "evil/../name.js", { type: "application/x-evil" }));
-    form.append("file", "text part");
+    form.append("file", new Blob(["text part"]));
     const response = await world.api("POST", "/v1/artifacts", { body: form });
     expect(response.status).toBe(201);
     const body = await json<PublishJson>(response);
@@ -236,6 +237,45 @@ describe("REST contract", () => {
       ["index.html", "text/html; charset=utf-8"],
     ]);
     expect(await (await world.content(body.artifact.id, "/b.txt")).text()).toBe("text part");
+  });
+
+  it("refuses a file part without a file name, whose bytes would arrive as text, before any write", async () => {
+    const world = new World();
+    const before = await snapshot();
+    const bucket = withBucket(world);
+    // A hand-built body: the second file part has no filename and holds the byte FF, which is not UTF-8.
+    const encoder = new TextEncoder();
+    const parts = [
+      encoder.encode(
+        '--b\r\nContent-Disposition: form-data; name="meta"\r\n\r\n' +
+          `${JSON.stringify({ title: "t", files: [{ path: "index.html" }, { path: "bin" }] })}\r\n` +
+          '--b\r\nContent-Disposition: form-data; name="file"; filename="x"\r\n\r\npage\r\n' +
+          '--b\r\nContent-Disposition: form-data; name="file"\r\n\r\n',
+      ),
+      new Uint8Array([0x41, 0xff, 0x42]),
+      encoder.encode("\r\n--b--\r\n"),
+    ];
+    const response = await world.api("POST", "/v1/artifacts", {
+      body: new Blob(parts),
+      headers: { "Content-Type": "multipart/form-data; boundary=b" },
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "invalid_request", issues: [{ field: "files[1]", reason: "not_a_file" }] },
+    });
+    expect(bucket.calls).toEqual([]);
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("keeps a non-UTF-8 byte of a file part with a file name", async () => {
+    const world = new World();
+    const form = new FormData();
+    form.append("meta", JSON.stringify({ title: "t", files: [{ path: "index.html" }, { path: "bin" }] }));
+    form.append("file", new Blob(["page"]), "index.html");
+    form.append("file", new Blob([new Uint8Array([0x41, 0xff, 0x42])]), "bin");
+    const created = await json<PublishJson>(await world.api("POST", "/v1/artifacts", { body: form }));
+    const served = await world.content(created.artifact.id, "/bin");
+    expect([...new Uint8Array(await served.arrayBuffer())]).toEqual([0x41, 0xff, 0x42]);
   });
 
   it("refuses a malformed multipart body", async () => {

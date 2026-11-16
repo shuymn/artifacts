@@ -233,7 +233,9 @@ no limit on versions.
   Unicode) or `"base64"` (RFC 4648 with padding, no whitespace).
 - **REST:** `multipart/form-data`: a `meta` part with the JSON input; `meta.files[n]` gives the path and optional type
   of the n-th part named `file`. A part's file name and `Content-Type` are ignored, so no path depends on how a client
-  encodes a part header; a part named other than `meta` or `file` is `invalid_request`.
+  encodes a part header; a part named other than `meta` or `file` is `invalid_request`. A `file` part must carry a
+  file name all the same: without one, multipart parsing yields its content as text decoded from UTF-8, which changes
+  bytes that are not UTF-8, so it is `invalid_request` before any write.
 
 ### Serving
 

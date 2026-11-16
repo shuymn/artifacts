@@ -107,13 +107,15 @@ async function readParts(request: Request): Promise<{ ok: true; parts: Parts } |
   let meta: string | undefined;
   const files: Blob[] = [];
   const issues: Issue[] = [];
-  // design.md section 6: a part's file name and Content-Type are ignored; only the names `meta` and `file` exist.
+  // design.md section 6: a part's file name and Content-Type are ignored; only the names `meta` and `file` exist. A
+  // `file` part without a file name is a string, already decoded as UTF-8: its bytes are lost, so it is refused.
   for (const [name, value] of form.value) {
     if (name === "meta") {
       if (meta !== undefined) issues.push({ field: "meta", reason: "duplicate_part" });
       meta = typeof value === "string" ? value : await value.text();
     } else if (name === "file") {
-      files.push(typeof value === "string" ? new Blob([value]) : value);
+      if (typeof value === "string") issues.push({ field: `files[${files.length}]`, reason: "not_a_file" });
+      files.push(typeof value === "string" ? new Blob() : value);
     } else {
       issues.push({ field: "body", reason: "unknown_part" });
     }
