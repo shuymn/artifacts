@@ -1,0 +1,136 @@
+/**
+ * `pull` (design.md section 9): writes every file of a version into a new or empty directory, so that a later
+ * `publish --id` from it reproduces the version. Files are created exclusively and checked against their listed size
+ * and SHA-256; a file that fails is removed, and the files written before it stay.
+ */
+import { createHash } from "node:crypto";
+import { lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
+import { dirname, posix, resolve, win32, type PlatformPath } from "node:path";
+
+import type { Api, ArtifactVersion, FileJson } from "./api.ts";
+import { CliError } from "./errors.ts";
+
+const HOST_PATHS: PlatformPath = process.platform === "win32" ? win32 : posix;
+
+/**
+ * Where a listed path is written: below `directory`, or refused. Each `/`-separated segment must be a plain name, and
+ * the resolved target must stay below the directory as `paths` reads it. Windows also separates on `\`, so a path
+ * holding one cannot be written there as listed; elsewhere `\` is part of a name.
+ */
+export function targetOf(directory: string, path: string, paths: PlatformPath = HOST_PATHS): string {
+  const refused = () => new CliError(`the version lists a path that cannot be written here: ${JSON.stringify(path)}`);
+  const segments = path.split("/");
+  if (segments.some((s) => s === "" || s === "." || s === ".." || s.includes("\0"))) throw refused();
+  if (paths.sep === "\\" && path.includes("\\")) throw refused();
+  const root = paths.resolve(directory);
+  const target = paths.resolve(root, ...segments);
+  const below = paths.relative(root, target);
+  if (below === "" || paths.isAbsolute(below) || below === ".." || below.startsWith(`..${paths.sep}`)) throw refused();
+  return target;
+}
+
+/** A path that is both a file and a directory of another path cannot exist in a file system. */
+function refuseClashes(files: readonly FileJson[]): void {
+  const paths = new Set(files.map((file) => file.path));
+  for (const path of paths) {
+    const segments = path.split("/");
+    for (let i = 1; i < segments.length; i++) {
+      const directory = segments.slice(0, i).join("/");
+      if (paths.has(directory)) {
+        throw new CliError(
+          `the version has a file ${JSON.stringify(directory)} and a file below it, ${JSON.stringify(path)}; ` +
+            "a directory cannot hold both",
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Creates `directory`, or accepts an existing empty one. A symbolic link is refused rather than followed, since its
+ * target would receive the files; directories this creates are its own.
+ */
+async function prepare(directory: string): Promise<void> {
+  const shown = JSON.stringify(directory);
+  // Resolving drops a trailing separator, which would make lstat follow a link.
+  const path = resolve(directory);
+  let info;
+  try {
+    info = await lstat(path);
+  } catch (error) {
+    if (codeOf(error) !== "ENOENT") throw new CliError(`cannot use ${shown} as the target directory`);
+    await mkdir(path, { recursive: true });
+    return;
+  }
+  if (info.isSymbolicLink()) throw new CliError(`${shown} is a symbolic link; pull into a new directory`);
+  if (!info.isDirectory()) throw new CliError(`${shown} is not a directory`);
+  if ((await readdir(path)).length > 0) throw new CliError(`${shown} is not empty; pull into a new directory`);
+}
+
+function codeOf(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
+/** The chunks of a download; a read that fails or passes the request's timeout ends the pull. */
+async function* download(body: ReadableStream<Uint8Array>, shown: string): AsyncGenerator<Uint8Array> {
+  try {
+    yield* body;
+  } catch (error) {
+    throw new CliError(
+      error instanceof DOMException
+        ? `the download of ${shown} did not finish in time`
+        : `the download of ${shown} broke off`,
+    );
+  }
+}
+
+async function writeFile(api: Api, id: string, version: number, file: FileJson, target: string): Promise<void> {
+  const shown = JSON.stringify(file.path);
+  // `wx` creates the file or fails, so nothing existing is overwritten and no link is followed.
+  const handle = await open(target, "wx").catch((error: unknown) => {
+    throw new CliError(
+      codeOf(error) === "EEXIST"
+        ? `cannot write ${shown}: another file of the version has the same name in this file system`
+        : `cannot write ${shown} (${codeOf(error) ?? "error"})`,
+    );
+  });
+  let complete = false;
+  try {
+    const body = await api.file(id, version, file.path);
+    const hash = createHash("sha256");
+    let size = 0;
+    for await (const chunk of download(body, shown)) {
+      hash.update(chunk);
+      size += chunk.byteLength;
+      // writeFile on a handle writes the whole chunk at the current position.
+      await handle.writeFile(chunk).catch((error: unknown) => {
+        throw new CliError(`cannot write ${shown} (${codeOf(error) ?? "error"})`);
+      });
+    }
+    if (size !== file.size || hash.digest("hex") !== file.sha256) {
+      throw new CliError(`the bytes of ${shown} differ from the version's listing`);
+    }
+    complete = true;
+  } finally {
+    await handle.close();
+    if (!complete) await unlink(target).catch(() => undefined);
+  }
+}
+
+export type Pulled = ArtifactVersion & { readonly dotNames: readonly string[] };
+
+export async function pull(api: Api, id: string, directory: string, version: number | undefined): Promise<Pulled> {
+  const result = await api.get(id, version);
+  const files = result.version.files;
+  const targets = files.map((file) => ({ file, target: targetOf(directory, file.path) }));
+  refuseClashes(files);
+  await prepare(directory);
+  for (const { file, target } of targets) {
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(api, id, result.version.number, file, target);
+  }
+  const dotNames = files.map((file) => file.path).filter((path) => path.split("/").some((s) => s.startsWith(".")));
+  return { ...result, dotNames };
+}
