@@ -1,5 +1,5 @@
 /*
- * The gallery's stylesheet: the Penpot design's tokens and components, one to one (docs/gallery/design.md).
+ * The gallery's stylesheet: the Pencil design's tokens and components, one to one (docs/gallery/design.md).
  * Each custom property is a token of docs/gallery/tokens.json; each comment `type.*` names the typography token a
  * rule applies. Fonts (@font-face) are declared where the Worker serves them, not here.
  */
@@ -187,7 +187,7 @@ a:focus-visible,
   gap: var(--space-2);
 }
 
-/* nav-tab: the border sits inside the padding, as Penpot's inner stroke does. */
+/* nav-tab: the border sits inside the padding, as the design's inner stroke does in Pencil. */
 .nav-tab {
   display: inline-flex;
   align-items: center;
