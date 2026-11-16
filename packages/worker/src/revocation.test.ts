@@ -2,7 +2,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { grantIdOf, hasRevocationRecord, recordingKv, revocationKey } from "./revocation.ts";
+import { fitsKvKey, grantOf, hasRevocationRecord, recordingKv, revocationKey } from "./revocation.ts";
 import { captureLogs, clearOAuthStorage, logEvents, never } from "./test-support.ts";
 
 beforeEach(async () => {
@@ -125,11 +125,18 @@ describe("OAUTH-5: the recording KV wrapper", () => {
 });
 
 describe("OAUTH-5: the revocation record's read", () => {
-  it("names the grant of a code or token of the library's form", () => {
-    expect(grantIdOf(`owner:${GRANT}:secret`)).toBe(GRANT);
+  it("names the grant of a code or token of the library's form, and the key the library reads it under", () => {
+    expect(grantOf(`owner:${GRANT}:secret`)).toEqual({ id: GRANT, key: GRANT_KEY });
     for (const malformed of ["", "owner", `owner:${GRANT}`, `owner:${GRANT}:a:b`]) {
-      expect(grantIdOf(malformed)).toBeUndefined();
+      expect(grantOf(malformed)).toBeUndefined();
     }
+  });
+
+  it("measures a key in UTF-8 bytes against KV's limit of 512", () => {
+    expect(fitsKvKey("k".repeat(512))).toBe(true);
+    expect(fitsKvKey("k".repeat(513))).toBe(false);
+    expect(fitsKvKey("é".repeat(256))).toBe(true);
+    expect(fitsKvKey(`k${"é".repeat(256)}`)).toBe(false);
   });
 
   it("finds a record and the absence of one", async () => {

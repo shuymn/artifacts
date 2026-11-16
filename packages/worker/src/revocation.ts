@@ -10,6 +10,7 @@
  * key: its keys start with `client:`, `grant:`, `token:`, `transaction:`, `client-assertion-jti:` or `enterprise-jti:`.
  */
 import { logEvent } from "./log.ts";
+import { utf8Length } from "./paths.ts";
 import { withTimeout } from "./timeout.ts";
 
 declare const grantIdBrand: unique symbol;
@@ -24,8 +25,13 @@ export function isGrantId(value: string): value is GrantId {
 
 /** `grant:<user>:<grant ID>`; the library refuses a user ID with `:`. */
 const GRANT_KEY = /^grant:[^:]+:([^:]+)$/;
-/** KV refuses a key longer than 512 bytes. */
+/** KV refuses a key longer than 512 bytes of UTF-8. */
 const MAX_KEY_BYTES = 512;
+
+/** Whether KV takes `key`; no record the library or the wrapper writes has a key it refuses. */
+export function fitsKvKey(key: string): boolean {
+  return utf8Length(key) <= MAX_KEY_BYTES;
+}
 
 export function revocationKey(grantId: string): string {
   return `revoked:${grantId}`;
@@ -71,18 +77,23 @@ export function recordingKv(base: KVNamespace, now: () => number): RecordingKv {
   return { kv, failed: () => failed };
 }
 
-/** The grant ID of a code or token of the library's form, `<user>:<grant ID>:<secret>`. */
-export function grantIdOf(credential: string): string | undefined {
+/**
+ * The grant a code or token of the library's form, `<user>:<grant ID>:<secret>`, names: its ID and the key under which
+ * the library reads it.
+ */
+export function grantOf(credential: string): { readonly id: string; readonly key: string } | undefined {
   const parts = credential.split(":");
-  return parts.length === 3 ? parts[1] : undefined;
+  if (parts.length !== 3) return undefined;
+  const [user = "", id = ""] = parts;
+  return { id, key: `grant:${user}:${id}` };
 }
 
 /**
- * Whether the grant `grantId` has a revocation record, read under the KV-read timeout (RES-2). A grant ID whose record
- * key would pass KV's key limit names no grant, since its grant key is longer still.
+ * Whether the grant `grantId` has a revocation record, read under the KV-read timeout (RES-2). An ID whose record key
+ * KV refuses has no record.
  */
 export async function hasRevocationRecord(kv: KVNamespace, grantId: string, timeoutMs: number): Promise<boolean> {
   const key = revocationKey(grantId);
-  if (new TextEncoder().encode(key).byteLength > MAX_KEY_BYTES) return false;
+  if (!fitsKvKey(key)) return false;
   return (await withTimeout(kv.get(key), timeoutMs)) !== null;
 }

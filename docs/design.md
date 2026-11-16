@@ -561,7 +561,9 @@ under `/.well-known/oauth-protected-resource` answer 404. The router does not us
   the library parses them (RES-1); the library's own bound on registration is 1 MiB.
 - A token request with `grant_type` `authorization_code` or `refresh_token` reaches the library only after the router
   has found no revocation record for the grant it names (Revocation, above); a KV failure or timeout there answers 503
-  `temporarily_unavailable`.
+  `temporarily_unavailable`. A code or refresh token whose grant key, `grant:<user>:<grant ID>`, would pass KV's limit
+  of 512 bytes names no grant and answers `invalid_grant` the same way: the library's read of that key would throw,
+  and its 503 would invite a retry that can never succeed.
 - The library's errors keep their RFC 6749 and RFC 7591 bodies, `{ "error", "error_description" }`, since clients
   parse them; its `onError` hook, which would otherwise write each error's description to the console, only logs
   `oauth.refused` with the code and the library's category, each from a closed set (DATA-1). `/mcp` and `/v1/` keep

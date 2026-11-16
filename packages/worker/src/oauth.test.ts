@@ -377,6 +377,9 @@ describe("PL-44: OAuth bodies are counted before the library reads them", () => 
   );
 });
 
+/** A code or token of the library's form whose grant key, `grant:owner:<grant ID>`, is `bytes` long. */
+const credentialWithGrantKey = (bytes: number) => `owner:${"a".repeat(bytes - "grant:owner:".length)}:x`;
+
 // OAUTH-5 at the token endpoint: a grant with a revocation record answers as a grant that is gone.
 describe("OAUTH-5: the revocation record's check before the token endpoint", () => {
   it("refuses a code of a revoked grant as the library refuses a code whose grant is gone", async () => {
@@ -417,6 +420,31 @@ describe("OAUTH-5: the revocation record's check before the token endpoint", () 
     // The grant itself is still there: only the record refused it.
     expect(await oauthKv().get(`grant:owner:${second.grantId}`)).not.toBeNull();
   });
+
+  it.each(["code exchange", "refresh"] as const)(
+    "refuses a %s whose grant key KV would refuse as a grant that is gone, rather than with a 503",
+    async (flow) => {
+      const world = new World();
+      const clientId = await register(world);
+      const send = (value: string) =>
+        flow === "refresh" ? refresh(world, clientId, value) : exchange(world, clientId, value);
+      const fetchSpy = vi.spyOn(OAuthAuthorizationServer.prototype, "fetch");
+      const logs = captureLogs();
+      // The library reads `grant:<user>:<grant ID>`: 512 bytes at KV's limit, one more past it.
+      const library = await errorOf(await send(credentialWithGrantKey(512)));
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(library).toMatchObject({ status: 400, body: { error: "invalid_grant" } });
+      const refused = await errorOf(await send(credentialWithGrantKey(513)));
+      expect(refused).toEqual(library);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      // The library's refusal and the router's log the same line.
+      const category = flow === "refresh" ? "refresh-token-grant" : "authorization-code-grant";
+      expect(logEvents(logs.lines)).toEqual([
+        { event: "oauth.refused", code: "invalid_grant", category },
+        { event: "oauth.refused", code: "invalid_grant", category },
+      ]);
+    },
+  );
 
   it.each(["refresh", "code exchange"])("refuses a grant that a %s wrote back after its revocation", async (flow) => {
     const world = new World();

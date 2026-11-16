@@ -11,7 +11,7 @@ import { readBytes } from "./body.ts";
 import type { Config } from "./config.ts";
 import { apiOrigin, appOrigin } from "./hosts.ts";
 import { errorName, logEvent } from "./log.ts";
-import { grantIdOf, hasRevocationRecord, isGrantId, recordingKv } from "./revocation.ts";
+import { fitsKvKey, grantOf, hasRevocationRecord, isGrantId, recordingKv } from "./revocation.ts";
 
 const TOKEN_PATH = "/oauth/token";
 const REGISTRATION_PATH = "/oauth/register";
@@ -151,13 +151,18 @@ function withoutCors(response: Response): Response {
   return answer;
 }
 
+type GrantType = { readonly parameter: string; readonly gone: string; readonly category: OAuthErrorCategory };
+
 /**
- * The grant types that use a grant: the parameter that names it, and what the library answers when the grant is gone,
- * which a revoked grant must look like.
+ * The grant types that use a grant: the parameter that names it, and what the library answers a client that
+ * authenticated when the grant is gone, with the category it logs; a revoked grant answers the same.
  */
-const GRANT_TYPES: ReadonlyMap<string, { readonly parameter: string; readonly gone: string }> = new Map([
-  ["authorization_code", { parameter: "code", gone: "Grant not found or authorization code expired" }],
-  ["refresh_token", { parameter: "refresh_token", gone: "Grant not found" }],
+const GRANT_TYPES: ReadonlyMap<string, GrantType> = new Map([
+  [
+    "authorization_code",
+    { parameter: "code", gone: "Grant not found or authorization code expired", category: "authorization-code-grant" },
+  ],
+  ["refresh_token", { parameter: "refresh_token", gone: "Grant not found", category: "refresh-token-grant" }],
 ]);
 
 /** The one value of `name` in `form`; undefined when it is missing, repeated or a file. */
@@ -168,12 +173,16 @@ function single(form: FormData, name: string): string | undefined {
 }
 
 /**
- * OAUTH-5: a token request whose code or refresh token names a grant with a revocation record answers `invalid_grant`,
- * before the library can write the grant back. The body is parsed as the library parses it: only an
- * `application/x-www-form-urlencoded` body that `formData()` reads. Any other body, and a repeated parameter, goes on
- * to the library, which refuses it before it reads a grant. Undefined when the request may go on.
+ * A token request whose code or refresh token names a grant that cannot be used answers `invalid_grant`, as the library
+ * answers a client that authenticated for a grant that is gone. Such a grant has a key KV refuses, which the library's
+ * read would turn into a 503 that invites a retry, or a revocation record (OAUTH-5), checked before the library can
+ * write the grant back. The router answers before the library authenticates the client, so a request without client
+ * authentication, which the library answers 401, learns whether the grant ID it sent has a record. The body is parsed
+ * as the library parses it: only an `application/x-www-form-urlencoded` body that `formData()` reads. Any other body,
+ * and a repeated parameter, goes on to the library, which refuses it before it reads a grant. Undefined when the
+ * request may go on.
  */
-async function refuseRevokedGrant(request: Request, kv: KVNamespace, timeoutMs: number): Promise<Response | undefined> {
+async function refuseGoneGrant(request: Request, kv: KVNamespace, timeoutMs: number): Promise<Response | undefined> {
   const mediaType = (request.headers.get("Content-Type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (mediaType !== "application/x-www-form-urlencoded") return undefined;
   let form: FormData;
@@ -185,17 +194,21 @@ async function refuseRevokedGrant(request: Request, kv: KVNamespace, timeoutMs: 
   const grantType = GRANT_TYPES.get(single(form, "grant_type") ?? "");
   if (grantType === undefined) return undefined;
   const credential = single(form, grantType.parameter);
-  const grantId = credential === undefined ? undefined : grantIdOf(credential);
-  if (grantId === undefined) return undefined;
+  const grant = credential === undefined ? undefined : grantOf(credential);
+  if (grant === undefined) return undefined;
+  if (!fitsKvKey(grant.key)) {
+    logEvent("oauth.refused", { code: "invalid_grant", category: grantType.category });
+    return oauthError(400, "invalid_grant", grantType.gone);
+  }
   let revoked: boolean;
   try {
-    revoked = await hasRevocationRecord(kv, grantId, timeoutMs);
+    revoked = await hasRevocationRecord(kv, grant.id, timeoutMs);
   } catch (error) {
     logEvent("request.failed", { error: errorName(error), host: "api" });
     return oauthError(503, "temporarily_unavailable", "The authorization server is temporarily unavailable");
   }
   if (!revoked) return undefined;
-  logEvent("oauth.refused", { reason: "revoked", ...(isGrantId(grantId) ? { grant: grantId } : {}) });
+  logEvent("oauth.refused", { reason: "revoked", ...(isGrantId(grant.id) ? { grant: grant.id } : {}) });
   return oauthError(400, "invalid_grant", grantType.gone);
 }
 
@@ -233,7 +246,7 @@ export async function serveOAuth(
     }
     forwarded = new Request(request.url, { method: "POST", headers: request.headers, body: body.value });
     if (url.pathname === TOKEN_PATH) {
-      const refusal = await refuseRevokedGrant(forwarded.clone(), kv, deps.kvReadMs);
+      const refusal = await refuseGoneGrant(forwarded.clone(), kv, deps.kvReadMs);
       if (refusal !== undefined) return refusal;
     }
   }
