@@ -147,11 +147,12 @@ and the threats are the three adversaries below, not untrusted users.
   credential of the library's three-part form is checked by the library only, any other against `API_TOKENS` only.
   Neither check reads D1 or R2, and the OAuth check reads two KV records, the token's and its grant's revocation
   record (OAUTH-5); a failure answers 401 `unauthorized`. The
-  OAuth endpoints and metadata documents on the API host take no credential. _Enforced (main)_ for API tokens in
-  `src/tokens.ts`; _Planned (OAuth)_ for access tokens, the open OAuth endpoints and an `API_TOKENS` that is missing or
-  `{}`, which refuses every API token. Pinned by behavior (`src/routing.test.ts`: each REST route and `/mcp`: no
-  header, another scheme, unknown and removed tokens, nothing changed; planned: PL-40, PL-46) and review (the
-  constant-time comparison). **Changed for OAuth:** "every request to the API host" became "every request to `/v1/`
+  OAuth endpoints and metadata documents on the API host take no credential. An `API_TOKENS` that is missing or `{}`
+  refuses every API token, and a malformed one answers 503. _Enforced (main)_ for API tokens in `src/tokens.ts` and
+  `src/config.ts`; _Planned (OAuth)_ for access tokens and the open OAuth endpoints. Pinned by behavior
+  (`src/routing.test.ts`: each REST route and `/mcp`: no header, another scheme, unknown and removed tokens, nothing
+  changed; every token refused while `API_TOKENS` is missing or `{}`, and 503 on every host for a malformed one
+  (PL-46); planned: PL-40) and review (the constant-time comparison). **Changed for OAuth:** "every request to the API host" became "every request to `/v1/`
   and `/mcp`", because discovery, registration and the token exchange must answer before a client holds a credential
   (design.md, AC-14). They reach KV only, and a client record or a code grants nothing without the owner's approval
   (OAUTH-1), so no artifact operation is open.

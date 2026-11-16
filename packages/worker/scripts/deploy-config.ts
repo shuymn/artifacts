@@ -333,8 +333,8 @@ export type DeployCheck =
 
 /**
  * Checks the deployment values against wrangler.jsonc (`base`) and returns `base` with them merged in, or every problem
- * found. The variables are checked by `parseConfig` once each has a value; `API_TOKENS` is a secret that the values
- * never hold, so the parser sees an empty token list in its place.
+ * found. The variables are checked by `parseConfig` once each has a value; `API_TOKENS` is an optional secret that the
+ * values never hold.
  */
 export function checkDeployValues(base: Json, values: unknown): DeployCheck {
   if (!isRecord(values)) return { ok: false, problems: ["the deployment values are not a JSON object"] };
@@ -356,7 +356,7 @@ export function checkDeployValues(base: Json, values: unknown): DeployCheck {
     const own = variableProblems(vars);
     problems.push(...own);
     if (own.length === 0) {
-      const parsed = parseConfig({ ...vars, API_TOKENS: "{}" });
+      const parsed = parseConfig(vars);
       if (parsed.ok) config = parsed.config;
       else problems.push(configProblem(parsed.code, parsed.variable));
     }

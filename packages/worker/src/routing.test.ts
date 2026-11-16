@@ -226,6 +226,58 @@ describe("TOK-1: bearer tokens on the API host", () => {
   });
 });
 
+// PL-46, TOK-1: a deployment turns API tokens off by deleting the secret or putting {}; a malformed value fails loudly.
+describe("PL-46: optional API_TOKENS", () => {
+  const API_ROUTES: [string, string][] = [
+    ["GET", "/v1/artifacts"],
+    ["POST", "/mcp"],
+  ];
+
+  it.each(["missing", "{}"])(
+    "refuses every API token while API_TOKENS is %s, and serves the other hosts",
+    async (state) => {
+      const world = new World();
+      const created = await world.created({ title: "t", files: { "index.html": "page" } });
+      if (state === "missing") without(world, "API_TOKENS");
+      else world.env = { ...world.env, API_TOKENS: state };
+      const logs = captureLogs();
+      for (const token of [TOKENS.codex, TOKENS.claude]) {
+        for (const [method, path] of API_ROUTES) {
+          const response = await world.api(method, path, { token });
+          expect({ method, path, status: response.status }).toEqual({ method, path, status: 401 });
+          expect(await response.json()).toMatchObject({ error: { code: "unauthorized" } });
+        }
+      }
+      expect(logEvents(logs.lines)).toEqual(
+        Array.from({ length: 4 }, () => ({ event: "token.refused", reason: "unknown" })),
+      );
+      const gallery = await world.fetch(`https://${APP_HOST}/`, {
+        headers: { "Cf-Access-Jwt-Assertion": await world.jwt({ aud: APP_AUD }) },
+      });
+      expect(gallery.status).toBe(200);
+      expect(await (await world.content(created.artifact.id, "/")).text()).toBe("page");
+    },
+  );
+
+  it.each(["", "not json", "[]", JSON.stringify({ codex: "x" })])(
+    "answers 503 on every host for API_TOKENS %j, without storage",
+    async (value) => {
+      const world = new World({ vars: { API_TOKENS: value } });
+      const { db, bucket } = untouchable(world);
+      const logs = captureLogs();
+      for (const url of [`https://${APP_HOST}/`, `${API}/v1/artifacts`, `https://${ID}${CONTENT_SUFFIX}/`]) {
+        const response = await world.fetch(url, { headers: { Authorization: `Bearer ${TOKENS.codex}` } });
+        expect({ url, status: response.status }).toEqual({ url, status: 503 });
+      }
+      expect(db.batches).toBe(0);
+      expect(bucket.calls).toEqual([]);
+      expect(logEvents(logs.lines)).toEqual(
+        Array.from({ length: 3 }, () => ({ event: "config.invalid", reason: "invalid", variable: "API_TOKENS" })),
+      );
+    },
+  );
+});
+
 // PL-47, section 11, ACC-2: OAuth is on outside a localhost configuration, and needs its storage there.
 describe("PL-47: OAuth storage and localhost", () => {
   it("answers 503 on every host without OAUTH_KV outside a localhost configuration, before Access or storage", async () => {

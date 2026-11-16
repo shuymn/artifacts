@@ -55,6 +55,7 @@ export type Config = {
    * only on loopback hosts, not on names under `localhost`.
    */
   readonly oauth: boolean;
+  /** Empty when `API_TOKENS` is missing or `{}`: every API token is then refused (TOK-1). */
   readonly tokens: readonly ApiToken[];
 };
 
@@ -164,10 +165,14 @@ export function parseConfig(input: ConfigInput): ConfigResult {
     access = { teamDomain: host, appAud, contentAud };
   }
 
-  const tokensText = text(input, "API_TOKENS");
-  if (typeof tokensText !== "string") return tokensText;
-  const tokens = parseApiTokens(tokensText);
-  if (tokens === undefined) return failure("invalid", "API_TOKENS");
+  // Optional (design.md section 7): a deployment turns API tokens off by deleting the secret or putting `{}`. Any other
+  // value that is not a valid object, an empty one included, is refused, so a typo fails loudly.
+  let tokens: readonly ApiToken[] = [];
+  if (input.API_TOKENS !== undefined) {
+    const parsedTokens = typeof input.API_TOKENS === "string" ? parseApiTokens(input.API_TOKENS) : undefined;
+    if (parsedTokens === undefined) return failure("invalid", "API_TOKENS");
+    tokens = parsedTokens;
+  }
 
   return {
     ok: true,

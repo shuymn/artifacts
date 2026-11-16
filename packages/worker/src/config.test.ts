@@ -53,6 +53,17 @@ describe("parseConfig", () => {
     expect(parsed).toMatchObject({ ok: true, config: { access: null, oauth: false, scheme: "http" } });
   });
 
+  // PL-46: a deployment turns API tokens off by deleting the secret or putting {}.
+  it.each([
+    ["missing", undefined],
+    ["{}", "{}"],
+  ])("takes API_TOKENS %s as no API token", (_name, value) => {
+    for (const input of [SHARED_DOMAIN, LOCAL]) {
+      const parsed = parseConfig({ ...input, API_TOKENS: value });
+      expect(parsed.ok && parsed.config.tokens).toEqual([]);
+    }
+  });
+
   it("takes the team domain as a host or an https URL", () => {
     const parsed = parseConfig({ ...SHARED_DOMAIN, ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com/" });
     expect(parsed).toMatchObject({ ok: true, config: { access: { teamDomain: "team.cloudflareaccess.com" } } });
@@ -123,7 +134,10 @@ describe("parseConfig", () => {
     ["ACCESS_TEAM_DOMAIN", "http://team.cloudflareaccess.com", "invalid"],
     ["ACCESS_APP_AUD", undefined, "missing"],
     ["ACCESS_CONTENT_AUD", "has space", "invalid"],
-    ["API_TOKENS", undefined, "missing"],
+    // PL-46: a malformed API_TOKENS, an empty one included, is refused, so a typo fails loudly.
+    ["API_TOKENS", "", "invalid"],
+    ["API_TOKENS", 1, "invalid"],
+    ["API_TOKENS", "null", "invalid"],
     ["API_TOKENS", "not json", "invalid"],
     ["API_TOKENS", "[]", "invalid"],
     ["API_TOKENS", JSON.stringify({ Codex: HASH }), "invalid"],

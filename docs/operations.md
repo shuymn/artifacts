@@ -214,8 +214,8 @@ application](https://developers.cloudflare.com/cloudflare-one/access-controls/ap
 | `vars.ARCHIVE_AFTER_DAYS`              | days until an untouched artifact is archived (design.md section 5)                       |
 | `vars.ACCESS_*`                        | the team domain and the two AUD tags                                                     |
 
-`API_TOKENS` is a secret, optional from the OAuth release, and never part of these values (section 4). The values live
-in two places, never both at once:
+`API_TOKENS` is an optional secret, never part of these values (section 4). The values live in two places, never both
+at once:
 
 - **Workers Builds:** the build variable `ARTIFACTS_DEPLOY_JSONC` holds the whole file, comments included.
 - **The owner's machine:** `packages/worker/wrangler.deploy.jsonc`, which git ignores.
@@ -359,13 +359,13 @@ pnpm exec wrangler secret put API_TOKENS < ~/artifacts/api-tokens.json
 `wrangler secret put` reads the value from standard input when piped, and creates and deploys a new version at once
 ([`secret put`](https://developers.cloudflare.com/workers/wrangler/commands/workers/#secret-put)), and a deployment
 never deletes a secret ([`deploy`](https://developers.cloudflare.com/workers/wrangler/commands/workers/#deploy)). Until
-the first put, the Worker answers 503 on every host; from the OAuth release it serves OAuth only instead.
+the first put, every API token is refused; from the OAuth release, OAuth clients still sign in.
 
 - **Rotate:** run `artifacts token <name>` again, replace the entry, put the object, then update the agent; the old
   token is refused from the put on.
 - **Revoke:** remove the entry and put the object. The token is refused from the next request (TOK-1).
-- **Turn all off** (Planned (OAuth)): put `{}`, or `pnpm exec wrangler secret delete API_TOKENS`. Every API token is
-  refused from the next request, and OAuth clients keep working (AC-18). A malformed object still answers 503.
+- **Turn all off:** put `{}`, or `pnpm exec wrangler secret delete API_TOKENS`. Every API token is refused from the
+  next request; from the OAuth release, OAuth clients keep working (AC-18). A malformed object still answers 503.
 
 ### OAuth grants (Planned (OAuth))
 
