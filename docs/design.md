@@ -103,7 +103,7 @@ skipped only when every configured host is a `localhost` name, and the deploymen
 - **ID:** 26 characters from `a-z2-7` (RFC 4648 base32, lowercase), each from 5 bits of a byte of
   `crypto.getRandomValues`: 130 bits, a valid DNS label, and not guessable from a public link. Deleting keeps a
   tombstone row, so an ID is never reused and no new artifact inherits an old origin's state (ISO-1).
-- **Title:** one line (no control characters), at most 1 KiB of UTF-8: lists show it on one line.
+- **Title:** non-empty, one line (no control characters), at most 1 KiB of UTF-8: lists show it on one line.
 - **Description:** any text, tabs and line breaks included, at most 16 KiB of UTF-8: a listing carries it for up to 100
   artifacts.
 - Both belong to a version; the artifact shows its latest version's. An update that omits them keeps the base's.
@@ -214,15 +214,16 @@ extension, with `; charset=utf-8` on text types and `application/octet-stream` f
 
 ### Limits
 
-| Bound                                | Value                | Reason                                                                                                                                                                                                                                        |
-| ------------------------------------ | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| REST publish request body            | 32 MiB               | `formData()` holds the body in memory; an isolate has 128 MB and may serve several requests at once                                                                                                                                           |
-| MCP request body                     | 4 MiB                | the SDK's default; large binaries go through REST                                                                                                                                                                                             |
-| Files per version and per request    | 2000                 | each new file costs up to four R2 calls (`head`, `put`, two retries) against 10,000 subrequests per invocation ([limits](https://developers.cloudflare.com/workers/platform/limits/)); equal bounds let any version be created in one request |
-| Path, title, description             | 1 KiB, 1 KiB, 16 KiB | above                                                                                                                                                                                                                                         |
-| File content returned by `read_file` | 1 MiB                | tool results go into the model's context                                                                                                                                                                                                      |
-| Page size of a listing               | 1 to 100, default 50 | response size                                                                                                                                                                                                                                 |
-| Wait for an R2 call, a D1 read       | 30 s, 10 s           | RES-2; a `put` carries up to the REST request bound, and a D1 read is an indexed lookup or a page of at most 100 rows. The Access key set waits 5 s (ACC-1)                                                                                   |
+| Bound                                | Value                      | Reason                                                                                                                                                                                                                                        |
+| ------------------------------------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| REST publish request body            | 32 MiB                     | `formData()` holds the body in memory; an isolate has 128 MB and may serve several requests at once                                                                                                                                           |
+| MCP request body                     | 4 MiB                      | the SDK's default; large binaries go through REST                                                                                                                                                                                             |
+| REST `PATCH` body                    | 4 KiB, whitespace included | the largest valid body is under 100 bytes; the bound is counted on the raw body                                                                                                                                                               |
+| Files per version and per request    | 2000                       | each new file costs up to four R2 calls (`head`, `put`, two retries) against 10,000 subrequests per invocation ([limits](https://developers.cloudflare.com/workers/platform/limits/)); equal bounds let any version be created in one request |
+| Path, title, description             | 1 KiB, 1 KiB, 16 KiB       | above                                                                                                                                                                                                                                         |
+| File content returned by `read_file` | 1 MiB                      | tool results go into the model's context                                                                                                                                                                                                      |
+| Page size of a listing               | 1 to 100, default 50       | response size                                                                                                                                                                                                                                 |
+| Wait for an R2 call, a D1 read       | 30 s, 10 s                 | RES-2; a `put` carries up to the REST request bound, and a D1 read is an indexed lookup or a page of at most 100 rows. The Access key set waits 5 s (ACC-1)                                                                                   |
 
 A file's size is bounded by the request it travels in. The body is counted as it is read (RES-1). There is no quota and
 no limit on versions.
