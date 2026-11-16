@@ -101,16 +101,10 @@ const ZONE_CASES = [
     "routes[0] (artifacts.example.com) is not in the zone example.org",
   ],
   [
-    "a zone_name with an uppercase letter",
-    2,
-    { pattern: "*-art.example.com/*", zone_name: "Example.com" },
-    "routes[2].zone_name is not a lowercase domain name, such as example.com",
-  ],
-  [
     "a zone_name of one label",
     2,
     { pattern: "*-art.example.com/*", zone_name: "com" },
-    "routes[2].zone_name is not a lowercase domain name, such as example.com",
+    "routes[2].zone_name is not a domain name, such as example.com",
   ],
   [
     "a blank zone_id",
@@ -359,6 +353,11 @@ describe("checkDeployValues", () => {
   it("accepts a zone_id, and a zone_name that is the host itself", () => {
     let values = set(filled(), ["routes", 2], { pattern: "*-art.example.com/*", zone_id: ZONE_ID });
     values = set(values, ["routes", 0, "zone_name"], "artifacts.example.com");
+    expect(problems(values)).toEqual([]);
+  });
+
+  it("compares a zone_name without regard to case", () => {
+    const values = set(filled(), ["routes", 2], { pattern: "*-art.example.com/*", zone_name: "Example.COM" });
     expect(problems(values)).toEqual([]);
   });
 

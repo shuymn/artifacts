@@ -194,8 +194,8 @@ const TARGET_NAMES: Record<Target, string> = {
 
 const ROUTE_KEYS: ReadonlySet<string> = new Set(["pattern", "custom_domain", "zone_name", "zone_id"]);
 
-/** A zone: a lowercase domain name of two labels or more. */
-const ZONE_NAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+/** A zone: a domain name of two labels or more, in any case (DNS names are case-insensitive, RFC 4343). */
+const ZONE_NAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
 const ZONE_ID = /^[0-9a-f]{32}$/;
 
 /** The host a route serves: a Custom Domain's pattern, or the `<host>` of a `<host>/*` route. */
@@ -220,12 +220,12 @@ function zoneProblems(entry: Json, at: string, host: string | undefined): string
   }
   if (zoneName === "") problems.push(`${at}.zone_name is empty`);
   else if (zoneName !== undefined && (typeof zoneName !== "string" || !ZONE_NAME.test(zoneName))) {
-    problems.push(`${at}.zone_name is not a lowercase domain name, such as example.com`);
+    problems.push(`${at}.zone_name is not a domain name, such as example.com`);
   } else if (
     typeof zoneName === "string" &&
     host !== undefined &&
-    host !== zoneName &&
-    !host.endsWith(`.${zoneName}`)
+    host !== zoneName.toLowerCase() &&
+    !host.endsWith(`.${zoneName.toLowerCase()}`)
   ) {
     problems.push(`${at} (${host}) is not in the zone ${zoneName}`);
   }
