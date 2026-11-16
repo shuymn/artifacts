@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/shuymn/artifacts/compare/v0.2.1...v0.2.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* revalidate gallery pages, set Vary and MCP headers ([e1a1171](https://github.com/shuymn/artifacts/commit/e1a1171df697e666d20f3b9f6c4e319847a9e100))
+
 ## [0.2.1](https://github.com/shuymn/artifacts/compare/v0.2.0...v0.2.1) (2026-11-16)
 
 
