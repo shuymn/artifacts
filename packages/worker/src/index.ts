@@ -1,24 +1,24 @@
 /**
  * The artifacts Worker (docs/design.md). One Worker serves every host: it classifies the request's host first
- * (HOST-1), then authenticates it for the host's class (Access JWT on the app and private content hosts, a bearer token
- * on the API host, none on public hosts) before any storage is read. The API host's OAuth authorization server paths
- * take no credential; only they reach the OAuth library's `fetch`, and only the app host's authorization endpoint, behind
- * Access, reaches its helpers.
+ * (HOST-1), then authenticates it for the host's class (Access JWT on the app and private content hosts, a bearer
+ * credential on the API host's `/mcp` and `/v1/`, none on public hosts) before any D1 or R2 call. The API host's OAuth
+ * authorization server paths and protected resource metadata take no credential; only the former reach the OAuth
+ * library's `fetch`, and only the app host's authorization endpoint, behind Access, reaches its helpers.
  */
 import { AccessVerifier, type AccessSettings } from "./access.ts";
 import { parseConfig, type Config } from "./config.ts";
 import { serveConsent, withConsentHeaders, type ConsentAnswer } from "./consent.ts";
+import { checkCredential, resourceMetadataAllow, resourceOfPath, serveResourceMetadata } from "./credentials.ts";
 import { serveGallery, withGalleryPolicy } from "./gallery/route.ts";
 import { classifyHost } from "./hosts.ts";
 import { newArtifactId, type ArtifactId } from "./id.ts";
 import { errorName, logEvent, type HostKind } from "./log.ts";
 import { handleMcp } from "./mcp.ts";
-import { AUTHORIZE_PATH, isApiOAuthPath, LIBRARY_PATHS, serveOAuth } from "./oauth.ts";
+import { AUTHORIZE_PATH, isApiOAuthPath, isResourceMetadataPath, LIBRARY_PATHS, serveOAuth } from "./oauth.ts";
 import type { OperationDeps } from "./operations.ts";
 import { handleRest, jsonResponse, restAllow, transportError } from "./rest.ts";
 import { methodAllowed, methodNotAllowed, plainResponse, serveArtifact, type BrowserClass } from "./serve.ts";
 import { TIMEOUTS, type Timeouts } from "./timeout.ts";
-import { authenticate } from "./tokens.ts";
 
 /** What the Worker takes from its environment besides bindings and variables; tests replace each. */
 export type WorkerDeps = {
@@ -63,10 +63,11 @@ async function refuseWithoutAccess(
 
 const noSuchRoute = () => jsonResponse(404, { error: { code: "not_found", message: "no such route" } });
 
-/** The methods of the route that takes `url` behind a bearer token, for `Allow`; undefined when none does. */
+/** The methods of the API route that takes `url`, for `Allow`; undefined when none does. */
 function apiAllow(url: URL, config: Config): string | undefined {
   if (url.pathname === "/mcp") return "POST";
   if (url.pathname.startsWith("/v1/")) return restAllow(url, config);
+  if (config.oauth) return resourceMetadataAllow(url.pathname);
   return undefined;
 }
 
@@ -93,13 +94,19 @@ async function api(
     const allow = apiAllow(url, config);
     return allow === undefined ? noSuchRoute() : transportError("method_not_allowed", { Allow: allow });
   }
-  const auth = await authenticate(request, config.tokens);
-  if (!auth.ok) {
-    logEvent("token.refused", { reason: auth.reason });
-    return transportError("unauthorized", { "WWW-Authenticate": "Bearer" });
+  if (config.oauth && isResourceMetadataPath(url.pathname)) {
+    return serveResourceMetadata(request, url, config) ?? noSuchRoute();
   }
-  if (url.pathname === "/mcp") return handleMcp(request, operationDeps(env, config, deps), auth.name);
-  if (url.pathname.startsWith("/v1/")) return handleRest(request, url, operationDeps(env, config, deps), auth.name);
+  const resource = resourceOfPath(url.pathname);
+  // TOK-1 covers `/mcp` and `/v1/`; where OAuth is on, a 401 must name a resource's metadata, and another path has none.
+  if (config.oauth && resource === undefined) return noSuchRoute();
+  const auth = await checkCredential(request, config, resource, config.oauth ? env.OAUTH_KV : undefined, {
+    now: deps.now,
+    kvReadMs: deps.timeouts.kvReadMs,
+  });
+  if (!auth.ok) return auth.response;
+  if (resource === "mcp") return handleMcp(request, operationDeps(env, config, deps), auth.publisher);
+  if (resource === "v1") return handleRest(request, url, operationDeps(env, config, deps), auth.publisher);
   return noSuchRoute();
 }
 

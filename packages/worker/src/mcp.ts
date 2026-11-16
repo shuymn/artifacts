@@ -1,14 +1,15 @@
 /**
  * The MCP adapter at `/mcp` on the API host (design.md section 8, "MCP server"). The router has checked the host
- * (HOST-1) and the bearer token (TOK-1); this module checks the `Origin` (HOST-3), removes the `Authorization` header
- * and builds a stateless `@modelcontextprotocol/server` handler for the request, whose factory closure holds the token
- * name, so the token never reaches the SDK (TOK-2). Each tool decodes its arguments, calls an operation of
+ * (HOST-1) and the bearer credential (TOK-1); this module checks the `Origin` (HOST-3), removes the `Authorization`
+ * header and builds a stateless `@modelcontextprotocol/server` handler for the request, whose factory closure holds the
+ * publisher, so the credential never reaches the SDK (TOK-2). Each tool decodes its arguments, calls an operation of
  * operations.ts and encodes its result; an operation error is a tool result with `isError: true` and the object REST
  * answers with (P5). Arguments that fail a tool's schema are refused by the SDK, as it forms the refusal.
  */
 import { createMcpHandler, McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
+import type { Publisher } from "./credentials.ts";
 import { encodeContent, ENCODINGS, decodeContent } from "./encoding.ts";
 import { errorBody, type Issue, type OperationError, type Result } from "./errors.ts";
 import { apiOrigin } from "./hosts.ts";
@@ -39,7 +40,6 @@ import {
   titleSchema,
   versionNumberSchema,
 } from "./schemas.ts";
-import type { TokenName } from "./tokens.ts";
 
 /** design.md section 8, "Server `instructions`", word for word. */
 export const INSTRUCTIONS = `This server publishes HTML pages ("artifacts") that the owner opens in a browser. Each artifact has its own origin;
@@ -270,8 +270,8 @@ async function readTool(deps: OperationDeps, args: z.output<typeof readArguments
   });
 }
 
-/** The server for one request: every tool of design.md section 8, acting as `token`. */
-export function createServer(deps: OperationDeps, token: TokenName): McpServer {
+/** The server for one request: every tool of design.md section 8, acting as `publisher`. */
+export function createServer(deps: OperationDeps, publisher: Publisher): McpServer {
   const server = new McpServer(
     { name: "artifacts", version: "0.0.0" },
     {
@@ -291,7 +291,7 @@ export function createServer(deps: OperationDeps, token: TokenName): McpServer {
       outputSchema: publishResult,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
-    guardTool(async (args) => encode(await createArtifact(deps, token, args))),
+    guardTool(async (args) => encode(await createArtifact(deps, publisher, args))),
   );
 
   server.registerTool(
@@ -306,7 +306,7 @@ export function createServer(deps: OperationDeps, token: TokenName): McpServer {
     },
     guardTool(async (args) =>
       encode(
-        await updateArtifact(deps, token, {
+        await updateArtifact(deps, publisher, {
           id: args.id,
           baseVersion: args.base_version,
           title: args.title,
@@ -376,7 +376,7 @@ export function createServer(deps: OperationDeps, token: TokenName): McpServer {
       outputSchema: settingsResult,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
-    guardTool(async (args) => encode(await updateSettings(deps, token, { id: args.id, public: args.public }))),
+    guardTool(async (args) => encode(await updateSettings(deps, publisher, { id: args.id, public: args.public }))),
   );
 
   server.registerTool(
@@ -388,7 +388,7 @@ export function createServer(deps: OperationDeps, token: TokenName): McpServer {
       outputSchema: settingsResult,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
-    guardTool(async (args) => encode(await updateSettings(deps, token, { id: args.id, archive: args.archive }))),
+    guardTool(async (args) => encode(await updateSettings(deps, publisher, { id: args.id, archive: args.archive }))),
   );
 
   server.registerTool(
@@ -400,7 +400,7 @@ export function createServer(deps: OperationDeps, token: TokenName): McpServer {
       outputSchema: deleteResult,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
-    guardTool(async (args) => encode(await deleteArtifact(deps, token, args))),
+    guardTool(async (args) => encode(await deleteArtifact(deps, publisher, args))),
   );
 
   return server;
@@ -423,14 +423,14 @@ function withApiHeaders(response: Response): Response {
 }
 
 /**
- * Serves one `/mcp` request after the token check (design.md section 8): a foreign `Origin` answers 403 (HOST-3);
+ * Serves one `/mcp` request after the credential check (design.md section 8): a foreign `Origin` answers 403 (HOST-3);
  * otherwise the request goes to the SDK without its `Authorization` header (TOK-2). The SDK answers `GET` and `DELETE`
  * with 405 and a body over 4 MiB, counted as it is read, with 413. Every answer has the API's headers, the SDK's too.
  */
 export async function handleMcp(
   request: Request,
   deps: OperationDeps,
-  token: TokenName,
+  publisher: Publisher,
   createHandler: McpHandlerFactory = createMcpHandler,
 ): Promise<Response> {
   const origin = request.headers.get("Origin");
@@ -446,7 +446,7 @@ export async function handleMcp(
   }
   const headers = new Headers(request.headers);
   headers.delete("Authorization");
-  const handler = createHandler(() => createServer(deps, token), {
+  const handler = createHandler(() => createServer(deps, publisher), {
     // The SDK reports errors it answered itself; the log carries their class only (DATA-1).
     onerror: (error) => logEvent("request.failed", { error: errorName(error), host: "api" }),
   });

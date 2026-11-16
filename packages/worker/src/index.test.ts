@@ -7,5 +7,7 @@ it("answers an unknown host 404 and the API without a token 401", async () => {
   expect(unknown.status).toBe(404);
   const api = await exports.default.fetch("https://artifacts-api.example.com/v1/artifacts");
   expect(api.status).toBe(401);
-  expect(api.headers.get("WWW-Authenticate")).toBe("Bearer");
+  expect(api.headers.get("WWW-Authenticate")).toBe(
+    'Bearer resource_metadata="https://artifacts-api.example.com/.well-known/oauth-protected-resource/v1"',
+  );
 });

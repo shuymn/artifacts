@@ -1,6 +1,6 @@
 // The grants API on REST (design.md section 8, "Grants"; section 7, "Revocation"): the listing, the revocation of one
-// grant through the library's `revokeGrant` and the recording wrapper (OAUTH-5, PL-41 at the token endpoint), its
-// failures (RES-2) and its logs (DATA-1). Grants come from the library's `completeAuthorization`, standing in for the
+// grant through the library's `revokeGrant` and the recording wrapper (OAUTH-5, PL-41 at the token endpoint and on
+// `/mcp` and `/v1/`), its failures (RES-2) and its logs (DATA-1). Grants come from the library's `completeAuthorization`, standing in for the
 // consent page of a later step.
 import { OAuthAuthorizationServer } from "@cloudflare/workers-oauth-provider";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,8 +14,11 @@ import {
   refresh,
   register,
   signedIn,
+  tokenKey,
   tokensOf,
+  useToken,
   type Fault,
+  type ResourceRoute,
 } from "./oauth-test-support.ts";
 import { revocationKey } from "./revocation.ts";
 import { API, captureLogs, clearOAuthStorage, gate, logEvents, stringAt, TOKENS, World } from "./test-support.ts";
@@ -231,12 +234,17 @@ describe("DELETE /v1/grants/{id}", () => {
     expect(helperSpy).not.toHaveBeenCalled();
   });
 
-  it.each(["refresh", "code exchange"] as const)(
-    "refuses a grant that a %s wrote back after its revocation through DELETE, and keeps it out of the listing",
-    async (flow) => {
+  it.each<["refresh" | "code exchange", ResourceRoute]>([
+    ["refresh", "mcp"],
+    ["refresh", "v1"],
+    ["code exchange", "mcp"],
+    ["code exchange", "v1"],
+  ])(
+    "refuses a grant that a %s wrote back after its revocation through DELETE, on /%s, and keeps it out of the listing",
+    async (flow, resource) => {
       const world = new World();
       const clientId = await register(world);
-      const code = await authorize(world, clientId);
+      const code = await authorize(world, clientId, `${API}/${resource}`);
       const grantId = code.split(":")[1] ?? "";
       const first = flow === "refresh" ? await tokensOf(await exchange(world, clientId, code)) : undefined;
       // The flow is held at its write of the grant, which follows its read, while DELETE revokes the grant.
@@ -255,8 +263,13 @@ describe("DELETE /v1/grants/{id}", () => {
       held.open();
       const raced = await tokensOf(await racing);
       healed(world);
-      // The library wrote the grant back after its deletion; the record still refuses it and hides it.
+      // The library wrote the grant back after its deletion, with a new access token; the record still refuses both,
+      // and hides the grant.
       expect(await oauthKv().get(grantKey(grantId))).not.toBeNull();
+      expect(await oauthKv().get(await tokenKey(raced.access_token))).not.toBeNull();
+      const used = await useToken(world, resource, raced.access_token);
+      expect(used.status).toBe(401);
+      expect(used.headers.get("WWW-Authenticate")).toContain('error="invalid_token"');
       expect(await listed(world)).toEqual([]);
       const after = await refresh(world, clientId, raced.refresh_token);
       expect(await after.json()).toEqual({ error: "invalid_grant", error_description: "Grant not found" });

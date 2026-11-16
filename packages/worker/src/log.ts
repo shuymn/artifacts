@@ -66,8 +66,8 @@ export type HostKind = (typeof HOST_KINDS)[number];
 
 /** Every field a log line can carry, each typed by a closed set, a validated name or a number. */
 export type LogFields = {
-  /** `revoked`: the token endpoint refused a grant with a revocation record. */
-  readonly reason?: ConfigErrorCode | AccessReason | TokenRefusal | StorageFailure | "revoked" | ConsentRefusal;
+  /** `revoked`: a grant with a revocation record, refused at the token endpoint or on `/mcp` and `/v1/`. */
+  readonly reason?: ConfigErrorCode | AccessReason | TokenRefusal | StorageFailure | ConsentRefusal;
   readonly variable?: ConfigVariable;
   /** A binding the configuration needs and the Worker lacks. */
   readonly binding?: "OAUTH_KV";

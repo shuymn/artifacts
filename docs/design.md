@@ -550,7 +550,11 @@ On `/mcp` and `/v1/`, the router reads `Authorization: Bearer <credential>` (TOK
   form and never tries the other; such a token is regenerated with `artifacts token`.
 - Neither path falls back to the other. A missing, unknown, expired, revoked or wrong-audience credential answers 401
   `unauthorized` with `WWW-Authenticate: Bearer resource_metadata="<the route's metadata URL>"`, and
-  `error="invalid_token"` when a credential was sent. A KV failure or timeout answers 503 `unavailable`.
+  `error="invalid_token"` when a credential was sent. A KV failure or timeout answers 503 `unavailable`. A credential
+  whose token key, `token:<user>:<grant ID>:<SHA-256>`, would pass KV's limit of 512 bytes is unknown, refused
+  without the library's read, which would throw and answer 503.
+- Where OAuth is on, any other path of the API host outside the OAuth paths answers 404 without reading a credential:
+  a 401 there would have no resource whose metadata it could name.
 
 The protected resource metadata is built from the configuration: `resource`, `authorization_servers` with the issuer
 alone (claude.ai uses only the first entry), `bearer_methods_supported: ["header"]` and `resource_name`. Other paths
