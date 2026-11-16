@@ -66,6 +66,8 @@ export type OperationDeps = {
   readonly newId: () => ArtifactId;
   readonly sleep: (ms: number) => Promise<void>;
   readonly timeouts: Timeouts;
+  /** `OAUTH_KV`, where OAuth is on: the grants API's storage. */
+  readonly oauthKv?: KVNamespace;
 };
 
 /** A file of a publish: a path in its stored form (filePathSchema), an optional given type, and its bytes. */

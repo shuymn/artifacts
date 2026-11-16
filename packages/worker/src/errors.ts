@@ -72,7 +72,7 @@ export const ISSUE_MESSAGES: Record<IssueReason, string> = {
 
 export type OperationError =
   | { readonly code: "invalid_request"; readonly issues: readonly Issue[] }
-  | { readonly code: "not_found" }
+  | { readonly code: "not_found"; readonly subject?: "grant" }
   | { readonly code: "version_conflict"; readonly latestVersion: number }
   | { readonly code: "unavailable" }
   | { readonly code: "internal" };
@@ -120,6 +120,9 @@ export function errorBody(error: OperationError): ErrorBody {
     case "version_conflict":
       return { error: { code: error.code, message: ERROR_MESSAGES[error.code], latest_version: error.latestVersion } };
     case "not_found":
+      return {
+        error: { code: error.code, message: error.subject === "grant" ? "no grant matches" : ERROR_MESSAGES.not_found },
+      };
     case "unavailable":
     case "internal":
       return { error: { code: error.code, message: ERROR_MESSAGES[error.code] } };

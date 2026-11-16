@@ -4,7 +4,9 @@
  * transport errors share the JSON shape `{ "error": { "code", "message", … } }`.
  */
 import { JSON_BODY_BYTES, PUBLISH_BODY_BYTES, readFormData, readJson } from "./body.ts";
+import type { Config } from "./config.ts";
 import { ERROR_STATUS, errorBody, type Issue, type OperationError, type Result } from "./errors.ts";
+import { listGrants, revokeGrantById } from "./grants.ts";
 import { isArtifactId } from "./id.ts";
 import {
   createArtifact,
@@ -260,10 +262,28 @@ async function file(
   return new Response(object.value.body, { headers });
 }
 
+const noContent = () => new Response(null, { status: 204, headers: API_HEADERS });
+
+/** The grants routes (section 8), where OAuth is on; none elsewhere. */
+function grantsRoute(segments: readonly string[], config: Config): Handlers | undefined {
+  if (!config.oauth) return undefined;
+  if (segments.length === 3) return { GET: async (_r, deps) => encode(await listGrants(deps)) };
+  if (segments.length !== 4) return undefined;
+  const id = segments[3] ?? "";
+  return {
+    DELETE: async (_r, deps) => {
+      const result = await revokeGrantById(deps, id);
+      return result.ok ? noContent() : operationError(result.error);
+    },
+  };
+}
+
 /** The handlers of the route a path under `/v1/` names, matched on the raw pathname's segments; none for no route. */
-function route(url: URL): Handlers | undefined {
+function route(url: URL, config: Config): Handlers | undefined {
   const segments = url.pathname.split("/");
-  if (segments[1] !== "v1" || segments[2] !== "artifacts") return undefined;
+  if (segments[1] !== "v1") return undefined;
+  if (segments[2] === "grants") return grantsRoute(segments, config);
+  if (segments[2] !== "artifacts") return undefined;
   if (segments.length === 3) {
     return {
       GET: (_r, deps) => list(url, deps),
@@ -277,7 +297,7 @@ function route(url: URL): Handlers | undefined {
       PATCH: (r, deps, token) => patch(r, deps, token, id),
       DELETE: async (_r, deps, token) => {
         const result = await deleteArtifact(deps, token, { id });
-        return result.ok ? new Response(null, { status: 204, headers: API_HEADERS }) : operationError(result.error);
+        return result.ok ? noContent() : operationError(result.error);
       },
     };
   }
@@ -297,14 +317,14 @@ function route(url: URL): Handlers | undefined {
 }
 
 /** The methods the route `url` names takes, for an `OPTIONS` refused before the token (ISO-2); none for no route. */
-export function restAllow(url: URL): string | undefined {
-  const handlers = route(url);
+export function restAllow(url: URL, config: Config): string | undefined {
+  const handlers = route(url, config);
   return handlers === undefined ? undefined : allowOf(handlers);
 }
 
 /** Routes a request on the API host under `/v1/`: the handler of its method, 405 with `Allow` otherwise. */
 export function handleRest(request: Request, url: URL, deps: OperationDeps, token: TokenName): Promise<Response> {
-  const handlers = route(url);
+  const handlers = route(url, deps.config);
   if (handlers === undefined) return Promise.resolve(notFound());
   const requested = request.method === "HEAD" ? "GET" : request.method;
   const method = METHODS.find((known) => known === requested);

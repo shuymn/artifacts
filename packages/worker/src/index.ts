@@ -35,6 +35,7 @@ const operationDeps = (env: Env, config: Config, deps: WorkerDeps): OperationDep
   newId: deps.newId,
   sleep: deps.sleep,
   timeouts: deps.timeouts,
+  ...(config.oauth && env.OAUTH_KV !== undefined ? { oauthKv: env.OAUTH_KV } : {}),
 });
 
 /**
@@ -61,9 +62,9 @@ async function refuseWithoutAccess(
 const noSuchRoute = () => jsonResponse(404, { error: { code: "not_found", message: "no such route" } });
 
 /** The methods of the route that takes `url` behind a bearer token, for `Allow`; undefined when none does. */
-function apiAllow(url: URL): string | undefined {
+function apiAllow(url: URL, config: Config): string | undefined {
   if (url.pathname === "/mcp") return "POST";
-  if (url.pathname.startsWith("/v1/")) return restAllow(url);
+  if (url.pathname.startsWith("/v1/")) return restAllow(url, config);
   return undefined;
 }
 
@@ -87,7 +88,7 @@ async function api(
   }
   // ISO-2: no preflight succeeds. One to a route answers 405 before authentication, one to no route 404.
   if (request.method === "OPTIONS") {
-    const allow = apiAllow(url);
+    const allow = apiAllow(url, config);
     return allow === undefined ? noSuchRoute() : transportError("method_not_allowed", { Allow: allow });
   }
   const auth = await authenticate(request, config.tokens);
