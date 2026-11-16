@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/shuymn/artifacts/compare/v0.4.0...v0.5.0) (2026-11-16)
+
+
+### Features
+
+* **worker:** bind OAuth KV, optional API tokens ([d008d0b](https://github.com/shuymn/artifacts/commit/d008d0bba9992770198516bc247286fd146308a9))
+
+
+### Bug Fixes
+
+* **gallery:** stack info rows in a narrow list ([0469007](https://github.com/shuymn/artifacts/commit/0469007fa081ed5638cea9ec16ea03b64eff1967))
+
 ## [0.4.0](https://github.com/shuymn/artifacts/compare/v0.3.0...v0.4.0) (2026-11-16)
 
 
