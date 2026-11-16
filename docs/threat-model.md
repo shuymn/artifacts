@@ -358,11 +358,14 @@ _Planned (OAuth)_.
 
 - **OAUTH-1: only the owner creates a grant.** A grant is created only by `POST /oauth/authorize` on the app host,
   after ACC-1 with the app audience, with the handle of a consent transaction that the same browser opened (its
-  `__Host-` binding cookie), within 10 minutes and once. Consent is never remembered, and the consent page cannot be
-  framed (`frame-ancestors 'none'`, `X-Frame-Options: DENY`). _Enforced (main)_ in `src/index.ts`, `src/consent.ts`,
-  with the library's consent helpers. Pinned by behavior (`src/consent.test.ts`: no JWT, the content audience, no
-  cookie or another transaction's, a used or expired handle, Deny; two `GET`s create no grant; the page shown again
-  after an approval) (PL-37) and deployed check (AC-19: another identity is denied).
+  `__Host-` binding cookie), within 10 minutes and once, except that the same browser can use a transaction twice at
+  nearly the same moment: the library reads and then deletes it, and KV has no atomic read-and-delete
+  ([design.md](design.md#revocation); accepted risks). Consent is never remembered, and the consent page cannot be framed
+  (`frame-ancestors 'none'`, `X-Frame-Options: DENY`). _Enforced (main)_ in `src/index.ts`, `src/consent.ts`, with the
+  library's consent helpers, apart from that limit. Pinned by behavior (`src/consent.test.ts`: no JWT, the content
+  audience, no cookie or another transaction's, a used handle replayed with its cookie kept, an expired handle, Deny;
+  two `GET`s create no grant; the page shown again after an approval) (PL-37) and deployed check (AC-19: another
+  identity is denied).
 - **OAUTH-2: a code goes only to a redirect URI the client registered, outside this deployment.** The redirect URI
   matches a registered one exactly, a loopback one on any port; one on a host of this deployment is refused before the
   consent page, since an artifact page there could read the code. Every client must send an S256 PKCE challenge: the
