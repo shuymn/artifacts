@@ -193,10 +193,11 @@ export async function update(api: Api, files: readonly LocalFile[], options: Upd
   try {
     result = await api.update(options.id, encoded.body, encoded.type);
   } catch (error) {
-    if (error instanceof ApiError && error.code === "version_conflict") {
-      const latest = error.latestVersion === undefined ? "newer" : String(error.latestVersion);
+    // The REST API answers 409 for version_conflict only (design.md section 8), so a 409 whose body was cut is one.
+    if (error instanceof ApiError && (error.code === "version_conflict" || error.status === 409)) {
+      const latest = error.latestVersion === undefined ? "a newer version" : `version ${error.latestVersion}`;
       throw new CliError(
-        `version_conflict: version ${latest} was published after version ${baseVersion}, which this publish ` +
+        `version_conflict: ${latest} was published after version ${baseVersion}, which this publish ` +
           "read; nothing was published. Check the latest version, then publish again",
       );
     }

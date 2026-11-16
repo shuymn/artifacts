@@ -147,12 +147,20 @@ function issuesOf(value: unknown): Issue[] {
 }
 
 /**
- * The answer's JSON body; an error status becomes an `ApiError`. A body that breaks off while it is read (a dropped
- * connection, the timeout) fails as it is, so `#call` reports the answer lost; only a complete body that is not JSON
- * is a shape error.
+ * The answer's JSON body; an error status becomes an `ApiError`. A 2xx body that breaks off while it is read (a dropped
+ * connection, the timeout) fails as it is, so `#call` reports the answer lost: what was applied is unknown. Any other
+ * status already tells the outcome, so it fails with that status whether or not its body arrives whole. Only a complete
+ * 2xx body that is not JSON is a shape error.
  */
 async function answer(response: Response): Promise<unknown> {
-  const text = response.status === 204 ? "" : await response.text();
+  let text: string;
+  try {
+    text = response.status === 204 ? "" : await response.text();
+  } catch (error) {
+    if (response.ok) throw error;
+    const message = `the API answered ${response.status}, and its body could not be read`;
+    throw new ApiError(response.status, `http_${response.status}`, message, []);
+  }
   let body: unknown;
   try {
     body = text === "" ? undefined : JSON.parse(text);

@@ -283,8 +283,11 @@ async function local(handler: RequestListener) {
 
 const network: Fetch = (input, init) => fetch(input, init);
 
-/** An API that records each request; a POST gets `post`, a listing an empty page. */
-function api(post: (response: Parameters<RequestListener>[1]) => void) {
+/** An API that records each request; a POST gets `post`, any other request `get` (an empty listing by default). */
+function api(
+  post: (response: Parameters<RequestListener>[1]) => void,
+  get: unknown = { artifacts: [], next_cursor: null },
+) {
   const seen: string[] = [];
   const handler: RequestListener = (request, response) => {
     seen.push(`${request.method} ${request.url?.split("?")[0]}`);
@@ -292,7 +295,7 @@ function api(post: (response: Parameters<RequestListener>[1]) => void) {
     request.on("end", () => {
       if (request.method === "POST") return post(response);
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ artifacts: [], next_cursor: null }));
+      response.end(JSON.stringify(get));
     });
   };
   return { seen, handler };
@@ -308,6 +311,40 @@ describe("an update whose answer is lost", () => {
       "artifacts: the update got no answer; it may have applied. Check the latest version with " +
         `\`artifacts get ${ID}\` before publishing again (this publish read version 1)\n`,
     );
+  });
+});
+
+/** Answers `status` with a JSON body that the connection cuts off. */
+function truncated(status: number) {
+  return (response: Parameters<RequestListener>[1]) => {
+    response.writeHead(status, { "Content-Type": "application/json", "Content-Length": "1000" });
+    response.write('{"error":{"code":', () => response.socket?.destroy());
+  };
+}
+
+describe("an error answer whose body is cut off", () => {
+  it("reports a 409 to an update as the conflict, not as an answer that may have applied", async () => {
+    const root = await tempDir();
+    await writeTree(root, { "index.html": "new" });
+    const base = { artifact: artifact(ID), version: version([{ path: "index.html", body: "x" }]) };
+    const { seen, handler } = api(truncated(409), base);
+    const ran = await cli(["publish", root, "--id", ID], { env: await local(handler), fetch: network });
+    expect(ran.status).toBe(1);
+    expect(ran.stderr).toBe(
+      "artifacts: version_conflict: a newer version was published after version 1, which this publish read; " +
+        "nothing was published. Check the latest version, then publish again\n",
+    );
+    expect(seen).toEqual([`GET /v1/artifacts/${ID}`, `POST /v1/artifacts/${ID}/versions`]);
+  });
+
+  it("reports a 400 to a create as the refusal, without listing or creating again", async () => {
+    const root = await tempDir();
+    await writeTree(root, { "index.html": "x" });
+    const { seen, handler } = api(truncated(400));
+    const ran = await cli(["publish", root, "--title", "t"], { env: await local(handler), fetch: network });
+    expect(ran.status).toBe(1);
+    expect(ran.stderr).toBe("artifacts: http_400: the API answered 400, and its body could not be read\n");
+    expect(seen).toEqual(["POST /v1/artifacts"]);
   });
 });
 
