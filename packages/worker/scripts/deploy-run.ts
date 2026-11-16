@@ -8,10 +8,13 @@
  *
  * 1. `wrangler r2 bucket info` for each bucket: `wrangler deploy` creates a bucket that does not exist, so a mistyped
  *    name would bind a new, empty bucket.
- * 2. `wrangler d1 migrations apply --remote` for each database, on every deploy: the code of a commit expects the schema
+ * 2. `wrangler kv namespace list`, which must list each namespace ID: wrangler's documentation describes provisioning
+ *    only for a binding without an ID and does not say what a wrong ID does, and a new, empty namespace would sign every
+ *    OAuth client out.
+ * 3. `wrangler d1 migrations apply --remote` for each database, on every deploy: the code of a commit expects the schema
  *    of that commit, and the command applies only the migrations not yet applied. Its confirmation prompt is skipped
  *    (no terminal on stdin), because declining it exits successfully and the deploy would go on.
- * 3. `wrangler deploy`.
+ * 4. `wrangler deploy`.
  */
 import { randomBytes } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -39,7 +42,33 @@ export type DeployIo = {
   readonly onSignal: (listener: (signal: TerminationSignal) => void) => () => void;
 };
 
-type Step = { readonly title: string; readonly args: readonly string[]; readonly onFailure: string };
+type Step = {
+  readonly title: string;
+  readonly args: readonly string[];
+  readonly onFailure: string;
+  /** A check of the command's standard output, captured up to `maxBytes`: the problem, or undefined when it passes. */
+  readonly output?: { readonly maxBytes: number; readonly check: (output: string) => string | undefined };
+};
+
+/**
+ * The most `wrangler kv namespace list` may print. It prints every namespace of the account as indented JSON, a few
+ * hundred bytes each; this bound holds thousands.
+ */
+export const MAX_NAMESPACE_LIST_BYTES = 4 * 1024 * 1024;
+
+/** Undefined when `wrangler kv namespace list` printed a list with a namespace whose ID is `id`; otherwise why not. */
+function checkNamespaceList(output: string, id: string): string | undefined {
+  let list: unknown;
+  try {
+    list = JSON.parse(output);
+  } catch {
+    list = undefined;
+  }
+  if (!Array.isArray(list) || !list.every((entry) => isRecord(entry) && typeof entry["id"] === "string")) {
+    return "wrangler printed no JSON list of namespaces";
+  }
+  return list.some((entry: Json) => entry["id"] === id) ? undefined : "the account has no namespace with that ID";
+}
 
 type Read = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly problem: string };
 
@@ -92,6 +121,12 @@ function steps(merged: Json, config: string): Step[] {
       title: `checking that the R2 bucket of ${binding} exists`,
       args: ["r2", "bucket", "info", name, "--config", config],
       onFailure: "Create the bucket first (docs/operations.md); nothing was changed.",
+    })),
+    ...bindings(merged, "kv_namespaces", "id").map(({ binding, name: id }) => ({
+      title: `checking that the KV namespace of ${binding} exists`,
+      args: ["kv", "namespace", "list", "--config", config],
+      onFailure: "Create the namespace, or correct its ID (docs/operations.md); nothing was changed.",
+      output: { maxBytes: MAX_NAMESPACE_LIST_BYTES, check: (output: string) => checkNamespaceList(output, id) },
     })),
     // The hint names the database: wrangler.jsonc alone has no ID for the binding, and the merged configuration is gone.
     ...bindings(merged, "d1_databases", "database_name").map(({ binding, name }) => ({
@@ -147,10 +182,19 @@ async function run(io: DeployIo, merged: Json): Promise<number> {
     for (const step of steps(merged, config)) {
       if (stoppedBy !== undefined) break;
       io.log(`deploy: ${step.title}`);
-      const result = await io.run(step.args, controller.signal);
+      const result = await io.run(
+        step.args,
+        controller.signal,
+        step.output === undefined ? {} : { captureBytes: step.output.maxBytes },
+      );
       if (stoppedBy !== undefined) break;
       if (!result.ok) {
         io.log(`deploy: ${step.title} failed: wrangler ${result.reason}. ${step.onFailure}`);
+        return 1;
+      }
+      const problem = step.output?.check(result.output ?? "");
+      if (problem !== undefined) {
+        io.log(`deploy: ${step.title} failed: ${problem}. ${step.onFailure}`);
         return 1;
       }
     }

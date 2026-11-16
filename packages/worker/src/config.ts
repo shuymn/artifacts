@@ -50,6 +50,11 @@ export type Config = {
   readonly archiveAfterMs: number;
   /** ACC-2: null only when every configured host is a `localhost` name; Access is then not verified. */
   readonly access: AccessConfig | null;
+  /**
+   * OAuth (design.md section 7) is off when every configured host is a `localhost` name: the library takes plain `http`
+   * only on loopback hosts, not on names under `localhost`.
+   */
+  readonly oauth: boolean;
   readonly tokens: readonly ApiToken[];
 };
 
@@ -174,6 +179,7 @@ export function parseConfig(input: ConfigInput): ConfigResult {
       scheme: isLocal ? "http" : "https",
       archiveAfterMs: days * DAY_MS,
       access,
+      oauth: !isLocal,
       tokens,
     },
   };

@@ -22,6 +22,19 @@ afterEach(() => {
 
 const ID = "abcdefghijklmnopqrstuvwxyz";
 
+/** The world's environment without `key`, as when the secret or binding is absent. */
+function without(world: World, key: "API_TOKENS" | "OAUTH_KV"): void {
+  const { [key]: _removed, ...env } = world.env;
+  world.env = env;
+}
+
+const LOCAL_HOSTS = {
+  APP_HOST: "app.localhost:8787",
+  API_HOST: "api.localhost:8787",
+  CONTENT_HOST_SUFFIX: "-art.localhost:8787",
+  PUBLIC_HOST_SUFFIX: "-pub.localhost:8787",
+} as const;
+
 /** A world whose D1 and R2 bindings fail the test when touched. */
 function untouchable(world: World): { db: DatabaseProbe; bucket: BucketProbe } {
   const db = new DatabaseProbe();
@@ -125,14 +138,7 @@ describe("ACC-2: Access outside localhost", () => {
   });
 
   it("serves a localhost configuration without Access", async () => {
-    const world = new World({
-      vars: {
-        APP_HOST: "app.localhost:8787",
-        API_HOST: "api.localhost:8787",
-        CONTENT_HOST_SUFFIX: "-art.localhost:8787",
-        PUBLIC_HOST_SUFFIX: "-pub.localhost:8787",
-      },
-    });
+    const world = new World({ vars: LOCAL_HOSTS });
     const form = new FormData();
     form.append("meta", JSON.stringify({ title: "local", files: [{ path: "index.html" }] }));
     form.append("file", new Blob(["local page"]));
@@ -218,6 +224,96 @@ describe("TOK-1: bearer tokens on the API host", () => {
       expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
     }
   });
+});
+
+// PL-47, section 11, ACC-2: OAuth is on outside a localhost configuration, and needs its storage there.
+describe("PL-47: OAuth storage and localhost", () => {
+  it("answers 503 on every host without OAUTH_KV outside a localhost configuration, before Access or storage", async () => {
+    const world = new World();
+    const created = await world.created({ title: "t", files: { "index.html": "page" } });
+    await world.patch(created.artifact.id, { public: true });
+    const id = created.artifact.id;
+    without(world, "OAUTH_KV");
+    const { db, bucket } = untouchable(world);
+    const logs = captureLogs();
+    const headers = { Authorization: `Bearer ${TOKENS.codex}`, "Cf-Access-Jwt-Assertion": await world.jwt() };
+    for (const url of [
+      `https://${APP_HOST}/`,
+      `https://${APP_HOST}/oauth/authorize`,
+      `${API}/v1/artifacts`,
+      `${API}/mcp`,
+      `${API}/oauth/token`,
+      `https://${id}${CONTENT_SUFFIX}/`,
+      `https://${id}${PUBLIC_SUFFIX}/`,
+      "https://example.com/",
+    ]) {
+      const response = await world.fetch(url, { headers });
+      expect({ url, status: response.status }).toEqual({ url, status: 503 });
+      expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
+    }
+    expect(db.batches).toBe(0);
+    expect(bucket.calls).toEqual([]);
+    expect(world.keys.calls).toBe(0);
+    expect(logEvents(logs.lines)).toEqual(
+      Array.from({ length: 8 }, () => ({ event: "config.invalid", reason: "missing", binding: "OAUTH_KV" })),
+    );
+  });
+
+  it("serves a localhost configuration without OAUTH_KV", async () => {
+    const world = new World({ vars: LOCAL_HOSTS });
+    without(world, "OAUTH_KV");
+    const response = await world.fetch("http://api.localhost:8787/v1/artifacts", {
+      headers: { Authorization: `Bearer ${TOKENS.codex}` },
+    });
+    expect(response.status).toBe(200);
+    expect((await world.fetch("http://app.localhost:8787/")).status).toBe(200);
+  });
+
+  const API_OAUTH_PATHS = [
+    "/.well-known/oauth-authorization-server",
+    "/oauth/token",
+    "/oauth/register",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/mcp",
+    "/.well-known/oauth-protected-resource/v1",
+  ];
+
+  // OAuth is off there: the library takes plain http only on loopback hosts, not on names under localhost.
+  it.each(["GET", "POST", "OPTIONS"])(
+    "answers %s with 404 on every OAuth path in a localhost configuration, with or without a credential",
+    async (method) => {
+      const world = new World({ vars: LOCAL_HOSTS });
+      const { db, bucket } = untouchable(world);
+      for (const path of API_OAUTH_PATHS) {
+        for (const headers of [{}, { Authorization: `Bearer ${TOKENS.codex}` }]) {
+          const response = await world.fetch(`http://api.localhost:8787${path}`, {
+            method,
+            headers,
+            ...(method === "POST" ? { body: "grant_type=refresh_token" } : {}),
+          });
+          expect({ path, status: response.status }).toEqual({ path, status: 404 });
+          expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+          expect(response.headers.has("WWW-Authenticate")).toBe(false);
+        }
+      }
+      expect(db.batches).toBe(0);
+      expect(bucket.calls).toEqual([]);
+    },
+  );
+
+  it.each(["GET", "HEAD", "POST", "PUT"])(
+    "answers %s /oauth/authorize on the app host with 404 in a localhost configuration",
+    async (method) => {
+      const world = new World({ vars: LOCAL_HOSTS });
+      const response = await world.fetch("http://app.localhost:8787/oauth/authorize?client_id=x", {
+        method,
+        ...(method === "POST" || method === "PUT" ? { body: "decision=approve" } : {}),
+      });
+      expect(response.status).toBe(404);
+      expect(response.headers.has("Set-Cookie")).toBe(false);
+      expect(response.headers.get("Content-Security-Policy")).not.toBeNull();
+    },
+  );
 });
 
 const METHODS = ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "PROPFIND"];

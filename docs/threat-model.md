@@ -128,9 +128,11 @@ and the threats are the three adversaries below, not untrusted users.
   verified with the app audience like the gallery, its `POST` included: _Planned (OAuth)_ (PL-37).
 - **ACC-2: Access verification is skipped only for a `localhost` configuration.** Every configured host must be a
   `localhost` name; no variable turns verification off, and the deployment script refuses `localhost` hosts and ports.
-  _Enforced (main)_ in `src/config.ts`, `scripts/deploy-config.ts`. Pinned by behavior (`src/routing.test.ts`:
-  production-shaped hosts without a JWT answer 403; `src/config.test.ts`: a mix of `localhost` and other hosts is
-  refused; `scripts/deploy.test.ts`: a `localhost` name and a port in each host variable are refused).
+  OAuth is off there too, so no consent page runs without Access: every OAuth path answers 404. _Enforced (main)_ in
+  `src/config.ts`, `src/index.ts`, `scripts/deploy-config.ts`. Pinned by behavior (`src/routing.test.ts`:
+  production-shaped hosts without a JWT answer 403, and in a `localhost` configuration every OAuth path answers 404
+  with any method (PL-47); `src/config.test.ts`: a mix of `localhost` and other hosts is refused;
+  `scripts/deploy.test.ts`: a `localhost` name and a port in each host variable are refused).
 - **ACC-3: the Access applications admit only the owner, and their cookie is HttpOnly.** The content application covers
   exactly `*` + the content suffix. HttpOnly is set explicitly because the documented default is inconsistent; without
   it, artifact JavaScript could read its host's JWT, which names the application's audience rather than the host and so
@@ -303,17 +305,17 @@ and the threats are the three adversaries below, not untrusted users.
   lines are bounded here rather than suppressed by patching it, and the first can quote a public artifact's values
   when a client ID names it or redirects to it. What DATA-1 protected holds: no credential or private content reaches
   the logs, and a public artifact's values are open to anyone with its link.
-- **DATA-2: deployment values stay out of the repository.** `wrangler.jsonc` sets no variable, route or identifier;
-  the deployment values live in the gitignored `wrangler.deploy.jsonc` or a Workers Builds variable, the committed
-  example holds placeholders only, and `API_TOKENS` is a secret. _Enforced (main)_ in `wrangler.jsonc`,
-  `wrangler.deploy.example.jsonc`, `scripts/deploy-config.ts`. Pinned by source check (`src/source.test.ts`:
-  `wrangler.jsonc` and the example) and behavior (`scripts/deploy.test.ts`: the deployment values may not set
-  `API_TOKENS` or a key of `wrangler.jsonc`). `wrangler.jsonc` binds `OAUTH_KV` without an ID, and the namespace's ID
-  is a deployment value: _Planned (OAuth)_ (PL-48).
+- **DATA-2: deployment values stay out of the repository.** `wrangler.jsonc` sets no variable, route or identifier,
+  and binds `OAUTH_KV` without an ID; the deployment values live in the gitignored `wrangler.deploy.jsonc` or a Workers
+  Builds variable, the committed example holds placeholders only, and `API_TOKENS` is a secret. _Enforced (main)_ in
+  `wrangler.jsonc`, `wrangler.deploy.example.jsonc`, `scripts/deploy-config.ts`, `scripts/deploy-run.ts`. Pinned by
+  source check (`src/source.test.ts`: `wrangler.jsonc` and the example) and behavior (`scripts/deploy.test.ts`: the
+  deployment values may not set `API_TOKENS` or a key of `wrangler.jsonc`, and the namespace's ID, 32 lowercase
+  hexadecimal characters, must be one the account lists before the migrations run (PL-48)).
 
 ### OAuth (OAUTH)
 
-All _Planned (OAuth)_, decided in [design.md](design.md#7-auth) section 7.
+All _Planned (OAuth)_, decided in [design.md](design.md#7-auth) section 7, except OAUTH-6's compatibility flag.
 
 - **OAUTH-1: only the owner creates a grant.** A grant is created only by `POST /oauth/authorize` on the app host,
   after ACC-1 with the app audience, with the handle of a consent transaction that the same browser opened (its
@@ -355,7 +357,8 @@ All _Planned (OAuth)_, decided in [design.md](design.md#7-auth) section 7.
   on public addresses, the library bounds a document at 5 KB and 10 s, and the authorize endpoint refuses a client ID
   on a host of this deployment before any fetch. The token endpoint may still fetch such a document, since the
   library authenticates a CIMD client there; it decides nothing, because no code or grant can exist for a client the
-  authorize endpoint refused. Pinned by behavior (PL-35) and source check (`wrangler.jsonc` sets the flag).
+  authorize endpoint refused. Pinned by behavior (PL-35) and source check (`src/source.test.ts`: `wrangler.jsonc` sets
+  the flag, _Enforced (main)_).
 
 ## IDs to check by change type
 

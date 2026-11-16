@@ -42,14 +42,15 @@ describe("parseConfig", () => {
         contentAud: "content-aud",
       });
       expect(parsed.config.scheme).toBe("https");
+      expect(parsed.config.oauth).toBe(true);
       expect(parsed.config.archiveAfterMs).toBe(30 * 86_400_000);
     }
   });
 
-  // ACC-2: Access is skipped only when every configured host is a localhost name.
-  it("skips Access only for an all-localhost configuration", () => {
+  // ACC-2: Access is skipped only when every configured host is a localhost name; OAuth is off there (PL-47).
+  it("skips Access and turns OAuth off only for an all-localhost configuration", () => {
     const parsed = parseConfig(LOCAL);
-    expect(parsed).toMatchObject({ ok: true, config: { access: null, scheme: "http" } });
+    expect(parsed).toMatchObject({ ok: true, config: { access: null, oauth: false, scheme: "http" } });
   });
 
   it("takes the team domain as a host or an https URL", () => {

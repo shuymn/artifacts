@@ -55,6 +55,8 @@ export type HostKind = (typeof HOST_KINDS)[number];
 export type LogFields = {
   readonly reason?: ConfigErrorCode | AccessReason | TokenRefusal | StorageFailure;
   readonly variable?: ConfigVariable;
+  /** A binding the configuration needs and the Worker lacks. */
+  readonly binding?: "OAUTH_KV";
   readonly host?: HostKind;
   readonly error?: ErrorName;
   readonly token?: TokenName;

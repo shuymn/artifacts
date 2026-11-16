@@ -56,7 +56,27 @@ async function refuseWithoutAccess(
   return plainResponse("private", outcome.status);
 }
 
+/**
+ * The paths OAuth serves (design.md section 7): on the API host, the authorization server's metadata, token and
+ * registration endpoints and the protected resource metadata; on the app host, the authorization endpoint.
+ */
+const API_OAUTH_PATHS: ReadonlySet<string> = new Set([
+  "/.well-known/oauth-authorization-server",
+  "/oauth/token",
+  "/oauth/register",
+]);
+const RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
+const AUTHORIZE_PATH = "/oauth/authorize";
+
+function isApiOAuthPath(path: string): boolean {
+  return API_OAUTH_PATHS.has(path) || path === RESOURCE_METADATA_PATH || path.startsWith(`${RESOURCE_METADATA_PATH}/`);
+}
+
+const noSuchRoute = () => jsonResponse(404, { error: { code: "not_found", message: "no such route" } });
+
 async function api(request: Request, url: URL, env: Env, config: Config, deps: WorkerDeps): Promise<Response> {
+  // OAuth is off in a localhost configuration, so its paths do not exist, whatever the credential.
+  if (!config.oauth && isApiOAuthPath(url.pathname)) return noSuchRoute();
   const auth = await authenticate(request, config.tokens);
   if (!auth.ok) {
     logEvent("token.refused", { reason: auth.reason });
@@ -64,7 +84,7 @@ async function api(request: Request, url: URL, env: Env, config: Config, deps: W
   }
   if (url.pathname === "/mcp") return handleMcp(request, operationDeps(env, config, deps), auth.name);
   if (url.pathname.startsWith("/v1/")) return handleRest(request, url, operationDeps(env, config, deps), auth.name);
-  return jsonResponse(404, { error: { code: "not_found", message: "no such route" } });
+  return noSuchRoute();
 }
 
 async function browser(
@@ -77,6 +97,8 @@ async function browser(
   id: ArtifactId | undefined,
 ): Promise<Response> {
   const kind: BrowserClass = host === "public" ? "public" : "private";
+  // OAuth is off in a localhost configuration: the authorization endpoint does not exist, whatever the method.
+  if (host === "app" && !config.oauth && url.pathname === AUTHORIZE_PATH) return plainResponse(kind, 404);
   if (!methodAllowed(request)) return methodNotAllowed(kind);
   if (host !== "public") {
     const refusal = await refuseWithoutAccess(request, config, deps, host);
@@ -103,6 +125,12 @@ export function createWorker(deps: WorkerDeps): Worker {
         return plainResponse("private", 503);
       }
       const { config } = parsed;
+      // Section 11: with OAuth on, a Worker without its storage answers as for an invalid variable, so a deployment
+      // never runs with OAuth silently off.
+      if (config.oauth && env.OAUTH_KV === undefined) {
+        logEvent("config.invalid", { reason: "missing", binding: "OAUTH_KV" });
+        return plainResponse("private", 503);
+      }
       const url = new URL(request.url);
       const route = classifyHost(url.host, config);
       try {

@@ -1,11 +1,14 @@
 // The Worker's public configuration (DATA-2): bindings, migrations and observability only. Deployment values (account,
-// routes, custom domains, the database and bucket identifiers, the variables of design.md section 11) live in the
-// gitignored wrangler.deploy.jsonc; local development takes the variables from .dev.vars (see .dev.vars.example).
+// routes, custom domains, the database, bucket and namespace identifiers, the variables of design.md section 11) live
+// in the gitignored wrangler.deploy.jsonc; local development takes the variables from .dev.vars (see .dev.vars.example).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "artifacts",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-10",
+  // The OAuth library fetches a client's metadata document (CIMD) only with this flag, which keeps the fetch on public
+  // addresses (design.md section 7; OAUTH-6).
+  "compatibility_flags": ["global_fetch_strictly_public"],
   // The Worker is reached only on its routes: no workers.dev URL and no preview URLs.
   "workers_dev": false,
   "preview_urls": false,
@@ -13,6 +16,9 @@
   "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
   // File bytes, one object per distinct file per artifact (design.md section 3).
   "r2_buckets": [{ "binding": "FILES" }],
+  // OAuth clients, grants and hashed tokens (design.md section 11). Without the binding the Worker answers 503 outside a
+  // localhost configuration; the deployment values give its ID.
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
   // The gallery's stylesheets, fonts and icon are bundled with the Worker: stylesheets and the SVG icon as text, fonts
   // and the ICO icon as bytes. fallthrough: true keeps wrangler's default rules (.txt, .html, .sql as text; .bin as
   // data) after these; nothing here imports such files, so false says the defaults are not needed and silences the

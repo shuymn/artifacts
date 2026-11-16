@@ -7,6 +7,8 @@ declare namespace Cloudflare {
   interface Env {
     DB: D1Database;
     FILES: R2Bucket;
+    // OAuth storage (design.md section 11): checked at each request, since a deployment can lack it.
+    OAUTH_KV?: KVNamespace;
     // Deployment values (design.md section 11): absent until configured, so parseConfig checks each one.
     APP_HOST?: string;
     API_HOST?: string;
