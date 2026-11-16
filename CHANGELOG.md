@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0](https://github.com/shuymn/artifacts/compare/v0.5.0...v0.6.0) (2026-11-16)
+
+
+### Features
+
+* **gallery:** add consent tokens and components ([0a4bc21](https://github.com/shuymn/artifacts/commit/0a4bc2100e735b9a3efe8ae08dfac7c69c8d4448))
+* **gallery:** design the consent page ([fdd50f5](https://github.com/shuymn/artifacts/commit/fdd50f5f764a17d13f86c0ac3bf68139c89614d6))
+* **worker:** serve the OAuth authorization server ([7e87241](https://github.com/shuymn/artifacts/commit/7e87241f7fbd1cc4ab5b772ab6790bca7d29f719))
+* **worker:** serve the OAuth authorization server ([5c0b3d0](https://github.com/shuymn/artifacts/commit/5c0b3d021b7e9af5c11b328a82e54aabf93cc2cf))
+
+
+### Bug Fixes
+
+* **worker:** refuse grant keys KV cannot hold ([47d7030](https://github.com/shuymn/artifacts/commit/47d703052f9181d6dfe1a8f4f26be4c8e9fb912c))
+
 ## [0.5.0](https://github.com/shuymn/artifacts/compare/v0.4.0...v0.5.0) (2026-11-16)
 
 
