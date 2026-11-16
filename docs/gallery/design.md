@@ -115,20 +115,20 @@ Each component in `gallery.pen` is one class in `gallery.css`; a variant is a mo
 no variants, so each variant is a component of its own, named `component/variant` (`nav-tab/state=current`). The
 reference pages show each in place.
 
-| Component         | Variant                                         | Markup                                                                                                          |
-| ----------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `site-header`     |                                                 | `header.site-header` > `div.brand` + `nav.site-nav`                                                             |
-| `nav-tab`         | `state=default`                                 | `a.nav-tab` > text + `span.nav-tab__count`                                                                      |
-|                   | `state=current`                                 | the same with `aria-current`: `"page"` on the list it links to, `"true"` on an artifact page in that section    |
-| `artifact-row`    |                                                 | `li.artifact-row` in `ul.artifact-list[role=list]`; see `reference/index.html`                                  |
-| `badge`           | `kind=public` / `kind=archived` / `kind=latest` | `span.badge.badge--public` / `.badge--archived` / `.badge--latest`                                              |
-| `pager`           |                                                 | `nav.pager` with an `aria-label` > one `a`                                                                      |
-| `back-link`       |                                                 | `a.back-link`                                                                                                   |
-| `section-heading` |                                                 | `h2.section-heading` with an `id` > text + `span.section-heading__count`                                        |
-| `info-row`        | `value=text`                                    | `div.info-row` > `dt` + `dd`, in `dl.info`                                                                      |
-|                   | `value=link`                                    | the same with `dd.info-row__link` > `a`                                                                         |
-| `table-cell`      | `style=head`                                    | `thead th[scope=col]`                                                                                           |
-|                   | `style=text` / `mono` / `muted` / `link`        | `td` / `td.cell--mono` / `td.cell--muted` / `td.cell--link` > `a`; every `td` has `data-label`, its column name |
+| Component         | Variant                                  | Markup                                                                                                          |
+| ----------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `site-header`     |                                          | `header.site-header` > `div.brand` + `nav.site-nav`                                                             |
+| `nav-tab`         | `state=default`                          | `a.nav-tab` > text + `span.nav-tab__count`                                                                      |
+|                   | `state=current`                          | the same with `aria-current`: `"page"` on the list it links to, `"true"` on an artifact page in that section    |
+| `artifact-row`    |                                          | `li.artifact-row` in `ul.artifact-list[role=list]`; see `reference/index.html`                                  |
+| `badge`           | `kind=public` / `kind=archived`          | `span.badge.badge--public` / `.badge--archived`                                                                 |
+| `pager`           |                                          | `nav.pager` with an `aria-label` > one `a`                                                                      |
+| `back-link`       |                                          | `a.back-link`                                                                                                   |
+| `section-heading` |                                          | `h2.section-heading` with an `id` > text + `span.section-heading__count`                                        |
+| `info-row`        | `value=text`                             | `div.info-row` > `dt` + `dd`, in `dl.info`                                                                      |
+|                   | `value=link`                             | the same with `dd.info-row__link` > `a`                                                                         |
+| `table-cell`      | `style=head`                             | `thead th[scope=col]`                                                                                           |
+|                   | `style=text` / `mono` / `muted` / `link` | `td` / `td.cell--mono` / `td.cell--muted` / `td.cell--link` > `a`; every `td` has `data-label`, its column name |
 
 In `site-header`, `div.brand` is `a.brand__link` (`img.brand__icon` and the wordmark) then `span.brand__version`.
 

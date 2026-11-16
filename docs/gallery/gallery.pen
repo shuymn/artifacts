@@ -229,28 +229,6 @@
                   "fill": "$color.badge.neutral.fg"
                 }
               ]
-            },
-            {
-              "type": "frame",
-              "id": "XbSpc",
-              "name": "badge/kind=latest",
-              "reusable": true,
-              "fill": "$color.badge.neutral.bg",
-              "cornerRadius": "$radius.pill",
-              "padding": [
-                "$space.0-5",
-                "$space.2"
-              ],
-              "children": [
-                {
-                  "id": "H6DQrl",
-                  "type": "ref",
-                  "ref": "E8AuAJ",
-                  "name": "Label",
-                  "content": "Latest",
-                  "fill": "$color.badge.neutral.fg"
-                }
-              ]
             }
           ]
         },
