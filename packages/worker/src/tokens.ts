@@ -1,8 +1,8 @@
 /**
- * API tokens (design.md section 7; TOK-1 to TOK-3). The secret `API_TOKENS` is a JSON object that maps each token
- * name to the hex SHA-256 of its token. A request presents `Authorization: Bearer <token>`; its SHA-256 is compared
- * with every entry in constant time, and the matching name stands for the caller from then on. The token itself is
- * never stored, returned or logged.
+ * API tokens (design.md section 7; TOK-1 to TOK-3). The optional secret `API_TOKENS` is a JSON object that maps each
+ * token name to the hex SHA-256 of its token; without it, or with `{}`, every token is refused. A request presents
+ * `Authorization: Bearer <token>`; its SHA-256 is compared with every entry in constant time, and the matching name
+ * stands for the caller from then on. The token itself is never stored, returned or logged.
  */
 declare const tokenNameBrand: unique symbol;
 /** A name from `API_TOKENS`: `[a-z0-9-]{1,32}`. Only `parseApiTokens` makes one. */

@@ -163,10 +163,11 @@ risks say what the shared-domain layout exposes.
   access is turned on ([public buckets](https://developers.cloudflare.com/r2/buckets/public-buckets/)); leave both the
   `r2.dev` URL and custom domains off. Create it before the first deploy: `wrangler deploy` creates a bucket that does
   not exist (the deploy script checks first, section 3).
-- **KV** (Planned (OAuth)). `pnpm exec wrangler kv namespace create <KV_NAME> --update-config=false` prints the
-  namespace ID ([get started](https://developers.cloudflare.com/kv/get-started/)). It holds OAuth clients, grants and
-  hashed tokens, and nothing else; every record expires on its own. `--update-config=false` keeps the ID out of
-  `wrangler.jsonc`, as for D1.
+- **KV.** `pnpm exec wrangler kv namespace create <KV_NAME> --update-config=false` prints the namespace ID
+  ([get started](https://developers.cloudflare.com/kv/get-started/)). It holds OAuth clients, grants and hashed tokens,
+  and nothing else; every record expires on its own. `--update-config=false` keeps the ID out of `wrangler.jsonc`, as
+  for D1. Create it before the first deploy: Wrangler provisions a new namespace for a binding without an ID (the deploy
+  script requires the ID and checks the namespace first, section 3).
 
 ### Access
 
@@ -208,13 +209,13 @@ application](https://developers.cloudflare.com/cloudflare-one/access-controls/ap
 | `account_id`                           | the account ID, when the credentials reach several accounts; otherwise leave the key out |
 | `routes`                               | the Custom Domains and routes of section 1                                               |
 | `d1_databases`, `r2_buckets`           | `<DATABASE_NAME>` and the database ID; `<BUCKET_NAME>`                                   |
-| `kv_namespaces`                        | the binding `OAUTH_KV` and the namespace ID (Planned (OAuth))                            |
+| `kv_namespaces`                        | the binding `OAUTH_KV` and the namespace ID                                              |
 | `vars.APP_HOST` … `PUBLIC_HOST_SUFFIX` | the hosts of the chosen layout                                                           |
 | `vars.ARCHIVE_AFTER_DAYS`              | days until an untouched artifact is archived (design.md section 5)                       |
 | `vars.ACCESS_*`                        | the team domain and the two AUD tags                                                     |
 
-`API_TOKENS` is a secret, optional from the OAuth release, and never part of these values (section 4). The values live
-in two places, never both at once:
+`API_TOKENS` is an optional secret, never part of these values (section 4). The values live in two places, never both
+at once:
 
 - **Workers Builds:** the build variable `ARTIFACTS_DEPLOY_JSONC` holds the whole file, comments included.
 - **The owner's machine:** `packages/worker/wrangler.deploy.jsonc`, which git ignores.
@@ -233,8 +234,8 @@ the same.
 JSONC, or leave a value empty, and when a variable fails the Worker's own configuration check (HOST-2), a host is a
 `localhost` name or has a port (ACC-2), a key belongs in `wrangler.jsonc`, `API_TOKENS` appears, a route would serve
 hosts that are not the deployment's, or a route repeats another, is outside its `zone_name`, or sets both `zone_name`
-and `zone_id`. From the OAuth release it also refuses values without a `kv_namespaces` entry for `OAUTH_KV` whose ID
-is 32 hexadecimal characters. The committed example is refused for its empty values.
+and `zone_id`, and when there is no `kv_namespaces` entry for `OAUTH_KV` whose `id` is 32 lowercase hexadecimal
+characters. The committed example is refused for its empty values.
 
 ## 3. Deploying
 
@@ -281,16 +282,17 @@ Cloudflare's documentation for Deploy to Cloudflare buttons tells a project to a
 `.wrangler-deploy-<random>.json` next to it, removed on every exit. Then, each step stopping the rest when it fails:
 
 1. `wrangler r2 bucket info <BUCKET_NAME>`: the bucket must exist, since `wrangler deploy` would create a new, empty one
-   for a mistyped name. From the OAuth release, `wrangler kv namespace list` must list the namespace ID too: the
-   documentation describes provisioning only for a binding without an ID and does not say what a wrong ID does, and a
-   new, empty namespace would sign every client out.
-2. `wrangler d1 migrations apply DB --remote`, **on every deploy**: the code of a release expects the schema of that
+   for a mistyped name.
+2. `wrangler kv namespace list`: it must list the namespace ID. The documentation describes provisioning only for a
+   binding without an ID and does not say what a wrong ID does, and a new, empty namespace would sign every client out.
+   The script reads the listing instead of printing it; a listing it cannot read stops the deploy too.
+3. `wrangler d1 migrations apply DB --remote`, **on every deploy**: the code of a release expects the schema of that
    release, and the command applies only the migrations not yet applied (`d1_migrations` records them;
    [migrations](https://developers.cloudflare.com/d1/reference/migrations/)). A flag would let a release deploy against
    an old schema. Its confirmation prompt is skipped: declining it exits successfully, so the deploy would go on.
    Because the migrations land before the code, and stay after a rollback, **a migration must keep the previous
    release's code working**.
-3. `wrangler deploy`.
+4. `wrangler deploy`.
 
 Each wrangler command may run for 10 minutes (a build may run for 20,
 [limits](https://developers.cloudflare.com/workers/ci-cd/builds/limits-and-pricing/)). It runs in a process group of its
@@ -357,13 +359,13 @@ pnpm exec wrangler secret put API_TOKENS < ~/artifacts/api-tokens.json
 `wrangler secret put` reads the value from standard input when piped, and creates and deploys a new version at once
 ([`secret put`](https://developers.cloudflare.com/workers/wrangler/commands/workers/#secret-put)), and a deployment
 never deletes a secret ([`deploy`](https://developers.cloudflare.com/workers/wrangler/commands/workers/#deploy)). Until
-the first put, the Worker answers 503 on every host; from the OAuth release it serves OAuth only instead.
+the first put, every API token is refused; from the OAuth release, OAuth clients still sign in.
 
 - **Rotate:** run `artifacts token <name>` again, replace the entry, put the object, then update the agent; the old
   token is refused from the put on.
 - **Revoke:** remove the entry and put the object. The token is refused from the next request (TOK-1).
-- **Turn all off** (Planned (OAuth)): put `{}`, or `pnpm exec wrangler secret delete API_TOKENS`. Every API token is
-  refused from the next request, and OAuth clients keep working (AC-18). A malformed object still answers 503.
+- **Turn all off:** put `{}`, or `pnpm exec wrangler secret delete API_TOKENS`. Every API token is refused from the
+  next request; from the OAuth release, OAuth clients keep working (AC-18). A malformed object still answers 503.
 
 ### OAuth grants (Planned (OAuth))
 
@@ -472,8 +474,8 @@ artifacts login                                     # opens the consent page; st
 
 ## 6. First deployment
 
-1. Section 1: Workers Paid, zones, the wildcard record, the D1 database, the R2 bucket, the KV namespace (from the
-   OAuth release), the two Access applications.
+1. Section 1: Workers Paid, zones, the wildcard record, the D1 database, the R2 bucket, the KV namespace, the two Access
+   applications.
 2. Fill the deployment values (section 2).
 3. `gh infra apply`: it restricts who can push to `release` (below), adds the release-please labels and allows the
    actions the workflows use (release-please, and `actions/upload-artifact` and `actions/download-artifact`, which hand

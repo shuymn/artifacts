@@ -1,4 +1,5 @@
-// The runner of the scripts in this directory: exit statuses, the timeout, and stopping every process of a command.
+// The runner of the scripts in this directory: exit statuses, the timeout, stopping every process of a command, and
+// capturing its standard output.
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,8 +15,18 @@ const WORKER = join(dirname(fileURLToPath(import.meta.url)), "..");
 const node = (script: string, timeoutMs = 10_000, graceMs = 10_000) =>
   createRunner({ command: process.execPath, prefix: ["-e", script], cwd: WORKER, timeoutMs, graceMs });
 
-const runNode = (script: string, options: { timeoutMs?: number; graceMs?: number; signal?: AbortSignal } = {}) =>
-  node(script, options.timeoutMs, options.graceMs)([], options.signal ?? new AbortController().signal);
+const runNode = (
+  script: string,
+  options: { timeoutMs?: number; graceMs?: number; signal?: AbortSignal; captureBytes?: number } = {},
+) =>
+  node(script, options.timeoutMs, options.graceMs)(
+    [],
+    options.signal ?? new AbortController().signal,
+    options.captureBytes === undefined ? {} : { captureBytes: options.captureBytes },
+  );
+
+/** Whether `value` can name one process: a positive safe integer. */
+const isPid = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
 
 /** Whether the process has exited, allowing the system a moment to reap it. */
 async function exited(pid: number): Promise<boolean> {
@@ -81,6 +92,8 @@ describe("createRunner", () => {
 
     afterEach(() => {
       for (const pid of pids) {
+        // Never 0 or a negative number, which would signal this process's group or every process it may signal.
+        if (!isPid(pid)) continue;
         try {
           process.kill(pid, "SIGKILL");
         } catch {
@@ -91,12 +104,21 @@ describe("createRunner", () => {
     });
 
     /**
+     * Code for a second process that publishes its PID to the file `pid`: written beside it, then renamed into place, so
+     * the file never holds part of a PID.
+     */
+    function publishPid(): string {
+      const file = JSON.stringify(join(dir, "pid"));
+      return `const fs = require("fs"); fs.writeFileSync(${file} + ".new", String(process.pid)); fs.renameSync(${file} + ".new", ${file});`;
+    }
+
+    /**
      * Like wrangler's launcher, starts a second Node process, forwards SIGINT and SIGTERM to it, and exits with its
      * status; with `exitCode`, exits with it as soon as the second process runs instead. The second process ignores
-     * SIGTERM, then writes its PID to a file.
+     * SIGTERM, then publishes its PID.
      */
     function launcher(exitCode?: number): string {
-      const second = `process.on("SIGTERM", () => {}); require("fs").writeFileSync(${JSON.stringify(join(dir, "pid"))}, String(process.pid)); process.stdout.write("ready"); setInterval(() => {}, 1000);`;
+      const second = `process.on("SIGTERM", () => {}); ${publishPid()} process.stdout.write("ready"); setInterval(() => {}, 1000);`;
       return `
         const child = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(second)}], { stdio: ["ignore", "pipe", "inherit"] });
         child.stdout.once("data", () => { ${exitCode === undefined ? "" : `process.exit(${exitCode});`} });
@@ -104,18 +126,26 @@ describe("createRunner", () => {
         child.on("exit", (code, signal) => process.exit(code ?? 1));`;
     }
 
-    /** The second process's PID, once it has written it. */
+    /**
+     * The second process's PID, once the file holds one. Anything but a positive integer is neither recorded nor
+     * returned: `Number("")` is 0, and `process.kill(0)` signals this process's own group.
+     */
     async function secondPid(): Promise<number> {
       for (let attempt = 0; attempt < 100; attempt++) {
+        let text: string | undefined;
         try {
-          const pid = Number(readFileSync(join(dir, "pid"), "utf8"));
+          text = readFileSync(join(dir, "pid"), "utf8");
+        } catch {
+          text = undefined;
+        }
+        const pid = text !== undefined && /^[1-9][0-9]*$/.test(text) ? Number(text) : undefined;
+        if (pid !== undefined && isPid(pid)) {
           pids.push(pid);
           return pid;
-        } catch {
-          await new Promise((resolve) => setTimeout(resolve, 20));
         }
+        await new Promise((resolve) => setTimeout(resolve, 20));
       }
-      throw new Error("the second process did not start");
+      throw new Error("the second process published no PID");
     }
 
     it("kills every process of a command that outlives the timeout", async () => {
@@ -142,6 +172,103 @@ describe("createRunner", () => {
       const pid = await secondPid();
       expect(await result).toEqual({ ok: false, reason: "exited with code 3" });
       expect(await exited(pid)).toBe(true);
+    });
+
+    /**
+     * Starts a second Node process that holds the command's standard output, in the command's group or, with
+     * `ownGroup`, in a group of its own, and ignores SIGTERM with `ignoreTerm`; once the second process has written its
+     * PID, the command prints "out" and exits with 0.
+     */
+    function holder(options: { ownGroup: boolean; ignoreTerm: boolean }): string {
+      const file = JSON.stringify(join(dir, "pid"));
+      const second = `${options.ignoreTerm ? 'process.on("SIGTERM", () => {});' : ""} ${publishPid()} setInterval(() => {}, 1000);`;
+      return `
+        require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(second)}], { stdio: ["ignore", "inherit", "inherit"], detached: ${options.ownGroup} });
+        const wait = setInterval(() => {
+          if (!require("fs").existsSync(${file})) return;
+          clearInterval(wait);
+          process.stdout.write("out", () => process.exit(0));
+        }, 10);`;
+    }
+
+    // "close" waits for the captured output's pipe, which the processes left behind still hold.
+    it("returns the output once the processes the command left have stopped", async () => {
+      const result = runNode(holder({ ownGroup: false, ignoreTerm: false }), { graceMs: 5000, captureBytes: 100 });
+      const pid = await secondPid();
+      const started = Date.now();
+      expect(await result).toEqual({ ok: true, output: "out" });
+      // Stopped by SIGTERM when the command exited, not by SIGKILL after the grace period.
+      expect(Date.now() - started).toBeLessThan(2500);
+      expect(await exited(pid)).toBe(true);
+    });
+
+    it("fails a capture whose left processes needed SIGKILL", async () => {
+      const result = runNode(holder({ ownGroup: false, ignoreTerm: true }), { graceMs: 300, captureBytes: 100 });
+      const pid = await secondPid();
+      expect(await result).toEqual({ ok: false, reason: "printed output that could not be read" });
+      expect(await exited(pid)).toBe(true);
+    });
+
+    it("stops waiting at the timeout for a pipe held outside the group", async () => {
+      const result = runNode(holder({ ownGroup: true, ignoreTerm: true }), {
+        timeoutMs: 1000,
+        graceMs: 300,
+        captureBytes: 100,
+      });
+      await secondPid();
+      expect(await result).toEqual({ ok: false, reason: "timed out after 1 s" });
+    });
+  });
+
+  describe("capturing standard output", () => {
+    it("returns what the command printed, read as UTF-8", async () => {
+      expect(await runNode("process.stdout.write('[\\u00e9]')", { captureBytes: 100 })).toEqual({
+        ok: true,
+        output: "[é]",
+      });
+      expect(await runNode("process.exit(0)", { captureBytes: 100 })).toEqual({ ok: true, output: "" });
+    });
+
+    it("accepts output at the bound and fails one byte past it", async () => {
+      expect(await runNode("process.stdout.write('12345')", { captureBytes: 5 })).toEqual({
+        ok: true,
+        output: "12345",
+      });
+      expect(await runNode("process.stdout.write('123456')", { captureBytes: 5 })).toEqual({
+        ok: false,
+        reason: "printed more than 5 bytes",
+      });
+    });
+
+    // A command blocked on a full pipe would run until the timeout.
+    it("reads and drops output past the bound, so the command finishes", async () => {
+      const script = "process.stdout.write('x'.repeat(8 * 1024 * 1024), () => process.exit(0))";
+      expect(await runNode(script, { captureBytes: 10, timeoutMs: 5000 })).toEqual({
+        ok: false,
+        reason: "printed more than 10 bytes",
+      });
+    });
+
+    it("reports a failed command's status, not its output", async () => {
+      expect(await runNode("process.stdout.write('[]', () => process.exit(3))", { captureBytes: 100 })).toEqual({
+        ok: false,
+        reason: "exited with code 3",
+      });
+    });
+
+    it("stops a command that outlives the timeout", async () => {
+      expect(
+        await runNode("process.stdout.write('['); setInterval(() => {}, 1000)", { timeoutMs: 200, captureBytes: 100 }),
+      ).toEqual({ ok: false, reason: "timed out after 0.2 s" });
+    });
+
+    it("stops a command when the signal aborts", async () => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort("SIGINT"), 100);
+      expect(await runNode("setInterval(() => {}, 1000)", { signal: controller.signal, captureBytes: 100 })).toEqual({
+        ok: false,
+        reason: "was stopped",
+      });
     });
   });
 

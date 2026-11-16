@@ -42,7 +42,14 @@ export function parseJsonc(text: string): { ok: true; value: unknown } | { ok: f
 }
 
 /** The keys the deployment values may set; everything else comes from wrangler.jsonc. `account_id` is optional. */
-const DEPLOY_KEYS: ReadonlySet<string> = new Set(["account_id", "routes", "d1_databases", "r2_buckets", "vars"]);
+const DEPLOY_KEYS: ReadonlySet<string> = new Set([
+  "account_id",
+  "routes",
+  "d1_databases",
+  "r2_buckets",
+  "kv_namespaces",
+  "vars",
+]);
 
 /** The variables the deployment values set: every configuration variable except `API_TOKENS`, a secret. */
 export const DEPLOY_VARIABLES = CONFIG_VARIABLES.filter((variable) => variable !== "API_TOKENS");
@@ -112,21 +119,33 @@ function variableProblems(vars: Json): string[] {
 
 /** A binding's entry from the deployment values, merged into the matching entry of wrangler.jsonc. */
 type BindingSpec = {
-  readonly key: "d1_databases" | "r2_buckets";
-  readonly fields: Readonly<Record<string, RegExp>>;
+  readonly key: "d1_databases" | "r2_buckets" | "kv_namespaces";
+  /** Each field's form, and what a value of another form is not. */
+  readonly fields: Readonly<Record<string, { readonly form: RegExp; readonly what: string }>>;
 };
 
 const D1: BindingSpec = {
   key: "d1_databases",
   fields: {
     // The name D1 shows and Time Travel takes; the ID is what the Worker binds.
-    database_name: /^\S+$/,
-    database_id: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    database_name: { form: /^\S+$/, what: "a database_name" },
+    database_id: {
+      form: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      what: "a database_id",
+    },
   },
 };
 const R2: BindingSpec = {
   key: "r2_buckets",
-  fields: { bucket_name: /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/ },
+  fields: { bucket_name: { form: /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/, what: "a bucket_name" } },
+};
+/**
+ * The OAuth storage (design.md section 11). wrangler provisions a new namespace for a binding without an ID, which
+ * would sign every client out, so the ID is required here, and deploy-run.ts checks that the account has it.
+ */
+const KV: BindingSpec = {
+  key: "kv_namespaces",
+  fields: { id: { form: /^[0-9a-f]{32}$/, what: "a namespace ID (32 lowercase hexadecimal characters)" } },
 };
 
 function bindingNames(base: Json, key: string): string[] {
@@ -168,11 +187,11 @@ function bindingValues(base: Json, values: Json, spec: BindingSpec, problems: st
     for (const key of Object.keys(entry)) {
       if (key !== "binding" && !(key in spec.fields)) problems.push(`${at}.${key} belongs in wrangler.jsonc`);
     }
-    for (const [field, form] of Object.entries(spec.fields)) {
+    for (const [field, { form, what }] of Object.entries(spec.fields)) {
       const value = entry[field];
       if (value === undefined) problems.push(`${at}.${field} is missing`);
       else if (value === "") problems.push(`${at}.${field} is empty`);
-      else if (typeof value !== "string" || !form.test(value)) problems.push(`${at}.${field} is not a ${field}`);
+      else if (typeof value !== "string" || !form.test(value)) problems.push(`${at}.${field} is not ${what}`);
     }
     found.set(binding, Object.fromEntries(Object.keys(spec.fields).map((field) => [field, entry[field]])));
   });
@@ -314,8 +333,8 @@ export type DeployCheck =
 
 /**
  * Checks the deployment values against wrangler.jsonc (`base`) and returns `base` with them merged in, or every problem
- * found. The variables are checked by `parseConfig` once each has a value; `API_TOKENS` is a secret that the values
- * never hold, so the parser sees an empty token list in its place.
+ * found. The variables are checked by `parseConfig` once each has a value; `API_TOKENS` is an optional secret that the
+ * values never hold.
  */
 export function checkDeployValues(base: Json, values: unknown): DeployCheck {
   if (!isRecord(values)) return { ok: false, problems: ["the deployment values are not a JSON object"] };
@@ -337,7 +356,7 @@ export function checkDeployValues(base: Json, values: unknown): DeployCheck {
     const own = variableProblems(vars);
     problems.push(...own);
     if (own.length === 0) {
-      const parsed = parseConfig({ ...vars, API_TOKENS: "{}" });
+      const parsed = parseConfig(vars);
       if (parsed.ok) config = parsed.config;
       else problems.push(configProblem(parsed.code, parsed.variable));
     }
@@ -345,6 +364,7 @@ export function checkDeployValues(base: Json, values: unknown): DeployCheck {
 
   const databases = bindingValues(base, values, D1, problems);
   const buckets = bindingValues(base, values, R2, problems);
+  const namespaces = bindingValues(base, values, KV, problems);
   problems.push(...routeProblems(values, config));
   if (problems.length > 0 || config === undefined || !isRecord(vars)) return { ok: false, problems };
 
@@ -362,6 +382,7 @@ export function checkDeployValues(base: Json, values: unknown): DeployCheck {
       vars,
       d1_databases: merge(D1.key, databases),
       r2_buckets: merge(R2.key, buckets),
+      kv_namespaces: merge(KV.key, namespaces),
     },
   };
 }
