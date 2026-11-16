@@ -59,8 +59,12 @@ const stalled: Fetch = (_input, init) =>
     init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
   });
 
-/** A listing whose every page names the same next cursor. */
-const looping: Fetch = async () => json(200, { artifacts: [], next_cursor: "same" });
+/** A listing whose every page names the same next cursor; past ten pages it stops answering, so a loop ends. */
+function looping(): Fetch {
+  let pages = 0;
+  return async () =>
+    ++pages > 10 ? Promise.reject(new TypeError("fetch failed")) : json(200, { artifacts: [], next_cursor: "same" });
+}
 
 const SHORT = { requestMs: 50, publishMs: 50, fileMs: 50 };
 
@@ -189,7 +193,7 @@ describe("list", () => {
     ]);
     expect(JSON.parse(stdout)).toEqual({ artifacts: pages.flatMap((page) => page.artifacts), next_cursor: null });
 
-    const loop = await cli(["list"], { env: ENV, fetch: looping });
+    const loop = await cli(["list"], { env: ENV, fetch: looping() });
     expect(loop.status).toBe(1);
     expect(loop.stderr).toContain("the API repeated a listing cursor");
   });
