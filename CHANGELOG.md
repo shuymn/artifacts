@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.9.0](https://github.com/shuymn/artifacts/compare/v0.8.0...v0.9.0) (2026-11-16)
+
+
+### Features
+
+* **cli:** list and revoke grants ([8110afc](https://github.com/shuymn/artifacts/commit/8110afc66fe12565b8a2a894c862bff109ea9565))
+* **cli:** list and revoke grants ([0b9703c](https://github.com/shuymn/artifacts/commit/0b9703c14c9d2c08732ab14ff69105d1ea61c2f5))
+* **cli:** sign in with OAuth ([aa69eaa](https://github.com/shuymn/artifacts/commit/aa69eaaad5bd9d7a776652200c6519492f6b5c94))
+* **cli:** sign in with OAuth ([d6856fd](https://github.com/shuymn/artifacts/commit/d6856fd5928b4deae8d69831c5435aa0614c0a73))
+
+
+### Bug Fixes
+
+* **cli:** check the status of OAuth refusals ([807573f](https://github.com/shuymn/artifacts/commit/807573f9e0648ea77414a2d7048e0f81bdde7dde))
+* **cli:** escape C1 in JSON and keep -- in advice ([d4ade21](https://github.com/shuymn/artifacts/commit/d4ade21b09dff9e0a3a3f6ad76beca5182aa18e7))
+* **cli:** report a stale lock recovery link ([27ee4d6](https://github.com/shuymn/artifacts/commit/27ee4d66dd01373269bf39ffc0306025ef274699))
+* **cli:** require 204 to finish logout ([67e4bc4](https://github.com/shuymn/artifacts/commit/67e4bc409f4a326b08e3963f2b51807637c45b23))
+* **cli:** stage the lock file as 0600 ([f43420e](https://github.com/shuymn/artifacts/commit/f43420e2a6a39b45f02fd7d0b1f6027402e2294d))
+
 ## [0.8.0](https://github.com/shuymn/artifacts/compare/v0.7.0...v0.8.0) (2026-11-16)
 
 
