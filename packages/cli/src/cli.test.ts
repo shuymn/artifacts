@@ -2,12 +2,13 @@
 // answers in e2e.test.ts.
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import type { Fetch } from "./api.ts";
 import { HELP } from "./cli.ts";
+import { targetOf } from "./pull.ts";
 import { cli, tempDir, writeTree } from "./test-support.ts";
 
 const TOKEN = `art_${"t".repeat(32)}`;
@@ -247,6 +248,48 @@ describe("timeouts", () => {
 });
 
 describe("pull", () => {
+  it.each([
+    ["..\\escaped.txt", "a \\ makes .. a segment"],
+    ["a\\b.txt", "a \\ cannot be part of a name"],
+    ["D:x.txt", "a drive outside the directory"],
+    ["../x.txt", "a .. segment"],
+    ["/abs.txt", "an empty first segment"],
+  ])("on Windows refuses %j (%s)", (path) => {
+    expect(() => targetOf("C:\\dest", path, win32)).toThrow(`cannot be written here: ${JSON.stringify(path)}`);
+  });
+
+  it("on Windows writes a plain path below the directory", () => {
+    expect(targetOf("C:\\dest", "sub/page.html", win32)).toBe("C:\\dest\\sub\\page.html");
+  });
+
+  it("on POSIX keeps \\ as part of a name and refuses what leaves the directory", () => {
+    expect(targetOf("/dest", "..\\escaped.txt", posix)).toBe("/dest/..\\escaped.txt");
+    expect(targetOf("/dest", "a\\b/c.txt", posix)).toBe("/dest/a\\b/c.txt");
+    for (const path of ["../x.txt", "a/../../x.txt", "/etc/x", "a//b"]) {
+      expect(() => targetOf("/dest", path, posix)).toThrow("cannot be written here");
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("writes a path with \\ inside the directory on this host", async () => {
+    const files = [
+      { path: "index.html", body: "i" },
+      { path: "..\\escaped.txt", body: "e" },
+    ];
+    const fetch: Fetch = async (input) => {
+      const listed = files.find((file) => input.endsWith(`/files/${encodeURIComponent(file.path)}`));
+      return listed === undefined
+        ? json(200, { artifact: artifact(ID), version: version(files) })
+        : new Response(listed.body);
+    };
+    const parent = await tempDir();
+    const { status, stderr } = await cli(["pull", ID, join(parent, "out")], { env: ENV, fetch });
+    expect(status).toBe(0);
+    // The name starts with ".", so a publish would skip it; pull says so.
+    expect(stderr).toContain('"..\\\\escaped.txt"');
+    expect(await readdir(parent)).toEqual(["out"]);
+    expect((await readdir(join(parent, "out"))).toSorted()).toEqual(["..\\escaped.txt", "index.html"]);
+  });
+
   it("refuses bytes that differ from the listing and removes the file", async () => {
     const fetch: Fetch = async (input) =>
       input.includes("/files/")

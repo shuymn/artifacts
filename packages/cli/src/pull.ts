@@ -5,18 +5,28 @@
  */
 import { createHash } from "node:crypto";
 import { mkdir, open, readdir, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, posix, win32, type PlatformPath } from "node:path";
 
 import type { Api, ArtifactVersion, FileJson } from "./api.ts";
 import { CliError } from "./errors.ts";
 
-/** The segments of a listed path, refused unless each is a plain name (the Worker never lists another). */
-function segmentsOf(path: string): string[] {
+const HOST_PATHS: PlatformPath = process.platform === "win32" ? win32 : posix;
+
+/**
+ * Where a listed path is written: below `directory`, or refused. Each `/`-separated segment must be a plain name, and
+ * the resolved target must stay below the directory as `paths` reads it. Windows also separates on `\`, so a path
+ * holding one cannot be written there as listed; elsewhere `\` is part of a name.
+ */
+export function targetOf(directory: string, path: string, paths: PlatformPath = HOST_PATHS): string {
+  const refused = () => new CliError(`the version lists a path that cannot be written here: ${JSON.stringify(path)}`);
   const segments = path.split("/");
-  if (segments.some((s) => s === "" || s === "." || s === ".." || s.includes("\0"))) {
-    throw new CliError(`the version lists a path that cannot be written: ${JSON.stringify(path)}`);
-  }
-  return segments;
+  if (segments.some((s) => s === "" || s === "." || s === ".." || s.includes("\0"))) throw refused();
+  if (paths.sep === "\\" && path.includes("\\")) throw refused();
+  const root = paths.resolve(directory);
+  const target = paths.resolve(root, ...segments);
+  const below = paths.relative(root, target);
+  if (below === "" || paths.isAbsolute(below) || below === ".." || below.startsWith(`..${paths.sep}`)) throw refused();
+  return target;
 }
 
 /** A path that is both a file and a directory of another path cannot exist in a file system. */
@@ -107,7 +117,7 @@ export type Pulled = ArtifactVersion & { readonly dotNames: readonly string[] };
 export async function pull(api: Api, id: string, directory: string, version: number | undefined): Promise<Pulled> {
   const result = await api.get(id, version);
   const files = result.version.files;
-  const targets = files.map((file) => ({ file, target: join(directory, ...segmentsOf(file.path)) }));
+  const targets = files.map((file) => ({ file, target: targetOf(directory, file.path) }));
   refuseClashes(files);
   await prepare(directory);
   for (const { file, target } of targets) {
