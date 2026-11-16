@@ -2,10 +2,12 @@
  * The artifacts Worker (docs/design.md). One Worker serves every host: it classifies the request's host first
  * (HOST-1), then authenticates it for the host's class (Access JWT on the app and private content hosts, a bearer token
  * on the API host, none on public hosts) before any storage is read. The API host's OAuth authorization server paths
- * take no credential; only they reach the OAuth library.
+ * take no credential; only they reach the OAuth library's `fetch`, and only the app host's authorization endpoint, behind
+ * Access, reaches its helpers.
  */
 import { AccessVerifier, type AccessSettings } from "./access.ts";
 import { parseConfig, type Config } from "./config.ts";
+import { serveConsent, withConsentHeaders, type ConsentAnswer } from "./consent.ts";
 import { serveGallery, withGalleryPolicy } from "./gallery/route.ts";
 import { classifyHost } from "./hosts.ts";
 import { newArtifactId, type ArtifactId } from "./id.ts";
@@ -111,8 +113,6 @@ async function browser(
   id: ArtifactId | undefined,
 ): Promise<Response> {
   const kind: BrowserClass = host === "public" ? "public" : "private";
-  // OAuth is off in a localhost configuration: the authorization endpoint does not exist, whatever the method.
-  if (host === "app" && !config.oauth && url.pathname === AUTHORIZE_PATH) return plainResponse(kind, 404);
   if (!methodAllowed(request)) return methodNotAllowed(kind);
   if (host !== "public") {
     const refusal = await refuseWithoutAccess(request, config, deps, host);
@@ -121,6 +121,30 @@ async function browser(
   // The gallery (design.md section 10).
   if (id === undefined) return serveGallery(request, url, operationDeps(env, config, deps));
   return serveArtifact(request, url, operationDeps(env, config, deps), id, kind);
+}
+
+/**
+ * The authorization endpoint on the app host (design.md section 7): the consent page on `GET`, its form on `POST`, any
+ * other method 405 (ISO-3), then Access with the app audience (ACC-1), as for the gallery. Every answer, these refusals
+ * included, gets the endpoint's headers (`withConsentHeaders`) where `fetch` returns it.
+ */
+async function authorize(
+  request: Request,
+  url: URL,
+  env: Env,
+  config: Config,
+  deps: WorkerDeps,
+): Promise<ConsentAnswer> {
+  // OAuth is off in a localhost configuration: the endpoint does not exist, whatever the method. `fetch` refused a
+  // configuration with OAuth and without OAUTH_KV.
+  if (!config.oauth || env.OAUTH_KV === undefined) return { response: plainResponse("private", 404) };
+  // `HEAD` too: a `GET` there writes a transaction.
+  if (request.method !== "GET" && request.method !== "POST") {
+    return { response: plainResponse("private", 405, { Allow: "GET, POST" }) };
+  }
+  const refusal = await refuseWithoutAccess(request, config, deps, "app");
+  if (refusal !== undefined) return { response: refusal };
+  return serveConsent(request, url, env.OAUTH_KV, config, { now: deps.now, kvReadMs: deps.timeouts.kvReadMs });
 }
 
 /** The Worker's fetch handler; the execution context goes to the OAuth library only, and `cf` is not used. */
@@ -153,8 +177,13 @@ export function createWorker(deps: WorkerDeps): Worker {
             return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
           case "api":
             return await api(request, url, env, ctx, config, deps);
-          case "app":
+          case "app": {
+            if (url.pathname === AUTHORIZE_PATH) {
+              const answer = await authorize(request, url, env, config, deps);
+              return withGalleryPolicy(withConsentHeaders(answer.response), answer.formAction);
+            }
             return withGalleryPolicy(await browser(request, url, env, config, deps, "app", undefined));
+          }
           case "content":
             return await browser(request, url, env, config, deps, "content", route.id);
           case "public":
@@ -170,7 +199,8 @@ export function createWorker(deps: WorkerDeps): Worker {
         });
         if (route.kind === "api") return jsonResponse(500, { error: { code: "internal", message: "internal error" } });
         const failure = plainResponse(route.kind === "public" ? "public" : "private", 500);
-        return route.kind === "app" ? withGalleryPolicy(failure) : failure;
+        if (route.kind !== "app") return failure;
+        return withGalleryPolicy(url.pathname === AUTHORIZE_PATH ? withConsentHeaders(failure) : failure);
       }
     },
   };

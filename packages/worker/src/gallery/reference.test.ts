@@ -7,11 +7,13 @@ import { describe, expect, it } from "vitest";
 
 import archivedHtml from "../../../../docs/gallery/reference/archived.html?raw";
 import artifactHtml from "../../../../docs/gallery/reference/artifact.html?raw";
+import consentErrorHtml from "../../../../docs/gallery/reference/consent-error.html?raw";
+import consentHtml from "../../../../docs/gallery/reference/consent.html?raw";
 import indexHtml from "../../../../docs/gallery/reference/index.html?raw";
 import rootPackage from "../../../../package.json" with { type: "json" };
 import type { ArtifactJson, GalleryArtifact, GalleryList, ListedArtifact, VersionJson } from "../operations.ts";
 import { assetPath } from "./assets.ts";
-import { artifactPage, listPage, type Chrome } from "./pages.ts";
+import { artifactPage, consentErrorPage, consentPage, listPage, type Chrome, type ConsentView } from "./pages.ts";
 import { decodeEntities, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
 
 /** The time the reference pages' relative times count from: "2 hours ago" for 09:12. */
@@ -206,6 +208,20 @@ const ARTIFACT: GalleryArtifact = {
 };
 
 /**
+ * The consent page of the reference: Claude Code, identified by its CIMD document's domain, signing in to MCP from a
+ * loopback port. The reference shows the handle as `…`.
+ */
+const CONSENT: ConsentView = {
+  clientName: "Claude Code",
+  clientDomain: "client.example.com",
+  redirectHost: "localhost",
+  loopback: true,
+  resource: { kind: "mcp", url: "https://artifacts-api.example.com/mcp" },
+  publisher: "claude-code",
+  handle: "…",
+};
+
+/**
  * The reference pages load Google Fonts and the repository's gallery.css and icons, and show the icon from the
  * repository; the Worker serves them itself, at their fingerprinted paths.
  */
@@ -291,6 +307,9 @@ const PAGES = [
     () => artifactPage(CHROME, ARTIFACT),
     [[`?versions_cursor=${ARTIFACT.versions.next_cursor}#versions`, "?versions_cursor=…"]],
   ],
+  ["consent.html", consentHtml, () => consentPage(CONSENT), []],
+  // The reference shows the error of a transaction that expired, was used, or belongs to another browser.
+  ["consent-error.html", consentErrorHtml, () => consentErrorPage("transaction"), []],
 ] as const;
 
 describe("templates and reference pages", () => {

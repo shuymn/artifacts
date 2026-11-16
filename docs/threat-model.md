@@ -105,7 +105,8 @@ and the threats are the three adversaries below, not untrusted users.
   content or public host answers them as any path: _Enforced (main)_ in `src/index.ts`, `src/oauth.ts`, pinned by
   behavior (`src/oauth.test.ts`: every OAuth path on each host class with the library's entry points spied on; an
   artifact's files at `oauth/token` and `.well-known/oauth-authorization-server` on its content and public hosts)
-  (PL-43). The app host's `/oauth/authorize`: _Planned (OAuth)_ (PL-37).
+  (PL-43). The app host's `/oauth/authorize` reaches the library's helpers, and nothing else of the app host does:
+  _Enforced (main)_ in `src/index.ts`, `src/consent.ts`, pinned by the same test.
 - **HOST-2: a configuration that would weaken a boundary is refused.** Refused: a public suffix that ends with the
   content suffix (the content Access wildcard would cover public hosts), an app or API host under either suffix, a
   suffix that makes an artifact label longer than 63 characters, and a mix of `localhost` and other hosts. The Worker
@@ -128,7 +129,9 @@ and the threats are the three adversaries below, not untrusted users.
   `exp`, expired and the tolerance edges, an algorithm other than RS256, an unknown `kid` that refreshes the set once,
   an unreachable key endpoint, a valid JWT sent only as a cookie). **Gap:** the production durations (a key set reused
   for 7 days, a 5 s key fetch) are checked by review, not by tests, which substitute short ones. `/oauth/authorize` is
-  verified with the app audience like the gallery, its `POST` included: _Planned (OAuth)_ (PL-37).
+  verified with the app audience like the gallery, its `POST` included: _Enforced (main)_ in `src/index.ts`, pinned by
+  behavior (`src/consent.test.ts`: `GET` and `POST` without a JWT and with the content audience's answer 403 before
+  the library) (PL-37).
 - **ACC-2: Access verification is skipped only for a `localhost` configuration.** Every configured host must be a
   `localhost` name; no variable turns verification off, and the deployment script refuses `localhost` hosts and ports.
   OAuth is off there too, so no consent page runs without Access: every OAuth path answers 404. _Enforced (main)_ in
@@ -174,8 +177,11 @@ and the threats are the three adversaries below, not untrusted users.
 - **TOK-3: every version and every change records its publisher.** A version stores `published_by`, the publisher name
   of its credential (an API token's name, or the name the owner gave a grant); create, publish, public, archive and
   delete changes log the publisher name and, for an OAuth credential, the grant's ID, since names may repeat across
-  grants. _Enforced (main)_ for API tokens in `src/operations.ts`; _Planned (OAuth)_ for grants. Pinned by behavior and
-  log redaction (`src/publish.test.ts`; planned: PL-7, PL-39).
+  grants. _Enforced (main)_ for API tokens in `src/operations.ts`, and for the name a grant receives in
+  `src/consent.ts`: the consent form takes only a name of the form `[a-z0-9-]{1,32}`, keeps it in the grant's props
+  and logs it with the grant's ID in `grant.created`; _Planned (OAuth)_ for versions and changes made with a grant.
+  Pinned by behavior and log redaction (`src/publish.test.ts`; `src/consent.test.ts`: a name of the wrong form creates
+  no grant and keeps the transaction, a corrected one succeeds (PL-39); planned: PL-7).
 
 ### Origin isolation (ISO)
 
@@ -202,26 +208,33 @@ and the threats are the three adversaries below, not untrusted users.
 - **ISO-3: browsers can only read artifacts.** Content hosts answer `GET` and `HEAD` only, and so does the app host
   except `/oauth/authorize`, which answers `GET` and `POST` only; that `POST` creates or refuses a grant under OAUTH-1
   and changes no artifact. Every artifact change is on the API host with a bearer credential, so no request
-  authenticated by a cookie changes an artifact. _Enforced (main)_ in `src/serve.ts`; the authorize path _Planned
-  (OAuth)_. Pinned by behavior (`src/routing.test.ts`; planned: PL-11, PL-37). **Changed for OAuth:** signing in needs
+  authenticated by a cookie changes an artifact. _Enforced (main)_ in `src/serve.ts`, and for the authorize path in
+  `src/index.ts`, `src/consent.ts`. Pinned by behavior (`src/routing.test.ts`; `src/consent.test.ts`: `HEAD`, `PUT`,
+  `DELETE`, `PATCH` and `OPTIONS` on `/oauth/authorize` answer 405 before Access and storage, and the form's `POST`
+  under OAUTH-1) (PL-11, PL-37). **Changed for OAuth:** signing in needs
   the owner's approval in a browser (P3). What ISO-3 kept from artifact pages holds: the one browser write needs the
   owner's Access session, a handle only the consent page shows, and the browser's `__Host-` binding cookie.
 - **ISO-4: the Worker sets one cookie, the consent binding, and decides nothing else on a cookie.** The binding is
   the library's `__Host-` cookie, set by `GET /oauth/authorize` and cleared when its transaction is used; it ties a
   consent transaction to the browser that opened it and authenticates nothing (ACC-1 still reads the JWT header). No
-  other route sets a cookie. _Enforced (main)_ for every route; the binding _Planned (OAuth)_. Pinned by behavior
-  (`src/routing.test.ts`, `src/serve.test.ts`: no `Set-Cookie` on any route; `src/access.test.ts`: a valid Access JWT
-  sent only as a cookie is refused, ACC-1; planned: PL-11, PL-37). **Changed for OAuth:** the cookie is the library's
+  other route sets a cookie. _Enforced (main)_ in `src/consent.ts`, which takes only the binding from the library's
+  headers. Pinned by behavior (`src/routing.test.ts`, `src/serve.test.ts`: no `Set-Cookie` on any route;
+  `src/access.test.ts`: a valid Access JWT sent only as a cookie is refused, ACC-1; `src/consent.test.ts`: the page
+  sets one `__Host-` binding, `Secure; HttpOnly; SameSite=Lax`, the answers that use it clear it, and no other answer
+  of the endpoint sets one) (PL-11, PL-37). **Changed for OAuth:** the cookie is the library's
   protection of the consent form against cross-site requests. `__Host-` keeps what ISO-4 protected in the
   shared-domain layout: no other host, artifact pages included, can set or replace it.
 - **ISO-5: the app host runs no supplied markup.** Artifact titles, descriptions, paths and every other value, and
   on the consent page every value a client supplied (its name, URI and redirect URI), are escaped by the one template
   that builds the pages; every app-host response's `Content-Security-Policy`, refusals and failures included, forbids
   scripts and framing, and forms except the consent page's, whose `form-action` admits the page and the client's
-  redirect origin only. _Enforced (main)_ for the gallery in `src/gallery/html.ts`, `src/gallery/route.ts`,
-  `src/index.ts`; _Planned (OAuth)_ for the consent page. Pinned by behavior (`src/gallery/gallery.test.ts`: markup and
-  attribute breakouts in titles, descriptions, paths and content types on every page; the header on every status the
-  app host answers; planned: PL-38). **Changed for OAuth:** the consent form must post and then send the browser to
+  redirect origin only. _Enforced (main)_ in `src/gallery/html.ts`, `src/gallery/route.ts`, `src/index.ts`, and for
+  the consent page in `src/gallery/pages.ts`, `src/consent.ts`. Pinned by behavior (`src/gallery/gallery.test.ts`:
+  markup and attribute breakouts in titles, descriptions, paths and content types on every page; the header on every
+  status the app host answers; `src/consent.test.ts`: markup in a client's name, URI, redirect path and `state`; the
+  page's policy with a loopback and an `https` origin in `form-action`, `form-action 'none'` on the endpoint's other
+  answers, and redirect origins of another form refused before the page (PL-38); `src/gallery/reference.test.ts`: the
+  consent pages' markup). **Changed for OAuth:** the consent form must post and then send the browser to
   the client. The origin added to `form-action` is the one the page shows the owner, and only of the forms design.md
   section 7 lists.
 
@@ -281,7 +294,8 @@ and the threats are the three adversaries below, not untrusted users.
   one past each bound; a chunked body without `Content-Length`; a `read_file` over the bound reads no object). The
   OAuth token and registration bodies are counted before the library reads them: _Enforced (main)_ in `src/oauth.ts`,
   pinned by behavior (`src/oauth.test.ts`: at and one past each bound, with and without `Content-Length`, the library
-  not called) (PL-44). The consent body: _Planned (OAuth)_.
+  not called) (PL-44). The consent form, at most 4 KiB, is counted before it is parsed: _Enforced (main)_ in
+  `src/consent.ts`, pinned by behavior (`src/consent.test.ts`: at and one past the bound).
 - **RES-2: waits are bounded where the outcome stays known.** Fetching Access keys, each R2 call and each D1 read have a
   timeout and answer 503 `unavailable`; a publish that times out before its commit leaves no version. The D1 commit
   has none: a timed-out commit could still apply. _Enforced (main)_ in `src/timeout.ts`, `src/objects.ts`, `src/db.ts`,
@@ -293,9 +307,11 @@ and the threats are the three adversaries below, not untrusted users.
   behavior (`src/oauth.test.ts`, `src/revocation.test.ts`: a read that fails or never answers). The library's KV calls
   on the token, registration and authorize paths, and a revocation's writes, have no timeout of ours, since a write
   that timed out could still apply; the library bounds a client document fetch at 10 s (OAUTH-6). The grant
-  listing's KV reads wait 10 s and answer 503: _Enforced (main)_ in `src/grants.ts`, pinned by behavior
+  listing's KV reads wait 10 s and answer 503: _Enforced (main)_ in `src/grants.ts`, and for the listing an approval
+  reads to replace a client's grants in `src/consent.ts`, where the 503 is the error page; pinned by behavior
   (`src/grants.test.ts`: a listing page and a record read that never answer, and a revocation whose slow writes still
-  complete). The KV reads of a credential check: _Planned (OAuth)_ (PL-40).
+  complete; `src/consent.test.ts`: a listing that fails or never answers). The KV reads of a credential check:
+  _Planned (OAuth)_ (PL-40).
 
 ### Data (DATA)
 
@@ -311,15 +327,18 @@ and the threats are the three adversaries below, not untrusted users.
   identifier, a password in its userinfo included, reaches the logs. Neither carries another party's secret or
   private content: the library fetches the document without a credential from a public address, where a private host
   answers with Access's sign-in. Invocation logs are off. _Enforced (main)_ in
-  `src/log.ts`, for the authorization server's paths in `src/oauth.ts`, and for the grants routes in `src/grants.ts`;
-  _Planned (OAuth)_ for the consent page and OAuth credentials on `/mcp` and `/v1/`. Pinned by log redaction (`src/log-redaction.test.ts`: every route and
-  failure path, `/mcp` and its SDK refusals included; `src/oauth.test.ts`: the metadata, registration and token
-  endpoints, their refusals, a revocation and KV and fetch failures, every `console` method captured, with markers in
-  codes, tokens, verifiers, client names, client-ID paths, queries and userinfo, a client document's fields and
-  thrown errors, each appearing only where those two lines put it, and the `onError` hook logging `oauth.refused` only
-  (PL-45); `src/grants.test.ts`: the listing, a revocation and their failures, with markers in a grant's metadata, a
-  client's name and a KV error; planned: consent handles) and source check (`src/source.test.ts`: `console` only in
-  the logging module; `wrangler.jsonc`). **Gap:** the gallery's routes are not among the redaction
+  `src/log.ts`, for the authorization server's paths in `src/oauth.ts`, for the grants routes in `src/grants.ts`, and
+  for the consent page in `src/consent.ts`; _Planned (OAuth)_ for OAuth credentials on `/mcp` and `/v1/`. Pinned by
+  log redaction (`src/log-redaction.test.ts`: every route and failure path, `/mcp` and its SDK refusals included;
+  `src/oauth.test.ts`: the metadata, registration and token endpoints, their refusals, a revocation and KV and fetch
+  failures, every `console` method captured, with markers in codes, tokens, verifiers, client names, client-ID paths,
+  queries and userinfo, a client document's fields and thrown errors, each appearing only where those two lines put
+  it, and the `onError` hook logging `oauth.refused` only (PL-45); `src/grants.test.ts`: the listing, a revocation and
+  their failures, with markers in a grant's metadata, a client's name and a KV error; `src/consent.test.ts`: every
+  outcome of the authorization endpoint, with markers in a client's name and URI, a redirect path, `state`, a consent
+  handle and cookie, a code, a form value and a KV error's message, none appearing) and source check
+  (`src/source.test.ts`: `console` only in the logging module; `wrangler.jsonc`). **Gap:** the gallery's routes are
+  not among the redaction
   markers yet. **Changed for OAuth:** "only `logEvent`" covers the Worker's own sources, since the dependency's two
   lines are bounded here rather than suppressed by patching it, and the first can quote a public artifact's values
   when a client ID names it or redirects to it. What DATA-1 protected holds: no credential or private content reaches
@@ -334,22 +353,29 @@ and the threats are the three adversaries below, not untrusted users.
 
 ### OAuth (OAUTH)
 
-All _Planned (OAuth)_, decided in [design.md](design.md#7-auth) section 7, except OAUTH-6's compatibility flag and
-OAUTH-5's revocation record at the token endpoint and through `/v1/grants`.
+Decided in [design.md](design.md#7-auth) section 7. Each states which part is _Enforced (main)_; the rest is
+_Planned (OAuth)_.
 
 - **OAUTH-1: only the owner creates a grant.** A grant is created only by `POST /oauth/authorize` on the app host,
   after ACC-1 with the app audience, with the handle of a consent transaction that the same browser opened (its
-  `__Host-` binding cookie), within 10 minutes and once. Consent is never remembered, and the consent page cannot be
-  framed (`frame-ancestors 'none'`, `X-Frame-Options: DENY`). Pinned by behavior (PL-37: no JWT, the content audience,
-  no cookie or another transaction's, a used or expired handle, Deny; two `GET`s create no grant) and deployed check
-  (AC-19: another identity is denied).
+  `__Host-` binding cookie), within 10 minutes and once, except that the same browser can use a transaction twice at
+  nearly the same moment: the library reads and then deletes it, and KV has no atomic read-and-delete
+  ([design.md](design.md#revocation); accepted risks). Consent is never remembered, and the consent page cannot be framed
+  (`frame-ancestors 'none'`, `X-Frame-Options: DENY`). _Enforced (main)_ in `src/index.ts`, `src/consent.ts`, with the
+  library's consent helpers, apart from that limit. Pinned by behavior (`src/consent.test.ts`: no JWT, the content
+  audience, no cookie or another transaction's, a used handle replayed with its cookie kept, an expired handle, Deny;
+  two `GET`s create no grant; the page shown again after an approval) (PL-37) and deployed check (AC-19: another
+  identity is denied).
 - **OAUTH-2: a code goes only to a redirect URI the client registered, outside this deployment.** The redirect URI
   matches a registered one exactly, a loopback one on any port; one on a host of this deployment is refused before the
   consent page, since an artifact page there could read the code. Every client must send an S256 PKCE challenge: the
   library requires one only from clients that authenticate with `none`, so the router requires it from the rest, and
   `plain` is refused. Every redirect carries `state` and `iss`; the consent page's `form-action` admits the redirect
-  origin only. Pinned by behavior (PL-36: public and confidential clients, without a challenge, with `plain`, with a
-  challenge the verifier does not match; PL-38).
+  origin only. _Enforced (main)_ in `src/consent.ts`, with the library's checks of the registered redirect URIs and of
+  the verifier at the code exchange. Pinned by behavior (`src/consent.test.ts`: redirect URIs on each host class
+  refused with an error page even where the library would redirect an error; an unregistered host form or path; another
+  loopback port accepted; public and confidential clients, without a challenge, with `plain`, with a challenge the
+  verifier does not match (PL-36); `state` and `iss` on every redirect; `form-action` (PL-38)).
 - **OAUTH-3: an access token works only on its resource.** Every grant and token names `<API origin>/mcp` or
   `<API origin>/v1`; a token is refused on the other, and refreshing keeps the grant's resource. Pinned by behavior
   (PL-40; PL-34 for a request without `resource`).
@@ -373,22 +399,29 @@ OAUTH-5's revocation record at the token endpoint and through `/v1/grants`.
   wrapper and the token endpoint in `src/revocation.ts`, `src/oauth.ts`, pinned by behavior (`src/revocation.test.ts`:
   the record before the deletion, a failed write failing it; `src/oauth.test.ts`: a revoked grant's code and refresh
   token refused, to a client that authenticated, as a grant that is gone, a refresh's and a code exchange's write-back
-  after the revocation, RFC 7009 with each token, injected failures of the record's write and of the deletion); and
+  after the revocation, RFC 7009 with each token, injected failures of the record's write and of the deletion);
   for `/v1/grants` in `src/grants.ts`, pinned by behavior (`src/grants.test.ts`, PL-41 at the token endpoint: the
   listing before and after, an unknown and a repeated `DELETE` (404), barriers between a refresh's and a code
   exchange's read and write of the grant with the grant revoked through `DELETE` between them, its tokens then refused
   and the grant kept out of the listing, injected failures of the record's write (503, the grant kept, a retry revokes
-  it) and of the deletion after it (503, the grant refused at once, a retry deletes it)); _Planned (OAuth)_ for
-  approval and access tokens. Pinned by behavior (PL-41: for each path, barriers between a refresh's and a code
-  exchange's read and write of the grant; injected failures of the record's write and of the deletion) and deployed
-  check (AC-20, the delay measured).
+  it) and of the deletion after it (503, the grant refused at once, a retry deletes it)); and for approval in
+  `src/consent.ts`, pinned by behavior (`src/consent.test.ts`: the client's grant for the resource replaced and its
+  tokens refused, its other resource and other clients kept, a CIMD client's grant replaced only from the same
+  redirect URI; a refresh's write-back after the replacement refused; injected failures of the listing, the record's
+  write and the deletion answering 503 without a code). _Planned (OAuth)_ for access tokens. Pinned by behavior
+  (PL-41: for each path, barriers between a refresh's and a code exchange's read and write of the grant; injected
+  failures of the record's write and of the deletion) and deployed check (AC-20, the delay measured).
 - **OAUTH-6: client documents are fetched only from public addresses and bounded, and a client on this deployment's
   hosts gets no consent page.** The compatibility flag `global_fetch_strictly_public` keeps the library's CIMD fetches
   on public addresses, the library bounds a document at 5 KB and 10 s, and the authorize endpoint refuses a client ID
   on a host of this deployment before any fetch. The token endpoint may still fetch such a document, since the
   library authenticates a CIMD client there; it decides nothing, because no code or grant can exist for a client the
-  authorize endpoint refused. Pinned by behavior (PL-35) and source check (`src/source.test.ts`: `wrangler.jsonc` sets
-  the flag, _Enforced (main)_).
+  authorize endpoint refused. A host of this deployment is the app or API host, or any name that ends in a content
+  or public suffix, as the deployment's routes match them. _Enforced (main)_ in `wrangler.jsonc` and
+  `src/consent.ts`. Pinned by behavior (`src/consent.test.ts`: a stubbed document on an outside host fetched and its
+  domain shown; a client ID on each host class, in upper case, with a trailing dot or a port, refused with no fetch;
+  an unreachable or invalid document answering an error page) (PL-35) and source check (`src/source.test.ts`:
+  `wrangler.jsonc` sets the flag).
 
 ## IDs to check by change type
 

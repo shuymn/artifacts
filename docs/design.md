@@ -386,15 +386,17 @@ consent page:
 
 1. The method is checked, then Access (ACC-1), as for the gallery. The path takes `GET` and `POST`; any other method,
    `HEAD` included, answers 405, since a `GET` there writes a transaction.
-2. A `client_id` that is an `https` URL on a host of this deployment (app, API, content or public) is refused before
-   anything is fetched (OAUTH-6): a public artifact could otherwise serve a client document under the owner's domain.
+2. A `client_id` that is an `https` URL on a host of this deployment (the app or API host, or any name ending in a
+   content or public suffix, as the routes match them) is refused before anything is fetched (OAUTH-6): a public
+   artifact could otherwise serve a client document under the owner's domain. A `redirect_uri` on such a host is
+   refused before the library sees the request (OAUTH-2): an artifact page there could read the code, and the library
+   would redirect its own refusals there.
 3. The library's `parseAuthRequest` checks the client, fetching its CIMD document, then the redirect URI against the
    registered ones, PKCE and the resource. It refuses `plain` but requires a challenge only from a client that
    authenticates with `none`, so the router then requires `code_challenge` with `code_challenge_method=S256` from
    every client, answering `invalid_request` to the redirect URI otherwise (OAUTH-2). Every grant then holds a
    challenge, and the library's code exchange requires its verifier.
-4. A redirect URI on a host of this deployment is refused (OAUTH-2): an artifact page there could read the code.
-5. `beginConsent` stores the request in KV for 10 minutes, encrypted under a 256-bit handle, and returns the handle
+4. `beginConsent` stores the request in KV for 10 minutes, encrypted under a 256-bit handle, and returns the handle
    for the page and a `__Host-` cookie that binds it to this browser, with `Cache-Control: no-store` and
    `X-Frame-Options: DENY`.
 
@@ -421,12 +423,13 @@ every value, all of which the client chose (ISO-5). It shows:
 - `decision=approve`: a publisher name of the wrong form is answered with an error page, leaving the transaction
   usable, so going back and correcting it works. Otherwise `approveConsent` checks the handle against this browser's
   cookie and consumes it. Approving replaces the grants the same client holds for that resource; for a CIMD client,
-  only those from the same redirect URI, port included. The router finds them in the grant listing and revokes each as
-  `DELETE /v1/grants/{id}` does (Revocation, below), since the library's own replacement ignores a failed deletion;
-  any failure answers the 503 error page, and no code is sent. Then `completeAuthorization`, with
-  `revokeExistingGrants: false`, stores the grant: user ID `owner`, since the Access policy is the one place that
-  names the owner; props `{ publisher }`; metadata with the publisher name, the client's name and the redirect host,
-  for listing grants. The browser is redirected to the client with `code`, `state` and `iss` (RFC 9207).
+  only those from the same redirect URI, port included. The router finds them in the grant listing, each page read
+  under the KV-read timeout, and revokes each as `DELETE /v1/grants/{id}` does (Revocation, below), since the
+  library's own replacement ignores a failed deletion; any failure answers the 503 error page, and no code is sent.
+  Then `completeAuthorization`, with `revokeExistingGrants: false`, stores the grant: user ID `owner`, since the
+  Access policy is the one place that names the owner; props `{ publisher }`; metadata with the publisher name, the
+  client's name and the redirect host, for listing grants. The browser is redirected to the client with `code`,
+  `state` and `iss` (RFC 9207).
 
 The owner names the publisher because neither alternative identifies one: a client's name is whatever it registered,
 so two clients can claim the same, and a grant's ID says nothing in a version history.
@@ -436,9 +439,10 @@ The consent page's `Content-Security-Policy` is the gallery's (section 10), whic
 that answers a form post, and other browsers differ
 ([MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action)), so
 the client's origin is listed. It is the redirect URI's origin, and it is written into the header only when it is
-`https://` with a DNS host, or `http://` with a loopback host, each with an optional port; any other form is refused
-before the page. Every other app-host response keeps `form-action 'none'`. Consent is never remembered: a site that
-navigates the owner's browser to the endpoint would otherwise skip the page.
+`https://` with a DNS host, or `http://` with a loopback host other than `::1` (`localhost`, `127.0.0.0/8`), each with
+an optional port; any other form is refused before the page. A CSP source cannot name an IPv6 address, and no client
+in the table above uses one. Every other app-host response keeps `form-action 'none'`. Consent is never remembered: a
+site that navigates the owner's browser to the endpoint would otherwise skip the page.
 
 | Failure                                                                                          | Answer                                                                              |
 | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |

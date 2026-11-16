@@ -1,7 +1,8 @@
 /**
- * The gallery's pages (design.md section 10). Each template produces the markup of its reference page
- * (docs/gallery/reference/), element for element and class for class; reference.test.ts holds them to it. Every value
- * goes through `html`, which escapes it (ISO-5). No page has a script, a form or a frame.
+ * The gallery's pages and the consent pages (design.md sections 7 and 10). Each template produces the markup of its
+ * reference page (docs/gallery/reference/), element for element and class for class; reference.test.ts holds them to
+ * it. Every value goes through `html`, which escapes it (ISO-5). No page has a script or a frame, and only the consent
+ * page has a form.
  */
 
 import rootPackage from "../../../../package.json" with { type: "json" };
@@ -85,19 +86,8 @@ const SECTIONS: Readonly<Record<Section, { readonly label: string; readonly href
 
 const sectionOf = (artifact: ArtifactJson): Section => (artifact.archived ? "archived" : "active");
 
-/**
- * A whole page. The current section's tab carries `aria-current`: `page` on its list, `true` on an artifact in it
- * (docs/gallery/design.md, "Components").
- */
-function document(title: string, chrome: Chrome, current: Section, page: "list" | "artifact", main: Markup): Markup {
-  const tab = (section: Section) => {
-    const { label, href } = SECTIONS[section];
-    const ariaCurrent =
-      section !== current ? null : page === "list" ? html`aria-current="page"` : html`aria-current="true"`;
-    return html`<a class="nav-tab" href="${href}" ${ariaCurrent}
-      >${label} <span class="nav-tab__count">${chrome.counts[section]}</span></a
-    >`;
-  };
+/** A whole page: its title, the header (the brand, then `nav` when given) and `main`. */
+function frame(title: string, nav: Markup | null, main: Markup): Markup {
   return html`<!doctype html>
     <html lang="en">
       <head>
@@ -108,13 +98,30 @@ function document(title: string, chrome: Chrome, current: Section, page: "list" 
         ${PRELOADS} ${STYLESHEETS} ${ICONS}
       </head>
       <body>
-        <header class="site-header">
-          ${BRAND}
-          <nav class="site-nav" aria-label="Sections">${tab("active")} ${tab("archived")}</nav>
-        </header>
+        <header class="site-header">${BRAND} ${nav}</header>
         ${main}
       </body>
     </html> `;
+}
+
+/**
+ * A gallery page, with the sections' tabs in its header. The current section's tab carries `aria-current`: `page` on
+ * its list, `true` on an artifact in it (docs/gallery/design.md, "Components").
+ */
+function document(title: string, chrome: Chrome, current: Section, page: "list" | "artifact", main: Markup): Markup {
+  const tab = (section: Section) => {
+    const { label, href } = SECTIONS[section];
+    const ariaCurrent =
+      section !== current ? null : page === "list" ? html`aria-current="page"` : html`aria-current="true"`;
+    return html`<a class="nav-tab" href="${href}" ${ariaCurrent}
+      >${label} <span class="nav-tab__count">${chrome.counts[section]}</span></a
+    >`;
+  };
+  return frame(
+    title,
+    html`<nav class="site-nav" aria-label="Sections">${tab("active")} ${tab("archived")}</nav>`,
+    main,
+  );
 }
 
 function time(iso: string, text?: string): Markup {
@@ -318,4 +325,180 @@ export function artifactPage(chrome: Chrome, data: GalleryArtifact): Markup {
     </section>
   </main>`;
   return document(artifact.title, chrome, section, "artifact", main);
+}
+
+/** What the consent page shows of an authorization request (design.md section 7, "Authorize and consent"). */
+export type ConsentView = {
+  /** The client's name, as the library describes it: its client ID when it gave none. */
+  readonly clientName: string;
+  /** The host of a CIMD client's URL; undefined for a client that registered itself (DCR). */
+  readonly clientDomain: string | undefined;
+  /** The redirect URI's host, where the code goes, and whether it is a loopback host. */
+  readonly redirectHost: string;
+  readonly loopback: boolean;
+  /** The grant's resource: its kind and URL. */
+  readonly resource: { readonly kind: "mcp" | "v1"; readonly url: string };
+  /** The publisher name the field starts with. */
+  readonly publisher: string;
+  /** The consent transaction's handle, posted back with the form. */
+  readonly handle: string;
+};
+
+const RESOURCE_NAMES = { mcp: "MCP", v1: "REST API" } as const;
+
+/**
+ * The publisher name the consent page proposes for a client (design.md section 7): its name lowercased, each run of
+ * other characters turned into `-`, cut to 32 characters, `client` if nothing is left.
+ */
+export function proposedPublisher(clientName: string): string {
+  const name = clientName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .slice(0, 32);
+  return name === "" ? "client" : name;
+}
+
+/**
+ * `GET /oauth/authorize`: the client and its request, the publisher name, and Allow and Deny. The rule of the field
+ * stands above the input as its description; the message below shows only while the input matches `:user-invalid`, and
+ * without script the browser's own validation names a bad value on submit. The pattern escapes its `-`: browsers
+ * compile `pattern` with the `v` flag, under which `[a-z0-9-]` is invalid and the browser skips the check.
+ */
+export function consentPage(view: ConsentView): Markup {
+  const app =
+    view.clientDomain === undefined
+      ? `${view.clientName}, registered itself; the name is not verified`
+      : `${view.clientName}, identified by ${view.clientDomain}`;
+  const main = html`<main class="page page--narrow">
+    <hgroup class="page-heading">
+      <h1>Allow access?</h1>
+      <p>An app asks for access to your artifacts. Check it before you allow it.</p>
+    </hgroup>
+    <dl class="info">
+      ${[
+        infoText("App", app),
+        infoText("Sends access to", view.redirectHost),
+        infoText("Resource", `${RESOURCE_NAMES[view.resource.kind]} at ${view.resource.url}`),
+        infoText("Allows", "Reading, publishing, making public and deleting every artifact"),
+      ]}
+    </dl>
+    ${
+      view.loopback &&
+      html`<p class="notice">
+        ${view.redirectHost} is an app on this computer: allow only if you just started signing in from it.
+      </p>`
+    }
+    <form class="form" method="post" action="/oauth/authorize">
+      <input type="hidden" name="handle" value="${view.handle}" />
+      <div class="field">
+        <label class="field__label" for="publisher">Publisher name</label>
+        <p class="field__help" id="publisher-help">
+          Shown as who published each version. 1 to 32 lowercase letters, digits or hyphens.
+        </p>
+        <input
+          class="field__input"
+          id="publisher"
+          name="publisher"
+          type="text"
+          value="${view.publisher}"
+          required
+          pattern="[a-z0-9\\-]{1,32}"
+          maxlength="32"
+          autocomplete="off"
+          autocapitalize="none"
+          autocorrect="off"
+          spellcheck="false"
+          aria-describedby="publisher-help"
+        />
+        <p class="field__message">Enter 1 to 32 lowercase letters, digits or hyphens.</p>
+      </div>
+      <div class="form__actions">
+        <button class="button button--primary" type="submit" name="decision" value="approve">Allow</button>
+        <button class="button button--secondary" type="submit" name="decision" value="deny" formnovalidate>Deny</button>
+      </div>
+    </form>
+  </main>`;
+  return frame("Allow access", null, main);
+}
+
+/** Why the consent page cannot go on; each answers with its own text in the error page's frame. */
+export type ConsentErrorKind =
+  | "transaction"
+  | "publisher"
+  | "request"
+  | "client_on_deployment"
+  | "redirect_on_deployment"
+  | "redirect_form"
+  | "client_unverifiable"
+  | "form"
+  | "unavailable"
+  | "internal";
+
+const RESTART = "Start signing in again from the app.";
+
+const CONSENT_ERRORS: Readonly<
+  Record<ConsentErrorKind, { readonly title: string; readonly heading: string; readonly text: string }>
+> = {
+  transaction: {
+    title: "Sign-in can’t continue",
+    heading: "This sign-in can’t continue",
+    text: `The request expired, was already used, or was opened in another browser. ${RESTART}`,
+  },
+  publisher: {
+    title: "Publisher name not valid",
+    heading: "The publisher name isn’t valid",
+    text: "A publisher name is 1 to 32 lowercase letters, digits or hyphens. Go back, correct it and allow again.",
+  },
+  request: {
+    title: "Sign-in can’t continue",
+    heading: "This sign-in can’t continue",
+    text: `The app’s sign-in request isn’t one this server accepts. ${RESTART}`,
+  },
+  client_on_deployment: {
+    title: "Sign-in can’t continue",
+    heading: "This sign-in can’t continue",
+    text: "The app identifies itself with an address on this server, where an artifact could pose as it. This server doesn’t accept it.",
+  },
+  redirect_on_deployment: {
+    title: "Sign-in can’t continue",
+    heading: "This sign-in can’t continue",
+    text: "The app asks to send access to an address on this server, where an artifact could read it. This server doesn’t accept it.",
+  },
+  redirect_form: {
+    title: "Sign-in can’t continue",
+    heading: "This sign-in can’t continue",
+    text: "The app asks to send access to an address this server doesn’t accept: it takes https with a domain name, or http on this computer.",
+  },
+  client_unverifiable: {
+    title: "Sign-in can’t continue",
+    heading: "This sign-in can’t continue",
+    text: `The app’s description could not be fetched or checked at its address. ${RESTART}`,
+  },
+  form: {
+    title: "Sign-in can’t continue",
+    heading: "This sign-in can’t continue",
+    text: `The form arrived incomplete. ${RESTART}`,
+  },
+  unavailable: {
+    title: "Sign-in unavailable",
+    heading: "Sign-in is unavailable",
+    text: "The server could not complete this step. Wait a moment, then start signing in again from the app.",
+  },
+  internal: {
+    title: "Sign-in failed",
+    heading: "Sign-in failed",
+    text: `Something went wrong on the server. ${RESTART}`,
+  },
+};
+
+/** The consent page's error page: the same frame, a heading and what to do next. */
+export function consentErrorPage(kind: ConsentErrorKind): Markup {
+  const error = CONSENT_ERRORS[kind];
+  const main = html`<main class="page page--narrow">
+    <hgroup class="page-heading">
+      <h1>${error.heading}</h1>
+      <p>${error.text}</p>
+    </hgroup>
+  </main>`;
+  return frame(error.title, null, main);
 }
