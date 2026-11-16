@@ -85,7 +85,7 @@ async function api(
       ctx,
     });
   }
-  // ISO-2: a preflight answers 405 before authentication, so no API answer is readable from another origin.
+  // ISO-2: no preflight succeeds. One to a route answers 405 before authentication, one to no route 404.
   if (request.method === "OPTIONS") {
     const allow = apiAllow(url);
     return allow === undefined ? noSuchRoute() : transportError("method_not_allowed", { Allow: allow });

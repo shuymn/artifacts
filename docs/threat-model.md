@@ -185,7 +185,8 @@ and the threats are the three adversaries below, not untrusted users.
   (`src/serve.test.ts`: two artifacts with the same path and different bytes each serve their own; create with a
   generator stubbed to a deleted ID is refused).
 - **ISO-2: private content cannot be read or loaded as a subresource from another origin.** No host sends
-  `Access-Control-Allow-*`, and `OPTIONS` answers 405, so a cross-origin `fetch` cannot read a response. Every response
+  `Access-Control-Allow-*`, and no preflight succeeds: `OPTIONS` answers 405 on every route and 404 where no route is,
+  so a cross-origin `fetch` cannot read a response. Every response
   of a private content host and of the app host carries `Cross-Origin-Resource-Policy: same-origin` (200, 304, 308,
   404), so another origin's `<script>`, `<img>`, `<link>` or media element cannot load it with the owner's cookie and
   observe it. CORP does not govern navigation: another origin can still frame a private page, which shows it to the
@@ -195,9 +196,9 @@ and the threats are the three adversaries below, not untrusted users.
   `src/routing.test.ts`, `src/gallery/gallery.test.ts`: every route and status, both host classes) and deployed check
   (design AC-8: artifact A's `<script src>` to artifact B fails, B loads its own). **Gap:** the deployed check has not
   run. The OAuth library adds CORS headers for browser clients; the router removes them, and `OPTIONS` answers 405 on
-  every API path before authentication: _Enforced (main)_ in `src/oauth.ts`, `src/index.ts`, pinned by behavior
-  (`src/oauth.test.ts`: OAuth answers to requests with an `Origin`; `OPTIONS` on each API path, with and without a
-  token) (PL-43).
+  every API route before authentication, and 404 on a path no route takes: _Enforced (main)_ in `src/oauth.ts`,
+  `src/index.ts`, pinned by behavior (`src/oauth.test.ts`: OAuth answers to requests with an `Origin`; `OPTIONS` on
+  each API route, with and without a token, and on a path no route takes) (PL-43).
 - **ISO-3: browsers can only read artifacts.** Content hosts answer `GET` and `HEAD` only, and so does the app host
   except `/oauth/authorize`, which answers `GET` and `POST` only; that `POST` creates or refuses a grant under OAUTH-1
   and changes no artifact. Every artifact change is on the API host with a bearer credential, so no request
@@ -303,15 +304,18 @@ and the threats are the three adversaries below, not untrusted users.
   library's error logging is replaced by `oauth.refused` with closed codes. Two lines of the library's own have no
   hook to replace them (design.md section 7): a client document that cannot be fetched or checked (the client ID as
   sent and the failure's message, which can quote the document's `client_id` and authentication methods) and a failed
-  renewal of a registered client (its generated ID and the KV error). Neither can carry a credential or private
-  content: a client ID authenticates nothing, and the library fetches the document without a credential from a public
-  address, where a private host answers with Access's sign-in. Invocation logs are off. _Enforced (main)_ in
+  renewal of a registered client (its generated ID and the KV error). They carry only what the caller or a document's
+  publisher chose: the first logs the client ID as the caller sent it, so whatever the caller put in its own
+  identifier, a password in its userinfo included, reaches the logs. Neither carries another party's secret or
+  private content: the library fetches the document without a credential from a public address, where a private host
+  answers with Access's sign-in. Invocation logs are off. _Enforced (main)_ in
   `src/log.ts`, and for the authorization server's paths in `src/oauth.ts`; _Planned (OAuth)_ for the consent page
   and OAuth credentials on `/mcp` and `/v1/`. Pinned by log redaction (`src/log-redaction.test.ts`: every route and
   failure path, `/mcp` and its SDK refusals included; `src/oauth.test.ts`: the metadata, registration and token
   endpoints, their refusals, a revocation and KV and fetch failures, every `console` method captured, with markers in
-  codes, tokens, verifiers, client names, client-ID paths and queries, a client document's fields and thrown errors,
-  each appearing only where those two lines put it, and the `onError` hook logging `oauth.refused` only (PL-45);
+  codes, tokens, verifiers, client names, client-ID paths, queries and userinfo, a client document's fields and
+  thrown errors, each appearing only where those two lines put it, and the `onError` hook logging `oauth.refused` only
+  (PL-45);
   planned: consent handles) and source check (`src/source.test.ts`: `console` only in the logging module;
   `wrangler.jsonc`). **Gap:** the gallery's routes are not among the redaction
   markers yet. **Changed for OAuth:** "only `logEvent`" covers the Worker's own sources, since the dependency's two
@@ -366,11 +370,11 @@ OAUTH-5's revocation record at the token endpoint.
   propagation delay", section 2.1). RFC 7009 with an access token revokes that token only. _Enforced (main)_ for the
   wrapper and the token endpoint in `src/revocation.ts`, `src/oauth.ts`, pinned by behavior (`src/revocation.test.ts`:
   the record before the deletion, a failed write failing it; `src/oauth.test.ts`: a revoked grant's code and refresh
-  token refused as a grant that is gone, a refresh's and a code exchange's write-back after the revocation, RFC 7009
-  with each token, injected failures of the record's write and of the deletion); _Planned (OAuth)_ for `/v1/grants`,
-  approval and access tokens. Pinned by behavior (PL-41: for each path, barriers between a refresh's and a code
-  exchange's read and write of the grant; injected failures of the record's write and of the deletion) and deployed
-  check (AC-20, the delay measured).
+  token refused, to a client that authenticated, as a grant that is gone, a refresh's and a code exchange's write-back
+  after the revocation, RFC 7009 with each token, injected failures of the record's write and of the deletion);
+  _Planned (OAuth)_ for `/v1/grants`, approval and access tokens. Pinned by behavior (PL-41: for each path, barriers
+  between a refresh's and a code exchange's read and write of the grant; injected failures of the record's write and
+  of the deletion) and deployed check (AC-20, the delay measured).
 - **OAUTH-6: client documents are fetched only from public addresses and bounded, and a client on this deployment's
   hosts gets no consent page.** The compatibility flag `global_fetch_strictly_public` keeps the library's CIMD fetches
   on public addresses, the library bounds a document at 5 KB and 10 s, and the authorize endpoint refuses a client ID

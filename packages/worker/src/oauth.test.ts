@@ -268,7 +268,7 @@ describe("PL-43: the library at the boundary", () => {
     for (const response of answers) expect(corsHeaders(response)).toEqual([]);
   });
 
-  it("answers OPTIONS and every other method a route does not take with 405, before the library or a token", async () => {
+  it("answers 405 to OPTIONS and every other method an API route does not take, before the library or a token", async () => {
     const world = new World();
     const fetchSpy = vi.spyOn(OAuthAuthorizationServer.prototype, "fetch");
     const allowed: [string, string][] = [
@@ -310,7 +310,7 @@ describe("PL-43: the library at the boundary", () => {
       expect(await response.json()).toMatchObject({ error: "invalid_request" });
     }
     expect(fetchSpy).not.toHaveBeenCalled();
-    // A path no route takes has no methods to name.
+    // A path no route takes has no methods to name: OPTIONS there answers 404.
     expect((await world.fetch(`${API}/nothing`, { method: "OPTIONS" })).status).toBe(404);
   });
 });
@@ -380,9 +380,10 @@ describe("PL-44: OAuth bodies are counted before the library reads them", () => 
 /** A code or token of the library's form whose grant key, `grant:owner:<grant ID>`, is `bytes` long. */
 const credentialWithGrantKey = (bytes: number) => `owner:${"a".repeat(bytes - "grant:owner:".length)}:x`;
 
-// OAUTH-5 at the token endpoint: a grant with a revocation record answers as a grant that is gone.
+// OAUTH-5 at the token endpoint: to a client that authenticated, a grant with a revocation record answers as a grant
+// that is gone. Without client authentication the library would answer 401 first; the router answers before it.
 describe("OAUTH-5: the revocation record's check before the token endpoint", () => {
-  it("refuses a code of a revoked grant as the library refuses a code whose grant is gone", async () => {
+  it("refuses a code of a revoked grant as the library refuses an authenticated client's code whose grant is gone", async () => {
     const world = new World();
     const clientId = await register(world);
     const gone = await authorize(world, clientId);
@@ -404,7 +405,7 @@ describe("OAUTH-5: the revocation record's check before the token endpoint", () 
     expect(logEvents(logs.lines)).toEqual([{ event: "oauth.refused", reason: "revoked", grant: grantId }]);
   });
 
-  it("refuses a refresh of a revoked grant as the library refuses one whose grant is gone", async () => {
+  it("refuses a refresh of a revoked grant as the library refuses an authenticated client's one whose grant is gone", async () => {
     const world = new World();
     const first = await signedIn(world);
     await oauthKv().delete(`grant:owner:${first.grantId}`);
@@ -579,7 +580,7 @@ describe("OAUTH-5: revocation at the token endpoint and its failures", () => {
 
 // Section 7: the server's metadata and lifetimes.
 describe("the authorization server's configuration", () => {
-  it("advertises the API host as issuer, the app host's authorization endpoint, CIMD and DCR, and no scopes", async () => {
+  it("advertises the API host as issuer, both resources, the app host's authorization endpoint, revocation, CIMD and DCR, and no scopes", async () => {
     const world = new World();
     const response = await world.fetch(`${API}${METADATA_PATH}`);
     expect(response.status).toBe(200);
@@ -650,7 +651,7 @@ describe("PL-45: DATA-1 on every OAuth path and failure", () => {
   const CIMD_FAILED = "CIMD fetch failed for ";
   const RENEWAL_FAILED = "Failed to renew client registration ";
 
-  it("logs no secret and no client value, except in the library's two lines", async () => {
+  it("logs no secret and no client value, except what the library's two lines carry", async () => {
     const world = new World({ timeouts: { r2Ms: 2_000, d1ReadMs: 2_000, kvReadMs: 50 } });
     const logs = captureLogs();
     const secrets: string[] = [];
