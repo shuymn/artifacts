@@ -4,6 +4,8 @@
 # Workers Builds reads too, so the deployment builds with the same major.
 [tools]
 pnpm = "12"
+# Runs the CLI, its tests, and builds its release binaries (packages/cli).
+bun = "1"
 # Linters the shared security and gha workflows also run; the git hooks use
 # these so local checks match CI.
 actionlint = "1"

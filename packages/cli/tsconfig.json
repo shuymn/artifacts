@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // Node runs the sources directly and strips their types, so only erasable syntax is allowed.
+    // Bun runs the sources directly. Erasable syntax only keeps them runnable by any runtime that strips types.
     "erasableSyntaxOnly": true,
     "types": ["node"]
   },

@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc",
-    "test": "vitest run"
+    "test": "bun --bun vitest run --project unit && vitest run --project e2e"
   },
   "devDependencies": {
     "@types/node": "catalog:",
