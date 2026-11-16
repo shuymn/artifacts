@@ -5,6 +5,7 @@
  */
 import { AccessVerifier, type AccessSettings } from "./access.ts";
 import { parseConfig, type Config } from "./config.ts";
+import { serveGallery } from "./gallery/route.ts";
 import { classifyHost } from "./hosts.ts";
 import { newArtifactId, type ArtifactId } from "./id.ts";
 import { errorName, logEvent, type HostKind } from "./log.ts";
@@ -80,8 +81,8 @@ async function browser(
     const refusal = await refuseWithoutAccess(request, config, deps, host);
     if (refusal !== undefined) return refusal;
   }
-  // The gallery (design.md section 10) is not served yet: every app host path answers 404.
-  if (id === undefined) return plainResponse(kind, 404);
+  // The gallery (design.md section 10).
+  if (id === undefined) return serveGallery(request, url, operationDeps(env, config, deps));
   return serveArtifact(request, url, operationDeps(env, config, deps), id, kind);
 }
 
