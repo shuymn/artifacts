@@ -835,11 +835,10 @@ every version needs index.html at its root.
   nothing (AC-7). A refresh reads the authorization server's metadata, checked as in step 1 of `login`, before it
   takes the lock. Every request of `login`, `logout` and a refresh waits at most 30 s.
 - **The lock:** every change to the file, storing a login, a refresh, dropping a client ID or removing a login on
-  `logout`, happens under
-  one lock, `credentials.json.lock` beside it. Without it, two processes refreshing with one token could leave the
-  file holding the token the server rotated out, and the next refresh would need a new login.
-  - A process takes the lock by linking a complete temporary file of mode `0600`, holding a random owner token, its process ID and
-    the host name, to that name, which fails while the lock exists. Under the lock it reads the file again, sends at
+  `logout`, happens under one lock, `credentials.json.lock` beside it. Without it, two processes refreshing with one
+  token could leave the file holding the token the server rotated out, and the next refresh would need a new login.
+  - A process takes the lock by linking a complete temporary file of mode `0600`, holding a random owner token, its
+    process ID and the host name, to that name, which fails while the lock exists. Under the lock it reads the file again, sends at
     most one request, the refresh, and writes the file. A refresh changes only the entry it read: it uses tokens
     another process stored meanwhile instead of refreshing, and stops if `logout` removed the login. On release, the
     holder removes the lock only if it still holds its own token.
