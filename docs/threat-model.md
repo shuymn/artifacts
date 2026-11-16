@@ -95,7 +95,9 @@ adversaries below, not untrusted users.
   `src/config.ts`. Pinned by behavior (`src/config.test.ts`: one test per refusal; `src/routing.test.ts`: 503 without
   storage). **Gap:** the deployment script does not exist yet, so its refusals are not pinned.
 - **HOST-3: `/mcp` refuses a foreign `Origin`.** A request that carries an `Origin` other than the API host's origin
-  answers 403 before the MCP handler; agents send none. _Planned._ Pinned by behavior.
+  answers 403 before the MCP handler; agents send none. _Enforced (main)_ in `src/mcp.ts`. Pinned by behavior
+  (`src/mcp.test.ts`: a foreign origin, `null`, and the API host with another scheme or port answer 403 without D1 or
+  R2; the API host's origin and a request without `Origin` are served; a missing token answers 401 first).
 
 ### Access (ACC)
 
@@ -128,9 +130,10 @@ adversaries below, not untrusted users.
   constant-time comparison).
 - **TOK-2: a token is never stored, returned, logged or handed to the MCP SDK.** The secret holds hashes; D1 holds
   token names; no response echoes the `Authorization` header; the per-request MCP factory captures the token name, and
-  the request it serves has no `Authorization` header. _Enforced (main)_ for storage, responses and logs. Pinned by log
-  redaction and behavior (`src/log-redaction.test.ts`: responses hold no marker token). **Gap:** the MCP handler does
-  not exist yet, so the factory boundary is not pinned.
+  the request it serves has no `Authorization` header. _Enforced (main)_ in `src/tokens.ts`, `src/mcp.ts`. Pinned by
+  log redaction and behavior (`src/log-redaction.test.ts`: REST and `/mcp` responses hold no marker token;
+  `src/mcp.test.ts`: for a 2025-era and a 2026-07-28 client, every request and factory context the SDK receives carries
+  no `Authorization` header, token or `authInfo`, and versions record the token name).
 - **TOK-3: every version and every change records its token.** A version stores `published_by`; create, publish,
   public, archive and delete changes log the token name. _Enforced (main)_ in `src/operations.ts`. Pinned by behavior
   and log redaction (`src/publish.test.ts`).
@@ -215,15 +218,16 @@ adversaries below, not untrusted users.
 ### Resources (RES)
 
 - **RES-1: input is bounded before it is used.** The bounds of [design.md](design.md#limits), each in its unit;
-  request bodies are counted while they are read. _Enforced (main)_ in `src/body.ts`, `src/schemas.ts`, `src/paths.ts`.
-  Pinned by behavior (`src/schemas.test.ts`, `src/paths.test.ts`, `src/publish.test.ts`: at and one past each bound; a
-  chunked body without `Content-Length`). **Gap:** the MCP request bound and the `read_file` bound belong to the MCP
-  adapter, which does not exist yet.
+  request bodies are counted while they are read. _Enforced (main)_ in `src/body.ts`, `src/schemas.ts`, `src/paths.ts`,
+  `src/mcp.ts` (the `read_file` bound; the MCP request bound is the SDK's default, which counts the body as it reads
+  it). Pinned by behavior (`src/schemas.test.ts`, `src/paths.test.ts`, `src/publish.test.ts`, `src/mcp.test.ts`: at and
+  one past each bound; a chunked body without `Content-Length`; a `read_file` over the bound reads no object).
 - **RES-2: waits are bounded where the outcome stays known.** Fetching Access keys, each R2 call and each D1 read have a
   timeout and answer 503 `unavailable`; a publish that times out before its commit leaves no version. The D1 commit
   has none: a timed-out commit could still apply. _Enforced (main)_ in `src/timeout.ts`, `src/objects.ts`, `src/db.ts`,
   `src/access.ts`. Pinned by behavior (`src/access.test.ts`, `src/publish.test.ts`: slow key endpoint, R2 and D1
-  reads; a slow commit still applies). **Gap:** the production waits (5 s for Access keys, 30 s per R2 call, 10 s per D1
+  reads; a slow commit still applies; `src/mcp.test.ts`: `read_file` reads an object's body under the R2 timeout and
+  cancels a body that stalls). **Gap:** the production waits (5 s for Access keys, 30 s per R2 call, 10 s per D1
   read) are checked by review, not by tests, which substitute short ones.
 
 ### Data (DATA)
@@ -232,8 +236,9 @@ adversaries below, not untrusted users.
   closed sets (event names, reason codes, error classes, token names, artifact IDs, version numbers, counts): never a
   token, an `Authorization` header, an Access JWT or cookie, file bytes, a title, a description or a path. Invocation
   logs are off. _Enforced (main)_ in `src/log.ts`. Pinned by log redaction (`src/log-redaction.test.ts`: every route and
-  failure path) and source check (`src/source.test.ts`: `console` only in the logging module; `wrangler.jsonc`).
-  **Gap:** the MCP and gallery routes do not exist yet; their paths join the redaction markers when they land.
+  failure path, `/mcp` and its SDK refusals included) and source check (`src/source.test.ts`: `console` only in the
+  logging module; `wrangler.jsonc`). **Gap:** the gallery routes do not exist yet; their paths join the redaction
+  markers when they land.
 - **DATA-2: deployment values stay out of the repository.** `wrangler.jsonc` sets no variable, route or identifier;
   the deployment file is gitignored, and `API_TOKENS` is a secret. _Enforced (main)_ for `wrangler.jsonc`. Pinned by
   source check (`src/source.test.ts`) of `wrangler.jsonc` and the deployment example. **Gap:** the deployment example
