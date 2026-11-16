@@ -9,6 +9,7 @@
     "deploy": "node scripts/deploy.ts"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "catalog:",
     "@modelcontextprotocol/server": "catalog:",
     "jose": "catalog:",
     "mime": "catalog:",

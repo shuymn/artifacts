@@ -21,7 +21,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const SHORT = { r2Ms: 50, d1ReadMs: 50 };
+const SHORT = { r2Ms: 50, d1ReadMs: 50, kvReadMs: 50 };
 
 function withBucket(world: World): BucketProbe {
   const probe = new BucketProbe();

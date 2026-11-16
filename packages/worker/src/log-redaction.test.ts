@@ -38,7 +38,7 @@ const file = (path: string, content: string) => ({ path, content });
 
 describe("DATA-1: log redaction", () => {
   it("logs no secret and no artifact content on any route or failure path", async () => {
-    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 50 }, keyTimeoutMs: 50 });
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 50, kvReadMs: 50 }, keyTimeoutMs: 50 });
     const logs = captureLogs();
     const responses: Response[] = [];
     const keep = async (response: Response | Promise<Response>) => {
@@ -146,7 +146,7 @@ describe("DATA-1: log redaction", () => {
   });
 
   it("logs no secret and no artifact content on the MCP route or its failure paths", async () => {
-    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 50 } });
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 50, kvReadMs: 50 } });
     const logs = captureLogs();
     const responses: Response[] = [];
     const fetch = world.fetch.bind(world);
