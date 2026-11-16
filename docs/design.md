@@ -251,15 +251,18 @@ no limit on versions.
   access, making an artifact private or deleting it takes effect on the next request. Immutability belongs to storage,
   not to the cache.
 - **Gallery assets** (section 10) are cached as immutable instead. They are not artifact files: the stylesheets, fonts
-  and SVG icon are bundled with the Worker and are the same for every request that passes Access, whatever an
-  artifact's visibility, so no later check could change the answer. Each is served at a fingerprinted path, its name
-  with 16 hex digits of the SHA-256 of its bytes (`/assets/gallery.<hash>.css`), computed when the Worker loads, with
-  `Cache-Control: private, max-age=31536000, immutable`: changed bytes get a new path, so a cached copy never goes
-  stale and a reload requests none of them. The unhashed paths and any other fingerprint answer 404: the Worker holds
-  only the deployed bytes, and serving them under an old fingerprint would cache them under that path for a year.
-  Pages are `no-cache`, so the next page a browser loads after a deployment names the new paths. `/favicon.ico` keeps
-  its fixed URL, which browsers request on their own, and revalidates with the app host's `private, no-cache` and its
-  `ETag`.
+  and SVG icon are bundled with the Worker and are the same for every request that passes Access, whatever an artifact's
+  visibility, so no later check could change the answer. Each is served at a fingerprinted path, its name with 16 hex
+  digits of the SHA-256 of its bytes (`/assets/gallery.<hash>.css`), computed when the Worker loads, with
+  `Cache-Control: private, max-age=31536000, immutable`: changed bytes get a new path, so a cached copy never goes stale
+  and a reload requests none of them. Only that exact path is immutable. A page can load its assets after the next
+  deployment is live, and a release before fingerprints named unhashed paths, so a path with a current asset's name and
+  extension under another fingerprint (`/assets/gallery.<other>.css`) or none (`/assets/gallery.css`) answers 200 with
+  the current file, `private, no-cache` and its `ETag`: the page gets today's stylesheet and fonts rather than none, and
+  no browser keeps them under a path that named other bytes. The Worker holds only the deployed bytes; keeping earlier
+  deployments' files would need storage that outlives a deployment. A `fonts.css` answered this way names the current
+  fonts' paths, which are immutable. A path that names no current asset answers 404. `/favicon.ico` keeps its fixed URL,
+  which browsers request on their own, and revalidates with the app host's `private, no-cache` and its `ETag`.
 - `Cross-Origin-Resource-Policy: same-origin` on every response of a private content host and of the app host,
   including 304, 308 and 404, so another origin cannot load private content as a script, image, stylesheet or media
   with the owner's cookie (ISO-2). Public hosts omit it: their content needs no credential, and other sites may embed

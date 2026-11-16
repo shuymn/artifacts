@@ -20,7 +20,9 @@ then the templates. Content and behavior of each page are in [design.md](../desi
 - **Text scales with the user's setting.** Each page has `<meta name="text-scale" content="scale">`, no rule sets a
   root `font-size`, and text and the spacing around it are in `rem`.
 - **Fonts are served by the Worker**: IBM Plex Sans and IBM Plex Mono (Latin subsets, `woff2`) in a separate
-  `@font-face` stylesheet, all at fingerprinted paths cached as immutable ([design.md](../design.md), section 6).
+  `@font-face` stylesheet, all at fingerprinted paths cached as immutable ([design.md](../design.md), section 6). A page
+  that loads its stylesheets or fonts after the next deployment gets that deployment's files at its own outdated paths,
+  revalidated rather than immutable, so it renders with the current stylesheet and fonts instead of unstyled.
   `gallery.css` falls back to `system-ui` and `ui-monospace` with `font-size-adjust: from-font`, so Japanese text falls
   back to the system font at the same x-height. The reference pages load the same fonts from Google Fonts instead, for
   previewing only.

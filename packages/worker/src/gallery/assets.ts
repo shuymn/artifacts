@@ -42,10 +42,11 @@ export type AssetSources = {
   readonly fonts: ReadonlyMap<AssetName, ArrayBuffer>;
 };
 
-/** The fingerprinted files: each one's path by its name, and each one by its path. */
+/** The fingerprinted files: each one's path by its name, each one by its path, and each one by its name. */
 export type FingerprintedAssets = {
   readonly paths: ReadonlyMap<AssetName, string>;
   readonly files: ReadonlyMap<string, Asset>;
+  readonly named: ReadonlyMap<AssetName, Asset>;
 };
 
 /**
@@ -75,10 +76,12 @@ const FONT_URL = /url\("(fonts\/[^"]+)"\)/g;
 export async function fingerprintAssets(sources: AssetSources): Promise<FingerprintedAssets> {
   const paths = new Map<AssetName, string>();
   const files = new Map<string, Asset>();
+  const named = new Map<AssetName, Asset>();
   const add = async (name: AssetName, asset: Asset) => {
     const path = pathOf(name, await fingerprint(asset.body));
     paths.set(name, path);
     files.set(path, asset);
+    named.set(name, asset);
   };
   for (const [name, body] of sources.fonts) await add(name, { contentType: WOFF2, body });
   const fonts = sources.fontsCss.replace(FONT_URL, (_, name: string) => {
@@ -89,7 +92,26 @@ export async function fingerprintAssets(sources: AssetSources): Promise<Fingerpr
   await add("fonts.css", { contentType: CSS, body: fonts });
   await add("gallery.css", { contentType: CSS, body: sources.galleryCss });
   await add("icon.svg", { contentType: "image/svg+xml", body: sources.iconSvg });
-  return { paths, files };
+  return { paths, files, named };
+}
+
+/** `/assets/<name>.<hash>.<ext>` or `/assets/<name>.<ext>`: the name and the extension. */
+const ASSET_PATH = /^\/assets\/(.+?)(?:\.[0-9a-f]{16})?(\.[a-z0-9]+)$/;
+
+/**
+ * The asset a path names, and whether the path is its current one. A path whose name and extension are a current
+ * asset's but whose fingerprint is another (a page from an earlier deployment) or missing (a release before
+ * fingerprints) names the current file too: design.md section 6 serves it revalidated, never as immutable.
+ */
+export function findAsset(
+  assets: FingerprintedAssets,
+  path: string,
+): { readonly asset: Asset; readonly current: boolean } | undefined {
+  const exact = assets.files.get(path);
+  if (exact !== undefined) return { asset: exact, current: true };
+  const match = ASSET_PATH.exec(path);
+  const asset = match === null ? undefined : assets.named.get(`${match[1]}${match[2]}`);
+  return asset === undefined ? undefined : { asset, current: false };
 }
 
 export const GALLERY_ASSETS = await fingerprintAssets({

@@ -3,13 +3,13 @@
  * icon they load. index.ts has checked the method (ISO-3) and Access (ACC-1) before this runs, and adds the gallery's
  * CSP to every app-host response, these included (`withGalleryPolicy`; ISO-5). Every response here carries the app
  * host's headers (`private, no-cache`, CORP, nosniff, no referrer; ISO-2), except that a fingerprinted asset is cached
- * as immutable (design.md section 6). A deleted or unknown artifact, a malformed cursor, an asset path whose
- * fingerprint is not the deployed file's, and any other path answer 404.
+ * as immutable (design.md section 6). A deleted or unknown artifact, a malformed cursor, an asset path that names no
+ * current asset, and any other path answer 404.
  */
 import type { OperationErrorCode } from "../errors.ts";
 import { getForGallery, listForGallery, type ArchiveCounts, type OperationDeps } from "../operations.ts";
 import { browserHeaders, plainResponse, serveAsset } from "../serve.ts";
-import { FAVICON, GALLERY_ASSETS } from "./assets.ts";
+import { FAVICON, findAsset, GALLERY_ASSETS, type FingerprintedAssets } from "./assets.ts";
 import type { Markup } from "./html.ts";
 import { artifactPage, listPage, type Chrome, type Section } from "./pages.ts";
 
@@ -72,13 +72,27 @@ function page(request: Request, markup: Markup): Response {
   });
 }
 
+/**
+ * An asset's answer, or `undefined` when the path names no asset. `/favicon.ico` keeps its URL, so it revalidates like
+ * a stored file (`no-cache` with an ETag). Any other asset at its current fingerprinted path is immutable; at an
+ * outdated or unhashed path, which a page from another deployment names, it is the current file, revalidated, so no
+ * browser keeps these bytes under that path (design.md section 6). `assets` is the deployed set; tests pass another.
+ */
+export function serveGalleryAsset(
+  request: Request,
+  path: string,
+  assets: FingerprintedAssets = GALLERY_ASSETS,
+): Promise<Response> | undefined {
+  if (path === "/favicon.ico") return serveAsset(request, FAVICON, HEADERS);
+  const found = findAsset(assets, path);
+  if (found === undefined) return undefined;
+  return serveAsset(request, found.asset, found.current ? IMMUTABLE_HEADERS : HEADERS);
+}
+
 export async function serveGallery(request: Request, url: URL, deps: OperationDeps): Promise<Response> {
   const path = url.pathname;
-  // `/favicon.ico` keeps its URL, so it revalidates like a stored file (`no-cache` with an ETag); every other asset's
-  // path names its bytes, and a deployment's new pages name the new paths.
-  if (path === "/favicon.ico") return serveAsset(request, FAVICON, HEADERS);
-  const file = GALLERY_ASSETS.files.get(path);
-  if (file !== undefined) return serveAsset(request, file, IMMUTABLE_HEADERS);
+  const asset = serveGalleryAsset(request, path);
+  if (asset !== undefined) return asset;
 
   const chrome = (counts: ArchiveCounts): Chrome => ({
     counts,

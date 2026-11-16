@@ -20,8 +20,9 @@ import {
   TOKENS,
   World,
 } from "../test-support.ts";
-import { assetPath, fingerprintAssets, type AssetSources } from "./assets.ts";
+import { assetPath, assetTag, fingerprintAssets, GALLERY_ASSETS, type AssetSources } from "./assets.ts";
 import iconSvg from "./icon.svg?raw";
+import { serveGalleryAsset } from "./route.ts";
 import { byClass, elements, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
 
 import css from "./gallery.css?raw";
@@ -387,13 +388,11 @@ describe("section 10: what answers 404", () => {
       "/assets/favicon.ico",
       "/assets/",
       "/assets/fonts/other.woff2",
-      // Assets only at their fingerprinted paths: not at their names, nor under another fingerprint.
-      "/assets/gallery.css",
-      "/assets/fonts.css",
-      "/assets/icon.svg",
-      "/assets/fonts/ibm-plex-sans-latin-400-normal.woff2",
-      assetPath("gallery.css").replace(/\.[0-9a-f]{16}\./, ".0000000000000000."),
+      // A path that names no current asset, under any fingerprint or none.
+      "/assets/other.css",
+      "/assets/other.0000000000000000.css",
       `${assetPath("gallery.css")}x`,
+      assetPath("gallery.css").replace(/\.css$/, ".svg"),
       "/?cursor=",
       "/?cursor=bad",
       `/archived?cursor=1.${id}x`,
@@ -760,5 +759,94 @@ describe("design.md section 6: fingerprinted asset paths", () => {
 
   it("refuses a fonts.css that names a font not bundled", async () => {
     await expect(fingerprintAssets(sources({ fonts: new Map() }))).rejects.toThrow(/not bundled/);
+  });
+});
+
+// A page from one deployment can load its assets after the next deployment is live, and the release before
+// fingerprints named unhashed paths. The Worker keeps only the current bytes, so such a path gets them, revalidated.
+/** An asset path under another fingerprint, and with none. */
+const outdated = (path: string) => path.replace(/\.[0-9a-f]{16}\./, ".0000000000000000.");
+const unhashed = (path: string) => path.replace(/\.[0-9a-f]{16}\./, ".");
+
+/** The bytes with one more: another fingerprint. */
+function changed(body: string | ArrayBuffer): ArrayBuffer {
+  const bytes = new Uint8Array(typeof body === "string" ? new TextEncoder().encode(body) : body);
+  const out = new Uint8Array(bytes.byteLength + 1);
+  out.set(bytes);
+  return out.buffer;
+}
+
+describe("design.md section 6: asset paths from another deployment", () => {
+  const IMMUTABLE = "private, max-age=31536000, immutable";
+
+  it("serves the current file, revalidated, at an outdated or unhashed path", async () => {
+    const world = new World();
+    for (const path of GALLERY_ASSETS.paths.values()) {
+      const current = await app(world, path);
+      const etag = current.headers.get("ETag") ?? "";
+      const bytes = await current.arrayBuffer();
+      for (const stale of [outdated(path), unhashed(path)]) {
+        const response = await app(world, stale);
+        expect({ stale, status: response.status }).toEqual({ stale, status: 200 });
+        expect({ stale, cache: response.headers.get("Cache-Control") }).toEqual({ stale, cache: "private, no-cache" });
+        expect(response.headers.get("Content-Type")).toBe(current.headers.get("Content-Type"));
+        expect(response.headers.get("ETag")).toBe(etag);
+        expect(await response.arrayBuffer()).toEqual(bytes);
+        const again = await app(world, stale, { headers: { "If-None-Match": etag } });
+        expect(again.status).toBe(304);
+        expect(again.headers.get("Cache-Control")).toBe("private, no-cache");
+      }
+    }
+  });
+
+  it("answers a page of one deployment with the next deployment's files, cached as immutable only at their own paths", async () => {
+    const world = new World();
+    // Deployment A is the one bundled; deployment B changes every file.
+    const head = one(elements(await page(world, "/")).filter((node) => node.tag === "head"));
+    const fontsOfA = await (await app(world, assetPath("fonts.css"))).text();
+    const urlsOfA = new Set([
+      ...elements(head)
+        .filter((node) => node.tag === "link")
+        .map((node) => node.attributes.get("href") ?? "")
+        .filter((href) => href !== "/favicon.ico"),
+      ...[...fontsOfA.matchAll(/url\("([^"]+)"\)/g)].map((match) => match[1] ?? ""),
+    ]);
+    expect([...urlsOfA].toSorted()).toEqual([...GALLERY_ASSETS.paths.values()].toSorted());
+
+    const fonts = [...GALLERY_ASSETS.named].filter(([name]) => name.startsWith("fonts/"));
+    const nameOf = new Map([...GALLERY_ASSETS.paths].map(([name, path]) => [path, name]));
+    const b = await fingerprintAssets({
+      galleryCss: `${css}\n/* B */\n`,
+      // fonts.css as in the repository: A's, with each font named again by its name.
+      fontsCss: fontsOfA.replace(/url\("([^"]+)"\)/g, (_, path: string) => `url("${nameOf.get(path) ?? path}")`),
+      iconSvg: `${iconSvg}\n`,
+      fonts: new Map(fonts.map(([name, asset]) => [name, changed(asset.body)])),
+    });
+
+    for (const url of urlsOfA) {
+      const name = nameOf.get(url) ?? "";
+      const wanted = b.named.get(name);
+      expect(b.paths.get(name)).not.toBe(url);
+      const response = await serveGalleryAsset(new Request(`https://${APP_HOST}${url}`), url, b);
+      expect({ url, status: response?.status }).toEqual({ url, status: 200 });
+      expect({ url, cache: response?.headers.get("Cache-Control") }).toEqual({ url, cache: "private, no-cache" });
+      expect(response?.headers.get("ETag")).toBe(wanted === undefined ? "" : await assetTag(wanted));
+      const body = new Uint8Array((await response?.arrayBuffer()) ?? new ArrayBuffer(0));
+      const want = wanted === undefined ? "" : wanted.body;
+      expect(body).toEqual(typeof want === "string" ? new TextEncoder().encode(want) : new Uint8Array(want));
+    }
+    // B's fonts.css, served at A's path, names B's fonts.
+    const stale = await serveGalleryAsset(new Request(`https://${APP_HOST}/`), assetPath("fonts.css"), b);
+    const named = [...((await stale?.text()) ?? "").matchAll(/url\("([^"]+)"\)/g)].map((match) => match[1] ?? "");
+    expect(named.toSorted()).toEqual(fonts.map(([name]) => b.paths.get(name) ?? "").toSorted());
+
+    for (const path of b.paths.values()) {
+      const response = await serveGalleryAsset(new Request(`https://${APP_HOST}${path}`), path, b);
+      expect({ path, status: response?.status, cache: response?.headers.get("Cache-Control") }).toEqual({
+        path,
+        status: 200,
+        cache: IMMUTABLE,
+      });
+    }
   });
 });
