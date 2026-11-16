@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/shuymn/artifacts/compare/v0.2.2...v0.3.0) (2026-11-16)
+
+
+### Features
+
+* **cli:** ship the CLI as single binaries on releases ([64028fd](https://github.com/shuymn/artifacts/commit/64028fdb007c3b74bca99c9f9add8412a975ac3a))
+
 ## [0.2.2](https://github.com/shuymn/artifacts/compare/v0.2.1...v0.2.2) (2026-11-16)
 
 
