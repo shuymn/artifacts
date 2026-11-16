@@ -112,6 +112,7 @@ body,
 }
 
 /* type.meta */
+.brand__version,
 .nav-tab__count,
 .artifact-row__meta,
 .section-heading__count {
@@ -126,7 +127,7 @@ body,
 }
 
 /* type.brand */
-.brand {
+.brand__link {
   font: var(--font-weight-semibold) var(--font-size-lg) / 1.25 var(--font-family-mono);
 }
 
@@ -167,22 +168,56 @@ a:focus-visible,
   outline-offset: var(--space-0-5);
 }
 
-/* site-header */
+/*
+ * site-header. When the brand and the nav do not fit on one line, the nav moves under the brand; when the brand alone
+ * does not, the version moves under the wordmark; the tabs wrap too. So the header never makes the page scroll sideways.
+ */
 .site-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2) var(--space-6);
   padding: var(--space-3) var(--space-7);
   border-block-end: var(--border-width) solid var(--color-border);
   background: var(--color-bg);
 }
 
+/*
+ * The brand: the icon and the wordmark in one link, then the version. Pencil has no baseline alignment, so the
+ * version's line box ends where the wordmark's does, which sets the two on one baseline to a fraction of a pixel.
+ */
 .brand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.brand__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   color: var(--color-text);
+}
+
+/*
+ * The icon is the wordmark's font size: 16 px at the default text size, where icon.svg's grid is whole pixels.
+ * space.0-5 above it lowers it by half that, so the glyph's foot sits on the wordmark's baseline.
+ */
+.brand__icon {
+  inline-size: 1em;
+  block-size: 1em;
+  padding-block-start: var(--space-0-5);
+}
+
+.brand__version {
+  color: var(--color-text-muted);
 }
 
 .site-nav {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }

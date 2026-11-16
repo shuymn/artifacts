@@ -3,6 +3,8 @@
  * (docs/gallery/reference/), element for element and class for class; reference.test.ts holds them to it. Every value
  * goes through `html`, which escapes it (ISO-5). No page has a script, a form or a frame.
  */
+
+import rootPackage from "../../../../package.json" with { type: "json" };
 import type {
   ArchiveCounts,
   ArtifactJson,
@@ -57,6 +59,24 @@ const PRELOADS = (
 const ICONS = html`<link rel="icon" href="/favicon.ico" sizes="32x32" />
   <link rel="icon" href="${assetPath("icon.svg")}" type="image/svg+xml" />`;
 
+/**
+ * The release version: the root package's, which the build inlines into the Worker as it does into the CLI. The Worker
+ * is deployed from the release branch, whose package.json carries the release's version.
+ */
+const VERSION: string = rootPackage.version;
+
+/**
+ * The header's brand (docs/gallery/design.md, "Components"): the icon and the wordmark in one link, then the version.
+ * The icon's `alt` is empty because the link's text names it, and its `width` and `height` hold its place until it
+ * loads.
+ */
+const BRAND = html`<div class="brand">
+  <a class="brand__link" href="/"
+    ><img class="brand__icon" src="${assetPath("icon.svg")}" alt="" width="16" height="16" />artifacts</a
+  >
+  <span class="brand__version">v${VERSION}</span>
+</div>`;
+
 /** Each section's nav tab: its label and the list it links to. */
 const SECTIONS: Readonly<Record<Section, { readonly label: string; readonly href: string }>> = {
   active: { label: "Active", href: "/" },
@@ -89,7 +109,7 @@ function document(title: string, chrome: Chrome, current: Section, page: "list" 
       </head>
       <body>
         <header class="site-header">
-          <a class="brand" href="/">artifacts</a>
+          ${BRAND}
           <nav class="site-nav" aria-label="Sections">${tab("active")} ${tab("archived")}</nav>
         </header>
         ${main}

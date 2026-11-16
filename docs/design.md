@@ -863,6 +863,10 @@ would: a page with the same data an hour later reads differently. The Worker ren
 Access (ACC-1) and a successful query, so a 304 skips no check (SRV-3) and saves only the transfer; a refusal, a 404 and
 a failed read carry no tag.
 
+Every page's header shows the gallery's icon and the wordmark, one link to `/`, then the release version, the root
+`package.json`'s, built into the Worker ([gallery/design.md](gallery/design.md), "Icon" and "Behavior the static design
+does not show").
+
 Every page links its stylesheets, preloads the fonts it uses ([gallery/design.md](gallery/design.md), "Ground rules")
 and links the gallery's icon ([gallery/design.md](gallery/design.md), "Icon"): `icon.svg` at its fingerprinted path
 (section 6), and `/favicon.ico` for browsers that take no SVG icon. `/favicon.ico` is a real ICO file rather than SVG
