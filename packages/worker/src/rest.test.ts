@@ -305,19 +305,28 @@ describe("REST contract", () => {
 
 // PL-22, VER-4.
 describe("VER-4: delete", () => {
-  it("answers 404 on every URL at once and empties the prefix", async () => {
+  it("answers 404 on every URL before the cleanup starts, then empties the prefix", async () => {
     const world = new World();
     const { artifact } = await world.created({ title: "t", files: { "index.html": "i", "a.txt": "a" } });
     const id = artifact.id;
     await world.updated(id, { base_version: 1, files: { "a.txt": "a2" } });
     await world.patch(id, { public: true });
     expect(await objectKeys(id)).toHaveLength(3);
+    const bucket = withBucket(world);
+    const held = gate();
+    // The cleanup's first call, the listing of the prefix, waits for the gate, then runs.
+    bucket.behave = (op, key, count) =>
+      op === "list" && count === 1 ? held.promise.then(() => env.FILES.list({ prefix: key })) : undefined;
 
-    expect((await world.api("DELETE", `/v1/artifacts/${id}`)).status).toBe(204);
+    const deletion = world.api("DELETE", `/v1/artifacts/${id}`);
+    await until(() => bucket.count("list") === 1);
     for (const response of [
       await world.content(id, "/"),
+      await world.content(id, "/a.txt"),
       await world.content(id, "/_v/1/"),
+      await world.content(id, "/_v/1/a.txt"),
       await world.public(id, "/"),
+      await world.public(id, "/_v/1/a.txt"),
       await world.api("GET", `/v1/artifacts/${id}`),
       await world.api("GET", `/v1/artifacts/${id}/versions`),
       await world.api("GET", `/v1/artifacts/${id}/versions/1/files/a.txt`),
@@ -326,9 +335,13 @@ describe("VER-4: delete", () => {
     }
     expect((await world.update(id, { base_version: 2 })).status).toBe(404);
     expect((await world.patch(id, { archive: "kept" })).status).toBe(404);
-    expect(await objectKeys(id)).toEqual([]);
     const listed = await json<Page>(await world.api("GET", "/v1/artifacts?archived=include"));
     expect(listed.artifacts.map((a) => a.id)).not.toContain(id);
+    expect(await objectKeys(id)).toHaveLength(3);
+
+    held.open();
+    expect((await deletion).status).toBe(204);
+    expect(await objectKeys(id)).toEqual([]);
   });
 
   it("answers 204 again for a tombstone and 404 for an ID that never existed", async () => {
