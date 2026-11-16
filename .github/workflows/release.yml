@@ -204,9 +204,8 @@ jobs:
           IFS="$(printf '\t')" read -r draft tag upload_url <<EOF
           $release
           EOF
-          # Assets are replaced only while the release is a draft; a published release is immutable.
-          if [ "$draft" != true ] || [ "$tag" != "$TAG" ]; then
-            echo "::error::release $RELEASE_ID is not the draft of $TAG (draft: $draft, tag: $tag)"
+          if [ "$tag" != "$TAG" ]; then
+            echo "::error::release $RELEASE_ID is not the release of $TAG (tag: $tag)"
             exit 1
           fi
           tag_sha() {
@@ -222,6 +221,35 @@ jobs:
             exit 1
           fi
           files=$(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          # Whether the release holds exactly these files, each uploaded whole: its size and, when GitHub gives one, its
+          # digest.
+          holds_files() {
+            gh api --paginate "$repo/releases/$RELEASE_ID/assets" \
+              --jq '.[] | [.name, .state, .size, (.digest // "")] | @tsv' >"$RUNNER_TEMP/listed" || return 1
+            LC_ALL=C sort "$RUNNER_TEMP/listed" >"$RUNNER_TEMP/uploaded"
+            if [ "$(cut -f1 "$RUNNER_TEMP/uploaded")" != "$files" ]; then
+              printf '::error::release %s holds other assets than the files of this run:\n%s\n' \
+                "$TAG" "$(cut -f1 "$RUNNER_TEMP/uploaded")"
+              return 1
+            fi
+            while IFS="$(printf '\t')" read -r name state size digest; do
+              if [ "$state" != uploaded ] || [ "$size" != "$(stat -c %s "$name")" ] ||
+                { [ -n "$digest" ] && [ "$digest" != "sha256:$(sha256sum "$name" | cut -d' ' -f1)" ]; }; then
+                echo "::error::the asset $name is not the file of this run ($state, $size bytes, ${digest:-no digest})"
+                return 1
+              fi
+            done <"$RUNNER_TEMP/uploaded"
+          }
+          # Published already: an earlier attempt of this job published it and then failed (its answer was lost, or the
+          # check after it). A published release is immutable, so it is accepted as it is only if it is this run's.
+          if [ "$draft" != true ]; then
+            if holds_files; then
+              echo "$TAG is published already, at $SHA with the files of this run" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::error::$TAG is published, but not with the files of this run; the next release replaces it"
+            exit 1
+          fi
           # An asset the earlier attempt left is replaced; any other asset is not this workflow's to remove.
           gh api --paginate "$repo/releases/$RELEASE_ID/assets" --jq '.[] | [.id, .name] | @tsv' >"$RUNNER_TEMP/assets"
           while IFS="$(printf '\t')" read -r asset name; do
@@ -236,22 +264,10 @@ jobs:
               -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" \
               --data-binary "@$name" "${upload_url%%\{*}?name=$name" >/dev/null
           done
-          # The draft holds exactly these files, each uploaded whole: its size and, when GitHub gives one, its digest.
-          gh api --paginate "$repo/releases/$RELEASE_ID/assets" \
-            --jq '.[] | [.name, .state, .size, (.digest // "")] | @tsv' | LC_ALL=C sort >"$RUNNER_TEMP/uploaded"
-          if [ "$(cut -f1 "$RUNNER_TEMP/uploaded")" != "$files" ]; then
-            printf '::error::the draft has other assets than the files uploaded:\n%s\n' "$(cut -f1 "$RUNNER_TEMP/uploaded")"
-            exit 1
-          fi
-          while IFS="$(printf '\t')" read -r name state size digest; do
-            if [ "$state" != uploaded ] || [ "$size" != "$(stat -c %s "$name")" ] ||
-              { [ -n "$digest" ] && [ "$digest" != "sha256:$(sha256sum "$name" | cut -d' ' -f1)" ]; }; then
-              echo "::error::the asset $name is not the file uploaded ($state, $size bytes, ${digest:-no digest})"
-              exit 1
-            fi
-          done <"$RUNNER_TEMP/uploaded"
+          holds_files || exit 1
           # legacy: GitHub marks the release with the highest version as latest, so finishing an older draft later does
-          # not take latest from a newer release.
+          # not take latest from a newer release. If the answer is lost or the check below fails, running the job again
+          # finds the release published and checks it as above.
           gh api -X PATCH "$repo/releases/$RELEASE_ID" -F draft=false -f make_latest=legacy >/dev/null
           if [ "$(gh api "$repo/releases/$RELEASE_ID" --jq .draft)" != false ] || [ "$(tag_sha)" != "$SHA" ]; then
             echo "::error::the release of $TAG did not publish at $SHA"
