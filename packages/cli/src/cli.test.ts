@@ -1,10 +1,12 @@
 // The command line, configuration, token generation and failure paths, against stubbed API answers. The Worker itself
 // answers in e2e.test.ts.
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { mkdir, readdir, readFile, symlink } from "node:fs/promises";
+import { createServer, type RequestListener } from "node:http";
 import { join, posix, win32 } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { Fetch } from "./api.ts";
 import { HELP } from "./cli.ts";
@@ -250,6 +252,73 @@ describe("timeouts", () => {
     expect(stderr).toContain('the download of "slow.css" did not finish in time');
     expect(await readdir(target)).toEqual(["index.html"]);
     expect(await readFile(join(target, "index.html"), "utf8")).toBe("<p>x</p>");
+  });
+});
+
+const servers: ReturnType<typeof createServer>[] = [];
+
+afterEach(async () => {
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections();
+    server.close();
+    await once(server, "close");
+  }
+});
+
+/** A local HTTP server answering with `handler`, and the configuration that points the CLI at it. */
+async function local(handler: RequestListener) {
+  const server = createServer(handler);
+  servers.push(server);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("the server has no port");
+  const { port } = address;
+  return { ARTIFACTS_API_URL: `http://127.0.0.1:${port}`, ARTIFACTS_TOKEN: TOKEN };
+}
+
+const network: Fetch = (input, init) => fetch(input, init);
+
+/** An API that records each request; a POST gets `post`, a listing an empty page. */
+function api(post: (response: Parameters<RequestListener>[1]) => void) {
+  const seen: string[] = [];
+  const handler: RequestListener = (request, response) => {
+    seen.push(`${request.method} ${request.url?.split("?")[0]}`);
+    request.resume();
+    request.on("end", () => {
+      if (request.method === "POST") return post(response);
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ artifacts: [], next_cursor: null }));
+    });
+  };
+  return { seen, handler };
+}
+
+describe("a create answered with a broken body", () => {
+  it("treats a 201 whose connection drops mid-body as lost, and lists before creating again", async () => {
+    const { seen, handler } = api((response) => {
+      response.writeHead(201, { "Content-Type": "application/json", "Content-Length": "1000" });
+      response.write('{"artifact":', () => response.socket?.destroy());
+    });
+    const root = await tempDir();
+    await writeTree(root, { "index.html": "x" });
+    const ran = await cli(["publish", root, "--title", "t"], { env: await local(handler), fetch: network });
+    expect(ran.status).toBe(1);
+    expect(ran.stderr).toContain("the create got no answer twice");
+    expect(seen).toEqual(["POST /v1/artifacts", "GET /v1/artifacts", "POST /v1/artifacts"]);
+  });
+
+  it("reports a complete 201 that is not JSON as a shape error, without creating again", async () => {
+    const { seen, handler } = api((response) => {
+      response.writeHead(201, { "Content-Type": "application/json" });
+      response.end('{"artifact":');
+    });
+    const root = await tempDir();
+    await writeTree(root, { "index.html": "x" });
+    const ran = await cli(["publish", root, "--title", "t"], { env: await local(handler), fetch: network });
+    expect(ran.status).toBe(1);
+    expect(ran.stderr).toContain("the API answered in a shape this CLI does not know");
+    expect(seen).toEqual(["POST /v1/artifacts"]);
   });
 });
 

@@ -146,13 +146,17 @@ function issuesOf(value: unknown): Issue[] {
   return value.filter((issue: unknown): issue is Issue => hasFields(issue, { field: "string", reason: "string" }));
 }
 
-/** The answer's JSON body; an error status becomes an `ApiError`. */
+/**
+ * The answer's JSON body; an error status becomes an `ApiError`. A body that breaks off while it is read (a dropped
+ * connection, the timeout) fails as it is, so `#call` reports the answer lost; only a complete body that is not JSON
+ * is a shape error.
+ */
 async function answer(response: Response): Promise<unknown> {
+  const text = response.status === 204 ? "" : await response.text();
   let body: unknown;
   try {
-    body = response.status === 204 ? undefined : await response.json();
-  } catch (error) {
-    if (isTimeout(error)) throw error;
+    body = text === "" ? undefined : JSON.parse(text);
+  } catch {
     if (response.ok) throw unexpected();
   }
   if (response.ok) return body;
