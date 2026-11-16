@@ -66,6 +66,8 @@ The gallery has one icon: the `a` of the monospace wordmark in `color.accent`, o
   fingerprinted path. It is the wordmark's font size, `1em`, which is 16 px at the default text size, where the grid
   falls on whole pixels; `width` and `height` of 16 hold its place until it loads, and its `alt` is empty because the
   link's text names it. The tile is the header's own color, so only the glyph shows, `space.1` before the wordmark.
+  Centered on the wordmark's line, the glyph's foot would sit 1 px above its baseline; `space.0-5` above the icon
+  lowers it by half that, onto the baseline.
 
 ## Tokens
 

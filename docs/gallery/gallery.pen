@@ -453,28 +453,41 @@
                       "children": [
                         {
                           "type": "frame",
-                          "id": "QpsY2",
-                          "name": "Icon",
-                          "clip": true,
-                          "width": 16,
-                          "height": 16,
-                          "fill": "$color.bg",
-                          "cornerRadius": 3,
+                          "id": "TphTx",
+                          "name": "brand__icon",
+                          "padding": [
+                            "$space.0-5",
+                            0,
+                            0,
+                            0
+                          ],
                           "children": [
                             {
-                              "type": "path",
-                              "id": "B2Tg6",
-                              "name": "Glyph",
-                              "geometry": "M10 6h10v4h-10z m10 4h4v16h-4z m-10 4h10v4h-10z m-2 2h4v8h-4z m2 6h10v4h-10z",
-                              "viewBox": [
-                                0,
-                                0,
-                                32,
-                                32
-                              ],
-                              "fill": "$color.accent",
+                              "type": "frame",
+                              "id": "QpsY2",
+                              "name": "Tile",
+                              "clip": true,
                               "width": 16,
-                              "height": 16
+                              "height": 16,
+                              "fill": "$color.bg",
+                              "cornerRadius": 3,
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "B2Tg6",
+                                  "name": "Glyph",
+                                  "geometry": "M10 6h10v4h-10z m10 4h4v16h-4z m-10 4h10v4h-10z m-2 2h4v8h-4z m2 6h10v4h-10z",
+                                  "viewBox": [
+                                    0,
+                                    0,
+                                    32,
+                                    32
+                                  ],
+                                  "fill": "$color.accent",
+                                  "width": 16,
+                                  "height": 16
+                                }
+                              ]
                             }
                           ]
                         },
