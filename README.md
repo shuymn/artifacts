@@ -8,6 +8,7 @@ Status: under construction.
 - [Design](docs/design.md): purpose, principles, decisions and acceptance criteria
 - [Threat model](docs/threat-model.md): assets, adversaries and security invariants
 - [Decisions](docs/decisions.md): libraries and code patterns
+- [Operations](docs/operations.md): Cloudflare setup, releases and deployment, tokens, clients, checks and restore
 
 ## Development
 

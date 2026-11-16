@@ -437,12 +437,18 @@ A deleted artifact and any other path answer 404. Artifact text is escaped and t
 
 ## 11. Operations
 
+The steps are in [operations.md](operations.md).
+
 - **Configuration split:** `packages/worker/wrangler.jsonc` (public) holds bindings (`DB`, `FILES`), migrations and
-  observability with invocation logs off. The gitignored `wrangler.deploy.jsonc` holds the account, routes, custom
-  domains, database and bucket identifiers, and the variables `APP_HOST`, `API_HOST`, `CONTENT_HOST_SUFFIX`,
-  `PUBLIC_HOST_SUFFIX`, `ARCHIVE_AFTER_DAYS`, `ACCESS_TEAM_DOMAIN`, `ACCESS_APP_AUD` and `ACCESS_CONTENT_AUD`;
-  `API_TOKENS` is a secret. A deployment script checks the file with the Worker's own parser, merges, and runs
-  `wrangler deploy` (DATA-2).
+  observability with invocation logs off. The deployment values, in the form of `wrangler.deploy.example.jsonc`, hold
+  the account, routes, custom domains, database and bucket identifiers, and the variables `APP_HOST`, `API_HOST`,
+  `CONTENT_HOST_SUFFIX`, `PUBLIC_HOST_SUFFIX`, `ARCHIVE_AFTER_DAYS`, `ACCESS_TEAM_DOMAIN`, `ACCESS_APP_AUD` and
+  `ACCESS_CONTENT_AUD`; they live in the build variable `ARTIFACTS_DEPLOY_JSONC` on Workers Builds or in the gitignored
+  `wrangler.deploy.jsonc` on the owner's machine. `API_TOKENS` is a secret. The deployment script (`pnpm run deploy`)
+  checks the values with the Worker's own parser, merges them, checks that the bucket exists, applies the D1
+  migrations on every deploy and runs `wrangler deploy` (DATA-2).
+- **Releases:** `main` is never deployed. release-please keeps a release PR open; merging it tags a version, a
+  workflow fast-forwards the `release` branch to it, and Workers Builds deploys `release` only.
 - **Cloudflare setup by the owner:** the proxied wildcard DNS record, the two Access applications, the D1 database and a
   private R2 bucket, on Workers Paid.
 - **Logging:** `logEvent` only, with closed fields; every change logs its token name, so the 7 days of Workers Logs

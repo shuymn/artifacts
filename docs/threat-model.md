@@ -69,15 +69,16 @@ adversaries below, not untrusted users.
 
 ## Entry points
 
-| Entry point                                     | Reached by | Authenticated by                                    |
-| ----------------------------------------------- | ---------- | --------------------------------------------------- |
-| Gallery on the app host                         | R1, R2     | Access; the Worker verifies the JWT (ACC-1)         |
-| Private content hosts                           | R1, R2, R4 | Access; the Worker verifies the JWT (ACC-1)         |
-| Public content hosts                            | R1, R2, R4 | none; the artifact's public flag (PUB-1)            |
-| REST API on the API host                        | R1, R3     | bearer token (TOK-1)                                |
-| MCP endpoint `/mcp` on the API host             | R1, R3     | bearer token (TOK-1) and the `Origin` rule (HOST-3) |
-| Any other host or route that reaches the Worker | R1         | none; answered 404 without storage (HOST-1)         |
-| CLI and the deployment script                   | the owner  | the token in the environment; the owner's account   |
+| Entry point                                      | Reached by                      | Authenticated by                                                                           |
+| ------------------------------------------------ | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| Gallery on the app host                          | R1, R2                          | Access; the Worker verifies the JWT (ACC-1)                                                |
+| Private content hosts                            | R1, R2, R4                      | Access; the Worker verifies the JWT (ACC-1)                                                |
+| Public content hosts                             | R1, R2, R4                      | none; the artifact's public flag (PUB-1)                                                   |
+| REST API on the API host                         | R1, R3                          | bearer token (TOK-1)                                                                       |
+| MCP endpoint `/mcp` on the API host              | R1, R3                          | bearer token (TOK-1) and the `Origin` rule (HOST-3)                                        |
+| Any other host or route that reaches the Worker  | R1                              | none; answered 404 without storage (HOST-1)                                                |
+| CLI and the deployment script                    | the owner                       | the token in the environment; the owner's account                                          |
+| The `release` branch, deployed by Workers Builds | the owner, the release workflow | a ruleset that lets only the workflow's App update it, fast-forward to a release of `main` |
 
 ## Invariants
 
@@ -92,8 +93,8 @@ adversaries below, not untrusted users.
   content suffix (the content Access wildcard would cover public hosts), an app or API host under either suffix, a
   suffix that makes an artifact label longer than 63 characters, and a mix of `localhost` and other hosts. The Worker
   answers 503 `unavailable`; the deployment script refuses the same values with the same parser. _Enforced (main)_ in
-  `src/config.ts`. Pinned by behavior (`src/config.test.ts`: one test per refusal; `src/routing.test.ts`: 503 without
-  storage). **Gap:** the deployment script does not exist yet, so its refusals are not pinned.
+  `src/config.ts`, `scripts/deploy-config.ts`. Pinned by behavior (`src/config.test.ts`: one test per refusal;
+  `src/routing.test.ts`: 503 without storage; `scripts/deploy.test.ts`: each refusal through the deployment script).
 - **HOST-3: `/mcp` refuses a foreign `Origin`.** A request that carries an `Origin` other than the API host's origin
   answers 403 before the MCP handler; agents send none. _Enforced (main)_ in `src/mcp.ts`. Pinned by behavior
   (`src/mcp.test.ts`: a foreign origin, `null`, and the API host with another scheme or port answer 403 without D1 or
@@ -112,9 +113,9 @@ adversaries below, not untrusted users.
   for 7 days, a 5 s key fetch) are checked by review, not by tests, which substitute short ones.
 - **ACC-2: Access verification is skipped only for a `localhost` configuration.** Every configured host must be a
   `localhost` name; no variable turns verification off, and the deployment script refuses `localhost` hosts and ports.
-  _Enforced (main)_ in `src/config.ts`. Pinned by behavior (`src/routing.test.ts`: production-shaped hosts without a
-  JWT answer 403; `src/config.test.ts`: a mix of `localhost` and other hosts is refused). **Gap:** the deployment script
-  does not exist yet, so its refusal of `localhost` is not pinned.
+  _Enforced (main)_ in `src/config.ts`, `scripts/deploy-config.ts`. Pinned by behavior (`src/routing.test.ts`:
+  production-shaped hosts without a JWT answer 403; `src/config.test.ts`: a mix of `localhost` and other hosts is
+  refused; `scripts/deploy.test.ts`: a `localhost` name and a port in each host variable are refused).
 - **ACC-3: the Access applications admit only the owner, and their cookie is HttpOnly.** The content application covers
   exactly `*` + the content suffix. HttpOnly is set explicitly because the documented default is inconsistent; without
   it, artifact JavaScript could read its host's JWT, which names the application's audience rather than the host and so
@@ -239,9 +240,11 @@ adversaries below, not untrusted users.
   failure path, `/mcp` and its SDK refusals included) and source check (`src/source.test.ts`: `console` only in the
   logging module; `wrangler.jsonc`). **Gap:** the gallery's routes are not among the redaction markers yet.
 - **DATA-2: deployment values stay out of the repository.** `wrangler.jsonc` sets no variable, route or identifier;
-  the deployment file is gitignored, and `API_TOKENS` is a secret. _Enforced (main)_ for `wrangler.jsonc`. Pinned by
-  source check (`src/source.test.ts`) of `wrangler.jsonc` and the deployment example. **Gap:** the deployment example
-  does not exist yet.
+  the deployment values live in the gitignored `wrangler.deploy.jsonc` or a Workers Builds variable, the committed
+  example holds placeholders only, and `API_TOKENS` is a secret. _Enforced (main)_ in `wrangler.jsonc`,
+  `wrangler.deploy.example.jsonc`, `scripts/deploy-config.ts`. Pinned by source check (`src/source.test.ts`:
+  `wrangler.jsonc` and the example) and behavior (`scripts/deploy.test.ts`: the deployment values may not set
+  `API_TOKENS` or a key of `wrangler.jsonc`).
 
 ## IDs to check by change type
 
