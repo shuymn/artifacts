@@ -8,6 +8,7 @@ import { join, posix, win32 } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import rootPackage from "../../../package.json" with { type: "json" };
 import type { Fetch } from "./api.ts";
 import { HELP } from "./cli.ts";
 import { targetOf } from "./pull.ts";
@@ -96,6 +97,19 @@ describe("help", () => {
     }
     expect((await cli([])).stdout).toBe(HELP);
     expect((await cli(["get", "--help"])).stdout).toBe(HELP);
+  });
+});
+
+describe("version", () => {
+  it("prints the root package's version for exactly --version, and get keeps --version <n>", async () => {
+    expect(await cli(["--version"])).toEqual({ status: 0, stdout: `${rootPackage.version}\n`, stderr: "" });
+    const urls: string[] = [];
+    const fetch: Fetch = async (input) => {
+      urls.push(input);
+      return json(200, { artifact: artifact(ID), version: version([]) });
+    };
+    expect((await cli(["get", ID, "--version", "2"], { env: ENV, fetch })).status).toBe(0);
+    expect(urls).toEqual([`https://artifacts-api.example.com/v1/artifacts/${ID}/versions/2`]);
   });
 });
 
