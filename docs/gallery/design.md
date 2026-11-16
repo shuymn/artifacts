@@ -14,10 +14,11 @@ the code, and the implementation follows them exactly:
 A design change goes to all of them: the Pencil file first, then `tokens.json`, `gallery.css` and the reference pages,
 then the templates. Content and behavior of each page are in [design.md](../design.md), section 10.
 
-`gallery.pen` is JSON, and the committed file has no `fileToken`. Pencil adds that member back each time it saves the
-file; it is not part of the design, and the secret scan reports it. The pre-commit hook removes it from staged `.pen`
-files with [`strip-pen-file-token.mjs`](../../scripts/strip-pen-file-token.mjs) before the scan, and Pencil opens the
-file without it.
+`gallery.pen` is JSON, and the committed file has no `fileToken`. Pencil adds that member each time it saves the file;
+it is not part of the design, and the secret scan reports it. Before the scan, the pre-commit hook cuts it out of the
+staged copy of each `.pen` file with [`strip-pen-file-token.mjs`](../../scripts/strip-pen-file-token.mjs) and leaves
+the working file alone, so a partly staged file keeps its unstaged part. The working file keeps the member, so after a
+save git shows the file changed by that one line; Pencil opens the file with or without it.
 
 ## Ground rules
 
