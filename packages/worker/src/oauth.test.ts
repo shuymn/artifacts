@@ -2,12 +2,29 @@
 // at the token endpoint (OAUTH-5) and the configuration of section 7. The consent page is a later step; here the
 // library's `completeAuthorization` stands in for it, called by the test.
 import { OAuthAuthorizationServer } from "@cloudflare/workers-oauth-provider";
-import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseConfig } from "./config.ts";
-import { authorizationServer, OAUTH_ERROR_CATEGORIES, OAUTH_ERROR_CODES, type OAuthEnv } from "./oauth.ts";
-import { recordingKv, revocationKey } from "./revocation.ts";
+import {
+  authorize,
+  errorOf,
+  exchange,
+  faulty,
+  FORM,
+  helpers,
+  METADATA_PATH,
+  oauthKv,
+  REDIRECT,
+  refresh,
+  register,
+  REGISTER_URL,
+  seconds,
+  signedIn,
+  tokenRequest,
+  tokensOf,
+  TOKEN_URL,
+} from "./oauth-test-support.ts";
+import { OAUTH_ERROR_CATEGORIES, OAUTH_ERROR_CODES } from "./oauth.ts";
+import { revocationKey } from "./revocation.ts";
 import {
   API,
   API_HOST,
@@ -19,9 +36,7 @@ import {
   gate,
   isRecord,
   logEvents,
-  never,
   PUBLIC_SUFFIX,
-  stringAt,
   TOKENS,
   World,
 } from "./test-support.ts";
@@ -34,148 +49,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const METADATA_PATH = "/.well-known/oauth-authorization-server";
-const TOKEN_URL = `${API}/oauth/token`;
-const REGISTER_URL = `${API}/oauth/register`;
-const REDIRECT = "http://127.0.0.1:33418/callback";
-const FORM = { "Content-Type": "application/x-www-form-urlencoded" };
 const ORIGIN = { Origin: "https://evil.example.org" };
 const ID = "abcdefghijklmnopqrstuvwxyz";
-const VERIFIER = "verifier-0123456789-0123456789-0123456789-0123456789";
-
-function oauthKv(): KVNamespace {
-  if (env.OAUTH_KV === undefined) throw new Error("the test configuration binds OAUTH_KV");
-  return env.OAUTH_KV;
-}
-
-function serverOf(world: World): OAuthAuthorizationServer<OAuthEnv> {
-  const parsed = parseConfig(world.env);
-  if (!parsed.ok) throw new Error("invalid test configuration");
-  return authorizationServer(parsed.config);
-}
-
-/** The library's helpers over `OAUTH_KV` through the recording wrapper, as the Worker's own callers get them. */
-function helpers(world: World) {
-  return serverOf(world).getOAuthApi({ OAUTH_KV: recordingKv(oauthKv(), () => Date.now()).kv });
-}
-
-function base64url(bytes: Uint8Array): string {
-  return btoa(String.fromCodePoint(...bytes))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/, "");
-}
-
-async function challengeOf(verifier: string): Promise<string> {
-  return base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-}
-
-async function register(world: World, metadata: Record<string, unknown> = {}): Promise<string> {
-  const response = await world.fetch(REGISTER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      redirect_uris: [REDIRECT],
-      token_endpoint_auth_method: "none",
-      client_name: "test client",
-      ...metadata,
-    }),
-  });
-  if (response.status !== 201) throw new Error(`registration answered ${response.status}: ${await response.text()}`);
-  return stringAt(await response.json(), "client_id");
-}
-
-/**
- * Stands in for the consent page: an approval by the owner, through the library's helper, of a request for `resource`
- * (none for a client that names none). Returns the code.
- */
-async function authorize(world: World, clientId: string, resource: string | null = `${API}/mcp`): Promise<string> {
-  const { redirectTo } = await helpers(world).completeAuthorization({
-    request: {
-      responseType: "code",
-      clientId,
-      redirectUri: REDIRECT,
-      scope: [],
-      state: "state",
-      codeChallenge: await challengeOf(VERIFIER),
-      codeChallengeMethod: "S256",
-      ...(resource === null ? {} : { resource }),
-    },
-    userId: "owner",
-    metadata: {},
-    scope: [],
-    props: { publisher: "test" },
-    revokeExistingGrants: false,
-  });
-  const code = new URL(redirectTo).searchParams.get("code");
-  if (code === null) throw new Error("no code");
-  return code;
-}
-
-function tokenRequest(world: World, params: Record<string, string> | string, headers: Record<string, string> = {}) {
-  return world.fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { ...FORM, ...headers },
-    body: typeof params === "string" ? params : new URLSearchParams(params).toString(),
-  });
-}
-
-type Tokens = { access_token: string; refresh_token: string; expires_in: number };
-
-async function tokensOf(response: Response): Promise<Tokens> {
-  if (response.status !== 200) throw new Error(`token endpoint answered ${response.status}: ${await response.text()}`);
-  return response.json();
-}
-
-const exchange = (world: World, clientId: string, code: string) =>
-  tokenRequest(world, {
-    grant_type: "authorization_code",
-    code,
-    client_id: clientId,
-    redirect_uri: REDIRECT,
-    code_verifier: VERIFIER,
-  });
-
-const refresh = (world: World, clientId: string, refreshToken: string) =>
-  tokenRequest(world, { grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId });
-
-/** A client, its grant's ID and the tokens of the code exchange. */
-async function signedIn(world: World): Promise<{ clientId: string; grantId: string; tokens: Tokens }> {
-  const clientId = await register(world);
-  const code = await authorize(world, clientId);
-  const tokens = await tokensOf(await exchange(world, clientId, code));
-  return { clientId, grantId: code.split(":")[1] ?? "", tokens };
-}
-
-type Fault = "throw" | "hang" | Promise<void>;
-
-/** `base` with each call `pick` names failed, held forever, or held until the promise settles. */
-function faulty(base: KVNamespace, pick: (method: string, key: string) => Fault | undefined, message = "KV-FAILURE") {
-  return new Proxy(base, {
-    get(target, property) {
-      const value: unknown = Reflect.get(target, property, target);
-      if (typeof value !== "function") return value;
-      return async (...args: unknown[]) => {
-        const fault = pick(String(property), typeof args[0] === "string" ? args[0] : "");
-        if (fault === "throw") throw new Error(message);
-        if (fault === "hang") return never();
-        if (fault !== undefined) await fault;
-        const result: unknown = Reflect.apply(value, target, args);
-        return result;
-      };
-    },
-  });
-}
 
 const corsHeaders = (response: Response) =>
   [...response.headers.keys()].filter((name) => name.toLowerCase().startsWith("access-control-"));
-
-const seconds = () => Math.floor(Date.now() / 1000);
-
-async function errorOf(response: Response): Promise<{ status: number; headers: string[][]; body: unknown }> {
-  const headers = [...response.headers].toSorted(([a], [b]) => a.localeCompare(b));
-  return { status: response.status, headers, body: await response.json() };
-}
 
 // PL-43, HOST-1, ISO-2.
 describe("PL-43: the library at the boundary", () => {
