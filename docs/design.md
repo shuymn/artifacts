@@ -392,6 +392,11 @@ so REST's `invalid_request` for the same input has no exact MCP twin.
   the host, the token and the `Origin` first, removes the `Authorization` header, then builds the handler for the
   request with a factory whose closure holds the token name; the token never reaches the SDK (TOK-2). `McpAgent` from `agents` is not used: nothing needs
   sessions.
+- Every `/mcp` answer carries `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, as the REST API's do: the
+  SDK's answers, its errors (405, 406, 400) and the Worker's own refusals (401, 403). The SDK marks an event stream
+  `no-cache, no-transform`; the Worker keeps `no-transform` (`no-store, no-transform`) so no proxy buffers or
+  recompresses the stream. It replaces the headers only and passes the body stream through unread, so events reach the
+  client as the SDK writes them.
 - Every tool has input and output schemas. Annotations: reads are `readOnlyHint`; `create_artifact` only adds, so it
   is not `destructiveHint`; every other change is `destructiveHint`, since an update can remove files, `set_public` can
   revoke public access, `set_archive` replaces a setting and `delete_artifact` deletes; `set_public`, `set_archive` and
