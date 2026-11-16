@@ -308,10 +308,10 @@ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE "$API/v1/grants/<grant>" -H "
 
 - **Revocation is final** once it answers 204. A 503 may have revoked part: run it again until it answers 204, or 404
   when the earlier call had finished after all.
-- **Sign a client out:** `artifacts logout` for the CLI, which revokes its grant as above. `claude mcp logout
-  artifacts` revokes at the server ([MCP](https://code.claude.com/docs/en/mcp)) through RFC 7009, which a refresh of
-  the same grant at that moment can undo (design.md section 7): for a client whose tokens may have leaked, revoke its
-  grant here. Removing a server from a client's configuration only forgets its tokens: revoke its grant here as well.
+- **Sign a client out:** `artifacts logout` for the CLI, which revokes its own grant as above; `claude mcp logout
+  artifacts` for Claude Code, which revokes at the server through RFC 7009 ([MCP](https://code.claude.com/docs/en/mcp))
+  with the same lasting effect (design.md section 7). Removing a server from a client's configuration only forgets its
+  tokens: revoke its grant here as well.
 - **A grant expires** after 30 days without a refresh; a client in use refreshes it. Signing a client in again
   replaces its grant only when it returns with the same client and redirect URI: Claude Code and Codex pick a new
   loopback port each time, so revoke the grant they leave behind.
@@ -579,8 +579,10 @@ CLI signs in, and 15 when API tokens are turned off.
     ID2=$(artifacts publish ./probe2 --title probe2 --json | jq -r .artifact.id)
     ```
 
-    More than an hour later, when the stored access token has expired, start both publishes from one command line, so
-    both read the expired token before either refreshes:
+    More than an hour later, when the stored access token has expired, start both publishes from one command line.
+    This is a smoke check: the shell starts both together but cannot hold them where each reads the stored token, so
+    they usually, not always, both read the expired token before either refreshes; PL-50 holds them at barriers in
+    the local tests.
 
     ```sh
     artifacts publish --id "$ID" ./probe & artifacts publish --id "$ID2" ./probe2 & wait
