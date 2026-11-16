@@ -83,6 +83,23 @@ spec:
               app: github-actions
             - context: security / betterleaks
               app: github-actions
+    # A push to `release` deploys (docs/operations.md), so only the repository's GitHub App, which the release workflow
+    # runs as, may create, move or delete it.
+    - name: release
+      target: branch
+      enforcement: active
+      bypass_actors:
+        - app: id:5775579
+          bypass_mode: always
+      conditions:
+        ref_name:
+          include:
+            - refs/heads/release
+      rules:
+        creation: true
+        update: true
+        deletion: true
+        non_fast_forward: true
   actions:
     enabled: true
     allowed_actions: selected
