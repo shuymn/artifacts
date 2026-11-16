@@ -149,19 +149,21 @@ adversaries below, not untrusted users.
   observe it. CORP does not govern navigation: another origin can still frame a private page, which shows it to the
   owner without giving the framer its content; for one owner, no framing policy is added. Public hosts do not send
   CORP: their content needs no credential, so loading it reveals nothing a direct request does not.
-  _Enforced (main)_ in `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`, `src/routing.test.ts`: every route
-  and status, both host classes) and deployed check (design AC-8: artifact A's `<script src>` to artifact B fails, B
-  loads its own). **Gap:** the gallery's pages are not served yet, so only the app host's 403, 404 and 405 are pinned;
-  the deployed check has not run.
+  _Enforced (main)_ in `src/serve.ts`, `src/gallery/route.ts`. Pinned by behavior (`src/serve.test.ts`,
+  `src/routing.test.ts`, `src/gallery/gallery.test.ts`: every route and status, both host classes) and deployed check
+  (design AC-8: artifact A's `<script src>` to artifact B fails, B loads its own). **Gap:** the deployed check has not
+  run.
 - **ISO-3: browsers can only read.** The app host and content hosts answer `GET` and `HEAD` only; every change is on the
   API host with a bearer token, so no request authenticated by a cookie changes state. _Enforced (main)_ in
   `src/serve.ts`. Pinned by behavior (`src/routing.test.ts`).
 - **ISO-4: the Worker sets no cookie and decides nothing on one.** _Enforced (main)._ Pinned by behavior
   (`src/routing.test.ts`, `src/serve.test.ts`: no `Set-Cookie` on any route; `src/access.test.ts`: a valid Access JWT
   sent only as a cookie is refused, ACC-1).
-- **ISO-5: the gallery runs no artifact-supplied markup.** Titles, descriptions and paths are escaped; the response's
-  `Content-Security-Policy` forbids scripts and framing. _Planned._ Pinned by behavior (markup and attribute breakouts
-  in each field; the header).
+- **ISO-5: the gallery runs no artifact-supplied markup.** Titles, descriptions, paths and every other value are
+  escaped by the one template that builds the pages; every gallery response's `Content-Security-Policy` forbids
+  scripts, forms and framing. _Enforced (main)_ in `src/gallery/html.ts`, `src/gallery/route.ts`. Pinned by behavior
+  (`src/gallery/gallery.test.ts`: markup and attribute breakouts in titles, descriptions, paths and content types on
+  every page; the header on every response).
 
 ### Serving (SRV)
 

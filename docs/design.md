@@ -412,7 +412,8 @@ every version needs index.html at its root.
 
 ## 10. Gallery
 
-Server-rendered on `APP_HOST`, without script, forms or frames; the owner designs the screens later.
+Server-rendered on `APP_HOST`, without script, forms or frames; the screens follow
+[gallery/design.md](gallery/design.md).
 
 | Page        | Shows                                                                                                                                                                                                |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
