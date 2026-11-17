@@ -1,7 +1,8 @@
 // PL-63's failures against a local stand-in for the API, which the Worker cannot be made to answer: a stream cut midway
 // or shorter than its Content-Length, a stall, a 409 naming paths, an interrupt, the other error answers, and a stored
-// login whose refresh is slow. Each leaves the directory as it was. The Worker answers in e2e.test.ts.
-import { readdir } from "node:fs/promises";
+// login whose refresh is slow. Each leaves the directory as it was, or names its part when it cannot remove it. The
+// Worker answers in e2e.test.ts.
+import { chmod, readdir } from "node:fs/promises";
 import type { RequestListener, ServerResponse } from "node:http";
 import { join } from "node:path";
 
@@ -13,6 +14,8 @@ import { cli, ID, local, tempDir, TOKEN, type RunOptions } from "./test-support.
 
 const network: Fetch = (input, init) => fetch(input, init);
 const TIMEOUTS = { requestMs: 5000, publishMs: 5000, fileMs: 5000, idleMs: 200 };
+/** Permission checks do not hold for root, which the test that makes a directory read-only needs. */
+const ROOT = process.getuid?.() === 0;
 const ARCHIVE = Uint8Array.from({ length: 1000 }, (_, i) => i % 251);
 const ZIP = { "Content-Type": "application/zip" };
 
@@ -136,7 +139,7 @@ describe("export against a stand-in", () => {
     expect(ran).toEqual({
       status: 1,
       stdout: "",
-      stderr: "artifacts: interrupted; the partial download was removed\n",
+      stderr: "artifacts: the export was interrupted\n",
       left: [],
     });
     expect(listening).toBe(0);
@@ -151,7 +154,7 @@ describe("export against a stand-in", () => {
     [
       503,
       { error: { code: "unavailable", message: "m" } },
-      "unavailable: the API could not read the version's files; nothing was written, so try again",
+      "unavailable: the API could not read the version's files; try again",
     ],
     [500, { error: { code: "internal", message: "the server failed" } }, "internal: the server failed"],
   ])("reports a %i in its own words, leaving nothing", async (status, body, message) => {
@@ -174,6 +177,34 @@ describe("export against a stand-in", () => {
         "artifacts: the API answered without a Content-Length, so a cut archive could not be told from a whole one\n",
       left: [],
     });
+  });
+
+  it.skipIf(ROOT)("names its part when it cannot remove it, after the failure that ended the export", async () => {
+    const directory = await tempDir();
+    const env = await local((_request, response) => {
+      start(response, 300);
+      // The directory turns read-only during the download, so the part cannot be removed.
+      void chmod(directory, 0o555);
+    });
+    try {
+      const ran = await cli(["export", ID, "--version", "1", "-o", join(directory, "out.zip")], {
+        env,
+        fetch: network,
+        timeouts: TIMEOUTS,
+      });
+      const [part = "", ...others] = await readdir(directory);
+      expect([part, others]).toEqual([expect.stringMatching(/^out\.zip\.[0-9a-f]{12}\.part$/), []]);
+      expect(ran).toEqual({
+        status: 1,
+        stdout: "",
+        stderr:
+          "artifacts: the download stalled: no bytes arrived for 0.2 s\n" +
+          `  the partial download ${JSON.stringify(join(directory, part))} was left behind: it could not be removed ` +
+          "(EACCES)\n",
+      });
+    } finally {
+      await chmod(directory, 0o755);
+    }
   });
 });
 
@@ -238,7 +269,7 @@ describe("export with a stored login", () => {
     expect(await running).toEqual({
       status: 1,
       stdout: "",
-      stderr: "artifacts: interrupted; the partial download was removed\n",
+      stderr: "artifacts: the export was interrupted\n",
       left: [],
     });
     expect(standIn.requests.at(-1)).toBe("POST /oauth/token refresh_token");

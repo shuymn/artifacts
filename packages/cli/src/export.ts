@@ -1,15 +1,15 @@
 /**
- * `export` (design.md section 9): writes a version's archive (section 8, "Export") to a file without overwriting
+ * `export` (design.md section 9): writes a version's archive (section 8, "Export") to a file without replacing
  * anything. The archive goes to `<file>.<random>.part` beside the target, created exclusively; only once the stream
  * has ended with the length `Content-Length` announced is the part linked to the target, which fails when the target
  * exists, and removed. Where the file system makes no hard links, the target is created exclusively and the part's
- * bytes copied into it. On any failure the command removes only what it created.
+ * bytes copied into it. On a failure the command removes what it created when it can, and names what it cannot.
  */
 import { randomBytes } from "node:crypto";
 import { link, lstat, open, unlink, type FileHandle } from "node:fs/promises";
 
 import type { Api, IdleLimit } from "./api.ts";
-import { CliError, codeOf } from "./errors.ts";
+import { CliError, codeOf, LeftBehind } from "./errors.ts";
 
 /** Subscribes a listener to the owner's interrupt and answers its unsubscribe. */
 export type OnInterrupt = (listener: () => void) => () => void;
@@ -41,6 +41,12 @@ export type Exported = {
   readonly note: string | undefined;
 };
 
+const PART = "the partial download";
+
+/** A file system call on `shown` failed; only its error code is kept. */
+const cannotWrite = (shown: string, error: unknown) =>
+  new CliError(`cannot write ${shown} (${codeOf(error) ?? "error"})`);
+
 /** Refuses a target that exists in any form, a dangling symbolic link included. */
 async function refuseExisting(target: string): Promise<void> {
   const shown = JSON.stringify(target);
@@ -51,6 +57,24 @@ async function refuseExisting(target: string): Promise<void> {
     throw new CliError(`cannot use ${shown} as the archive's file (${codeOf(error) ?? "error"})`);
   }
   throw new CliError(`${shown} exists; export does not replace it, so name another file with -o`);
+}
+
+/** Removes a file this command made; when it stays, a note naming it. A file already gone is not left behind. */
+async function removeOwn(path: string, what: string): Promise<string | undefined> {
+  try {
+    await unlink(path);
+    return undefined;
+  } catch (error) {
+    if (codeOf(error) === "ENOENT") return undefined;
+    return `${what} ${JSON.stringify(path)} was left behind: it could not be removed (${codeOf(error) ?? "error"})`;
+  }
+}
+
+/** `error` with one more file it left behind. */
+function leaving(error: unknown, note: string): LeftBehind {
+  return error instanceof LeftBehind
+    ? new LeftBehind(error.failure, [...error.notes, note])
+    : new LeftBehind(error, [note]);
 }
 
 /**
@@ -123,7 +147,7 @@ async function download(
       // A write is not bounded: an interrupt or the idle limit takes effect once it returns. Closing the file waits
       // for a pending write anyway, so no cleanup could come sooner.
       await handle.writeFile(chunk.value).catch((error: unknown) => {
-        throw new CliError(`cannot write ${shown} (${codeOf(error) ?? "error"})`);
+        throw cannotWrite(shown, error);
       });
     }
   } finally {
@@ -173,7 +197,7 @@ async function place(part: string, target: string, makeLink: ExportOptions["link
     copy = await open(target, "wx");
   } catch (error) {
     if (codeOf(error) === "EEXIST") throw appeared();
-    throw new CliError(`cannot write ${shown} (${codeOf(error) ?? "error"})`);
+    throw cannotWrite(shown, error);
   }
   let failure: unknown;
   try {
@@ -185,8 +209,9 @@ async function place(part: string, target: string, makeLink: ExportOptions["link
     failure ??= error;
   });
   if (failure === undefined) return;
-  await unlink(target).catch(() => undefined);
-  throw new CliError(`cannot write ${shown} (${codeOf(failure) ?? "error"})`);
+  const error = cannotWrite(shown, failure);
+  const note = await removeOwn(target, "the incomplete copy");
+  throw note === undefined ? error : new LeftBehind(error, [note]);
 }
 
 /**
@@ -207,15 +232,12 @@ export async function exportVersion(
   const shownPart = JSON.stringify(part);
   // `wx` creates the file or fails, so nothing existing is overwritten and no link is followed.
   const handle = await open(part, "wx").catch((error: unknown) => {
-    throw new CliError(`cannot write ${shownPart} (${codeOf(error) ?? "error"})`);
+    throw cannotWrite(shownPart, error);
   });
   const idle = new Idle(options.idleMs);
   // From here an interrupt aborts the download instead of ending the process, so the part is removed. Once the
   // download is whole, the part is put in place and removed whatever comes.
-  const unsubscribe = options.onInterrupt(() =>
-    idle.abort(new CliError("interrupted; the partial download was removed")),
-  );
-  let complete = false;
+  const unsubscribe = options.onInterrupt(() => idle.abort(new CliError("the export was interrupted")));
   try {
     let bytes: number;
     try {
@@ -227,24 +249,20 @@ export async function exportVersion(
       idle.stop();
     }
     await handle.close().catch((error: unknown) => {
-      throw new CliError(`cannot write ${shownPart} (${codeOf(error) ?? "error"})`);
+      throw cannotWrite(shownPart, error);
     });
     await place(part, target, options.link);
-    complete = true;
-    return { version: number, file: target, bytes, note: await removePart(part, true) };
-  } finally {
-    if (!complete) await removePart(part, false);
-    unsubscribe();
-  }
-}
-
-/** Removes the part; after a success, a part that stays is reported rather than failing the export. */
-async function removePart(part: string, placed: boolean): Promise<string | undefined> {
-  try {
-    await unlink(part);
-    return undefined;
+    const note = await removeOwn(part, PART);
+    return {
+      version: number,
+      file: target,
+      bytes,
+      note: note === undefined ? undefined : `the archive is in place; ${note}`,
+    };
   } catch (error) {
-    if (!placed || codeOf(error) === "ENOENT") return undefined;
-    return `the archive is in place, but ${JSON.stringify(part)} could not be removed (${codeOf(error) ?? "error"})`;
+    const note = await removeOwn(part, PART);
+    throw note === undefined ? error : leaving(error, note);
+  } finally {
+    unsubscribe();
   }
 }

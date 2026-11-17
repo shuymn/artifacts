@@ -17,7 +17,7 @@ import {
   type Timeouts,
 } from "./api.ts";
 import { readConfig, readOrigin, SET_TOKEN_OR_SIGN_IN, storesLogin, type Config, type Environment } from "./config.ts";
-import { CliError, EXIT, UsageError, type ExitStatus } from "./errors.ts";
+import { CliError, EXIT, LeftBehind, UsageError, type ExitStatus } from "./errors.ts";
 import { EXPORT_LINK, exportVersion, processInterrupts, type ExportOptions, type OnInterrupt } from "./export.ts";
 import { LOCK_OPTIONS, type LockBarriers } from "./lock.ts";
 import { login, logout, systemOpener, type LoginContext } from "./login.ts";
@@ -518,8 +518,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
 };
 
-/** An export's error answers in the command's words; nothing was written when one arrives. */
+/** An export's error answers in the command's words, keeping what it names as left behind. */
 function exportError(error: unknown, id: string): unknown {
+  if (error instanceof LeftBehind) return new LeftBehind(exportError(error.failure, id), error.notes);
   if (!(error instanceof ApiError)) return error;
   if (error.code === "not_extractable") {
     const paths = error.paths.map((path) => `\n  ${quoted(path)}`).join("");
@@ -534,7 +535,7 @@ function exportError(error: unknown, id: string): unknown {
     );
   }
   if (error.status === 503) {
-    return new CliError(`${error.code}: the API could not read the version's files; nothing was written, so try again`);
+    return new CliError(`${error.code}: the API could not read the version's files; try again`);
   }
   return error;
 }
@@ -542,7 +543,10 @@ function exportError(error: unknown, id: string): unknown {
 /** The message for an error, without any token the command holds should any text ever carry one. */
 function errorText(error: unknown, platform: NodeJS.Platform, secrets: ReadonlySet<string>): string {
   let text: string;
-  if (error instanceof ApiError) {
+  if (error instanceof LeftBehind) {
+    // The failure first, then one line for each file it left behind.
+    text = [errorText(error.failure, platform, secrets), ...error.notes].join("\n  ");
+  } else if (error instanceof ApiError) {
     const where = storesLogin(platform)
       ? "check ARTIFACTS_TOKEN, or sign in again with artifacts login"
       : "check ARTIFACTS_TOKEN";

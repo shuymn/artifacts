@@ -255,7 +255,7 @@ describe("export", () => {
     }
     child.kill("SIGINT");
     expect(await closed).toBe(1);
-    expect(stderr).toBe("artifacts: interrupted; the partial download was removed\n");
+    expect(stderr).toBe("artifacts: the export was interrupted\n");
     expect(await readdir(cwd)).toEqual([]);
   });
 });
