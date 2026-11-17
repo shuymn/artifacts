@@ -278,10 +278,13 @@ and the threats are the three adversaries below, not untrusted users.
   result page's admits its one script by hash: the Worker's own bytes, the same on every result page, which take their
   target from an escaped link: _Enforced (main)_ in `src/confirm.ts`, `src/gallery/pages.ts`, `src/gallery/route.ts`,
   pinned by behavior (`src/confirm.test.ts`: markup in a title on both pages and the result page; the policy on every
-  status; the script's SHA-256 equal to the policy's after a visibility change and a delete, the same bytes for two
-  artifacts, its target per result; `src/gallery/reference.test.ts`: the confirmation pages' markup) (PL-56, PL-58).
-  **Gap:** that the script sends the opener to its target and closes the popup, and leaves a tab without an opener as
-  it is, needs a browser: the frame's script that opens the popup comes with the viewer (PL-58).
+  status, a misconfiguration's 503 included; the script's SHA-256 equal to the policy's after a visibility change and
+  a delete, the same bytes for two artifacts, its target per result, and its one navigation, the opener's
+  `location.replace`; `src/gallery/reference.test.ts`: the confirmation pages' markup) (PL-56, PL-58). **Gap:** that
+  the script sends the opener to its target and closes the popup, and leaves a tab without an opener as it is, needs
+  a browser: the frame's script that opens the popup comes with the viewer (PL-58). A misconfiguration (an invalid
+  variable, or OAuth without `OAUTH_KV`) answers 503 before the host is classified; that answer carries the policy on
+  the confirmation paths only, so on any other app-host path it has no CSP, and it has no body but its status text.
 
 ### Serving (SRV)
 
