@@ -16,9 +16,11 @@ export type Timeouts = {
   readonly publishMs: number;
   /** One file of `pull`, its bytes included. */
   readonly fileMs: number;
+  /** How long an export's download may go without a byte; its whole time is not bounded, since it grows with the version. */
+  readonly idleMs: number;
 };
 
-export const TIMEOUTS: Timeouts = { requestMs: 60_000, publishMs: 600_000, fileMs: 300_000 };
+export const TIMEOUTS: Timeouts = { requestMs: 60_000, publishMs: 600_000, fileMs: 300_000, idleMs: 60_000 };
 
 export type Issue = { readonly field: string; readonly reason: string };
 
@@ -29,13 +31,23 @@ export class ApiError extends CliError {
   readonly code: string;
   readonly issues: readonly Issue[];
   readonly latestVersion: number | undefined;
+  /** The paths of a `not_extractable` answer. */
+  readonly paths: readonly string[];
 
-  constructor(status: number, code: string, message: string, issues: readonly Issue[], latestVersion?: number) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    issues: readonly Issue[],
+    latestVersion?: number,
+    paths: readonly string[] = [],
+  ) {
     super(message);
     this.status = status;
     this.code = code;
     this.issues = issues;
     this.latestVersion = latestVersion;
+    this.paths = paths;
   }
 }
 
@@ -82,6 +94,22 @@ export type VersionJson = {
   readonly url: string;
   readonly files: readonly FileJson[];
 };
+
+/**
+ * Bounds a request by inactivity instead of a timeout, for an export, whose time grows with the version. `signal` ends
+ * the request, and the limit runs only between `start` and `stop`: resolving the credential, a refresh included, is
+ * bounded by the refresh's own limits and not counted against it.
+ */
+export type IdleLimit = {
+  readonly signal: AbortSignal;
+  /** Rejects with the signal's reason once it aborts, for racing a wait the signal may not end itself. */
+  readonly aborted: Promise<never>;
+  readonly start: () => void;
+  readonly stop: () => void;
+};
+
+/** An export's archive: its bytes as a stream, and the length its `Content-Length` announced. */
+export type Download = { readonly body: ReadableStream<Uint8Array>; readonly length: number };
 
 /** The answer of a publish or a get: the artifact and one version with its files. */
 export type ArtifactVersion = { readonly artifact: ArtifactJson; readonly version: VersionJson };
@@ -206,7 +234,25 @@ async function answer(response: Response): Promise<unknown> {
   const code = typeof error?.code === "string" ? error.code : `http_${response.status}`;
   const message = typeof error?.message === "string" ? error.message : `the API answered ${response.status}`;
   const latest = typeof error?.latest_version === "number" ? error.latest_version : undefined;
-  throw new ApiError(response.status, code, message, issuesOf(error?.issues), latest);
+  const paths = Array.isArray(error?.paths) ? error.paths.filter((path) => typeof path === "string") : [];
+  throw new ApiError(response.status, code, message, issuesOf(error?.issues), latest, paths);
+}
+
+/** An archive's answer: its body and announced length, which a cut stream is told from a whole one by. */
+async function readDownload(response: Response): Promise<Download> {
+  if (!response.ok || response.body === null) {
+    await answer(response);
+    throw unexpected();
+  }
+  const declared = response.headers.get("Content-Length") ?? "";
+  const type = response.headers.get("Content-Type");
+  if (!/^[0-9]{1,15}$/.test(declared) || type !== "application/zip") {
+    await response.body.cancel().catch(() => undefined);
+    throw declared === ""
+      ? new CliError("the API answered without a Content-Length, so a cut archive could not be told from a whole one")
+      : unexpected();
+  }
+  return { body: response.body, length: Number(declared) };
 }
 
 export function isTimeout(error: unknown): boolean {
@@ -252,8 +298,8 @@ export class Api {
   }
 
   /**
-   * Sends one request and reads its answer, each attempt under `timeoutMs`; after a 401, at most once more with the
-   * credential's renewed token.
+   * Sends one request and reads its answer, each attempt under `timeoutMs`, or under `idle` when it is given; after a
+   * 401, at most once more with the credential's renewed token. The credential is resolved before either limit starts.
    */
   async #call<T>(
     method: string,
@@ -261,26 +307,40 @@ export class Api {
     timeoutMs: number,
     read: (response: Response) => Promise<T>,
     body?: { readonly content: Blob | string; readonly type: string },
+    idle?: IdleLimit,
   ): Promise<T> {
     const send = (token: string) => {
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
       if (body !== undefined) headers["Content-Type"] = body.type;
-      const init: RequestInit = { method, headers, signal: AbortSignal.timeout(timeoutMs), redirect: "manual" };
+      const init: RequestInit = {
+        method,
+        headers,
+        signal: idle?.signal ?? AbortSignal.timeout(timeoutMs),
+        redirect: "manual",
+      };
       if (body !== undefined) init.body = body.content;
       return this.#fetch(`${this.#origin}${path}`, init);
     };
-    // A failure of the credential (a refresh) is its own CliError, never a lost answer of this request.
+    /** A wait under `idle`, which ends on its abort even where the fetch would not. */
+    const bounded = <R>(wait: Promise<R>): Promise<R> =>
+      idle === undefined ? wait : Promise.race([wait, idle.aborted]);
+    // A failure of the credential (a refresh) is its own CliError, never a lost answer of this request. A refresh is
+    // bounded by its own limits and awaited whole, outside `idle`, so none is left running when the request fails.
     const token = await this.#credential.token();
     try {
-      let response = await send(token);
+      idle?.start();
+      let response = await bounded(send(token));
       if (response.status === 401) {
+        idle?.stop();
         const renewed = await this.#credential.renew(token);
+        idle?.start();
         if (renewed !== undefined) {
-          await response.body?.cancel().catch(() => undefined);
-          response = await send(renewed);
+          // Not awaited: the refused answer's body is of no use, and its cancel has no bound of its own.
+          void response.body?.cancel().catch(() => undefined);
+          response = await bounded(send(renewed));
         }
       }
-      return await read(response);
+      return await bounded(read(response));
     } catch (error) {
       if (error instanceof CliError) throw error;
       throw lost(error, timeoutMs);
@@ -369,5 +429,15 @@ export class Api {
       await answer(response);
       throw unexpected();
     });
+  }
+
+  /**
+   * `GET …/versions/{n}/export` (design.md section 8, "Export"): the archive as a stream and the length its
+   * `Content-Length` announces, under `idle` in place of a timeout. `idle` still runs when this answers, and its signal
+   * ends the body.
+   */
+  async exportArchive(id: string, version: number, idle: IdleLimit): Promise<Download> {
+    const route = `/v1/artifacts/${segment(id)}/versions/${version}/export`;
+    return this.#call("GET", route, this.#timeouts.idleMs, readDownload, undefined, idle);
   }
 }

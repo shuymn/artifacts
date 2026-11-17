@@ -194,6 +194,72 @@ async function unreadableLogin(): Promise<string> {
   return home;
 }
 
+describe("export", () => {
+  it("writes the archive to <id>-v<n>.zip in the directory it runs in and never replaces it", async () => {
+    const archive = Uint8Array.from({ length: 4096 }, (_, i) => i % 251);
+    const seen: string[] = [];
+    const env = await local((request, response) => {
+      seen.push(`${request.method} ${request.url}`);
+      if (request.url === `/v1/artifacts/${ID}`) {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        return response.end(JSON.stringify({ artifact: artifact(ID), version: version([]) }));
+      }
+      if (request.url === `/v1/artifacts/${ID}/versions/1/export`) {
+        response.writeHead(200, { "Content-Type": "application/zip", "Content-Length": String(archive.byteLength) });
+        return response.end(archive);
+      }
+      response.writeHead(404, { "Content-Type": "application/json" });
+      return response.end(JSON.stringify({ error: { code: "not_found", message: "m" } }));
+    });
+    const cwd = await tempDir();
+    const exported = await artifacts(["export", ID], { env, cwd });
+    expect(exported).toEqual({
+      status: 0,
+      stdout: `exported ${ID} version 1 to ${ID}-v1.zip (4096 bytes)\n`,
+      stderr: "",
+    });
+    expect(await readdir(cwd)).toEqual([`${ID}-v1.zip`]);
+    expect(new Uint8Array(await readFile(join(cwd, `${ID}-v1.zip`)))).toEqual(archive);
+
+    const again = await artifacts(["export", ID], { env, cwd });
+    expect(again).toMatchObject({ status: 1, stdout: "" });
+    expect(again.stderr).toContain(`"${ID}-v1.zip" exists; export does not replace it`);
+    expect(seen).toEqual([
+      `GET /v1/artifacts/${ID}`,
+      `GET /v1/artifacts/${ID}/versions/1/export`,
+      `GET /v1/artifacts/${ID}`,
+    ]);
+  });
+
+  // Windows has no signals to send: Node's kill ends the process there without one.
+  it.runIf(process.platform !== "win32")("removes its part when SIGINT stops the download", async () => {
+    const env = await local((_request, response) => {
+      response.writeHead(200, { "Content-Type": "application/zip", "Content-Length": "4096" });
+      response.write(new Uint8Array(1024));
+    });
+    const cwd = await tempDir();
+    const child = spawn(binary, ["export", ID, "--version", "1"], {
+      cwd,
+      env: { ...BASE_ENV, ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8").on("data", (text: string) => (stderr += text));
+    const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
+    // The part holds the first bytes once the download is under way.
+    for (let tries = 0; tries < 300; tries++) {
+      const [part] = await readdir(cwd);
+      if (part !== undefined && (await stat(join(cwd, part))).size > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    child.kill("SIGINT");
+    expect(await closed).toBe(1);
+    expect(stderr).toBe("artifacts: the export was interrupted\n");
+    expect(await readdir(cwd)).toEqual([]);
+  });
+});
+
 describe("the credential", () => {
   it("is ARTIFACTS_TOKEN when it is set, and a credentials file placed beforehand is not read", async () => {
     const seen: (string | undefined)[] = [];

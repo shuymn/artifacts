@@ -47,7 +47,7 @@ function looping(): Fetch {
     ++pages > 10 ? Promise.reject(new TypeError("fetch failed")) : json(200, { artifacts: [], next_cursor: "same" });
 }
 
-const SHORT = { requestMs: 50, publishMs: 50, fileMs: 50 };
+const SHORT = { requestMs: 50, publishMs: 50, fileMs: 50, idleMs: 50 };
 
 describe("help", () => {
   it("carries the authoring rule in the words of design.md section 4", async () => {

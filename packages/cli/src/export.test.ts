@@ -1,0 +1,376 @@
+// PL-63's failures against a local stand-in for the API, which the Worker cannot be made to answer: a stream cut midway,
+// shorter or longer than its Content-Length or of another type, a stall, a 409 naming paths, an interrupt, the other
+// error answers, a part that cannot be removed, and a stored login whose refresh is slow. Each failure leaves the
+// directory as it was, or names what it could not remove. The Worker answers in e2e.test.ts.
+import { chmod, readdir } from "node:fs/promises";
+import type { RequestListener, ServerResponse } from "node:http";
+import { join } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import type { Fetch } from "./api.ts";
+import { Credentials, gate, StandIn, until, type Answer } from "./login-test-support.ts";
+import { cli, ID, local, tempDir, TOKEN, type RunOptions } from "./test-support.ts";
+
+const network: Fetch = (input, init) => fetch(input, init);
+const TIMEOUTS = { requestMs: 5000, publishMs: 5000, fileMs: 5000, idleMs: 200 };
+const ARCHIVE = Uint8Array.from({ length: 1000 }, (_, i) => i % 251);
+const ZIP = { "Content-Type": "application/zip" };
+const ENV = { ARTIFACTS_API_URL: "https://artifacts-api.example.com", ARTIFACTS_TOKEN: TOKEN };
+/** Permission checks do not hold for root, which the tests that make a file or directory unusable need. */
+const ROOT = process.getuid?.() === 0;
+
+/** An answer of `bytes` under a Content-Length of the archive's whole length, ending cleanly. */
+const announcing =
+  (bytes: Uint8Array): Fetch =>
+  async () =>
+    new Response(bytes, { headers: { ...ZIP, "Content-Length": String(ARCHIVE.byteLength) } });
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Starts the archive's answer: its headers with the whole length, then `sent` bytes of it. */
+function start(response: ServerResponse, sent: number): void {
+  response.writeHead(200, { ...ZIP, "Content-Length": String(ARCHIVE.byteLength) });
+  response.write(ARCHIVE.subarray(0, sent));
+}
+
+/** `export` of version 1 into a new directory with `fetch`; the directory's entries afterwards. */
+async function exportedWith(fetch: Fetch, env: Record<string, string>, options: RunOptions = {}) {
+  const directory = await tempDir();
+  const ran = await cli(["export", ID, "--version", "1", "-o", join(directory, "out.zip")], {
+    env,
+    fetch,
+    timeouts: TIMEOUTS,
+    ...options,
+  });
+  return { ...ran, left: await readdir(directory) };
+}
+
+/** `export` of version 1 into a new directory against `handler`; the directory's entries afterwards. */
+async function exported(handler: RequestListener, options: RunOptions = {}) {
+  return exportedWith(network, await local(handler), options);
+}
+
+describe("export against a stand-in", () => {
+  it("fails on a stream cut midway, leaving nothing", async () => {
+    const ran = await exported((_request, response) => {
+      start(response, 300);
+      setTimeout(() => response.socket?.destroy(), 50);
+    });
+    expect(ran).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the download broke off after 300 of 1000 bytes\n",
+      left: [],
+    });
+  });
+
+  it("fails on a stream that ends cleanly short of its Content-Length, leaving nothing", async () => {
+    expect(await exportedWith(announcing(ARCHIVE.subarray(0, 600)), ENV)).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the download ended after 600 of the 1000 bytes the API announced\n",
+      left: [],
+    });
+  });
+
+  it("stops at the first byte past its Content-Length, leaving nothing", async () => {
+    expect(await exportedWith(announcing(new Uint8Array(1200)), ENV)).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the API sent more than the 1000 bytes it announced\n",
+      left: [],
+    });
+  });
+
+  it.each([
+    ["before the headers", () => undefined],
+    ["midway", (response: ServerResponse) => start(response, 300)],
+  ])("fails when no byte arrives for the idle limit %s, leaving nothing", async (_when, answer) => {
+    const ran = await exported((_request, response) => answer(response));
+    expect(ran).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the download stalled: no bytes arrived for 0.2 s\n",
+      left: [],
+    });
+  });
+
+  it("has no limit on the whole download while bytes keep arriving", async () => {
+    const ran = await exported(async (_request, response) => {
+      start(response, 0);
+      for (let at = 0; at < ARCHIVE.byteLength; at += 200) {
+        await pause(100);
+        response.write(ARCHIVE.subarray(at, at + 200));
+      }
+      response.end();
+    });
+    expect(ran).toMatchObject({ status: 0, stderr: "", left: ["out.zip"] });
+    expect(ran.stdout).toMatch(/to .*out\.zip \(1000 bytes\)\n$/);
+  });
+
+  it("prints each path of a 409 not_extractable on its own line, escaped", async () => {
+    const paths = ["a", "a\\b", "c\u0085d\u2028e\u2029f\u0007"];
+    const ran = await exported((_request, response) => {
+      response.writeHead(409, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: { code: "not_extractable", message: "m", paths } }));
+    });
+    expect(ran).toEqual({
+      status: 1,
+      stdout: "",
+      stderr:
+        'artifacts: not_extractable: the version has paths that cannot be extracted as stored, since they hold "\\" ' +
+        "or another path uses them as a directory; export refuses it:\n" +
+        '  "a"\n' +
+        '  "a\\\\b"\n' +
+        '  "c\\u0085d\\u2028e\\u2029f\\u0007"\n',
+      left: [],
+    });
+  });
+
+  it("stops on an interrupt during the download, leaving nothing, and stops listening for one", async () => {
+    let interrupt: (() => void) | undefined;
+    let listening = 0;
+    const ran = await exported(
+      (_request, response) => {
+        start(response, 300);
+        setTimeout(() => interrupt?.(), 50);
+      },
+      {
+        onInterrupt: (listener) => {
+          interrupt = listener;
+          listening++;
+          return () => listening--;
+        },
+      },
+    );
+    expect(ran).toEqual({ status: 1, stdout: "", stderr: "artifacts: the export was interrupted\n", left: [] });
+    expect(listening).toBe(0);
+  });
+
+  it.each([
+    [
+      404,
+      { error: { code: "not_found", message: "m" } },
+      `not_found: there is no such version of ${ID} to export; artifacts get ${ID} names the latest`,
+    ],
+    [
+      503,
+      { error: { code: "unavailable", message: "m" } },
+      "unavailable: the API could not read the version's files; try again",
+    ],
+    [500, { error: { code: "internal", message: "the server failed" } }, "internal: the server failed"],
+  ])("reports a %i in its own words, leaving nothing", async (status, body, message) => {
+    const ran = await exported((_request, response) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(body));
+    });
+    expect(ran).toEqual({ status: 1, stdout: "", stderr: `artifacts: ${message}\n`, left: [] });
+  });
+
+  it("refuses an archive without a Content-Length, which could not tell a cut stream from a whole one", async () => {
+    const ran = await exported((_request, response) => {
+      response.writeHead(200, ZIP);
+      response.end(ARCHIVE);
+    });
+    expect(ran).toEqual({
+      status: 1,
+      stdout: "",
+      stderr:
+        "artifacts: the API answered without a Content-Length, so a cut archive could not be told from a whole one\n",
+      left: [],
+    });
+  });
+
+  it("refuses a 200 of another type than application/zip, leaving nothing", async () => {
+    const ran = await exported((_request, response) => {
+      response.writeHead(200, { "Content-Type": "text/html", "Content-Length": String(ARCHIVE.byteLength) });
+      response.end(ARCHIVE);
+    });
+    expect(ran).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the API answered in a shape this CLI does not know\n",
+      left: [],
+    });
+  });
+
+  it("prints no token, when it succeeds or when the API echoes the token in an error", async () => {
+    const whole = await exported((_request, response) => {
+      start(response, ARCHIVE.byteLength);
+      response.end();
+    });
+    expect(whole).toMatchObject({ status: 0, left: ["out.zip"] });
+    const echoed = await exported((_request, response) => {
+      response.writeHead(500, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: { code: "internal", message: `refused ${TOKEN}` } }));
+    });
+    expect(echoed).toMatchObject({ status: 1, stderr: "artifacts: internal: refused [token]\n" });
+    expect(`${whole.stdout}${whole.stderr}${echoed.stdout}${echoed.stderr}`).not.toContain(TOKEN);
+  });
+
+  it.skipIf(ROOT)("names its part when it cannot remove it, after the failure that ended the export", async () => {
+    const directory = await tempDir();
+    const env = await local((_request, response) => {
+      start(response, 300);
+      // The directory turns read-only during the download, so the part cannot be removed.
+      void chmod(directory, 0o555);
+    });
+    try {
+      const ran = await cli(["export", ID, "--version", "1", "-o", join(directory, "out.zip")], {
+        env,
+        fetch: network,
+        timeouts: TIMEOUTS,
+      });
+      const [part = "", ...others] = await readdir(directory);
+      expect([part, others]).toEqual([expect.stringMatching(/^out\.zip\.[0-9a-f]{12}\.part$/), []]);
+      expect(ran).toEqual({
+        status: 1,
+        stdout: "",
+        stderr:
+          "artifacts: the download stalled: no bytes arrived for 0.2 s\n" +
+          `  the partial download ${JSON.stringify(join(directory, part))} was left behind: it could not be removed ` +
+          "(EACCES)\n",
+      });
+    } finally {
+      await chmod(directory, 0o755);
+    }
+  });
+});
+
+/**
+ * A stored login: its access token expired, so the next command refreshes it first, or valid for an hour, so a refresh
+ * follows only a 401.
+ */
+async function storedLogin(standIn: StandIn, expired: boolean) {
+  const credentials = await Credentials.create();
+  const { client, tokens } = standIn.issue();
+  await credentials.put(standIn.origin, { client, tokens, expires: Date.now() + (expired ? 0 : 3_600_000) });
+  return { credentials, tokens };
+}
+
+/** Starts an export with `fetch`, interrupted when the test calls `interrupt`; `settled` tells whether it ended. */
+function interruptible(fetch: Fetch, env: Record<string, string>) {
+  const state = { interrupt: (): void => undefined, settled: false };
+  const running = exportedWith(fetch, env, {
+    onInterrupt: (listener) => {
+      state.interrupt = listener;
+      return () => undefined;
+    },
+  }).finally(() => {
+    state.settled = true;
+  });
+  return { state, running };
+}
+
+describe("export with a stored login", () => {
+  const EXPORT = `/v1/artifacts/${ID}/versions/1/export`;
+  const body = "archive bytes";
+  /** The stand-in answers JSON: the archive is the JSON string, with its length. */
+  const archive: Answer = {
+    status: 200,
+    body,
+    headers: { ...ZIP, "Content-Length": String(Buffer.byteLength(JSON.stringify(body))) },
+  };
+  const refused: Answer = { status: 401, body: { error: { code: "unauthorized", message: "a valid bearer token" } } };
+
+  it("starts the idle limit when the request starts, not while a refresh resolves the credential", async () => {
+    const standIn = await StandIn.start();
+    const { credentials } = await storedLogin(standIn, true);
+    standIn.override = async ({ path }) => {
+      if (path === "/oauth/token") await pause(3 * TIMEOUTS.idleMs);
+      return path === EXPORT ? archive : undefined;
+    };
+    const ran = await exportedWith(network, credentials.env(standIn));
+    expect(ran).toMatchObject({ status: 0, stderr: "", left: ["out.zip"] });
+    expect(standIn.requests).toEqual([
+      "GET /.well-known/oauth-authorization-server",
+      "POST /oauth/token refresh_token",
+      `GET ${EXPORT}`,
+    ]);
+  });
+
+  it("waits for a refresh an interrupt arrives during, then sends nothing and removes its part", async () => {
+    const standIn = await StandIn.start();
+    const { credentials, tokens } = await storedLogin(standIn, true);
+    const refresh = gate();
+    standIn.override = async ({ path }) => {
+      if (path === "/oauth/token") await refresh.wait;
+      return undefined;
+    };
+    const { state, running } = interruptible(network, credentials.env(standIn));
+    await until(() => standIn.requests.includes("POST /oauth/token refresh_token"));
+    state.interrupt();
+    // The refresh is still under way, so the export waits for it, and the idle limit does not count it.
+    await pause(3 * TIMEOUTS.idleMs);
+    expect(state.settled).toBe(false);
+    refresh.open();
+    expect(await running).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the export was interrupted\n",
+      left: [],
+    });
+    expect(standIn.requests.at(-1)).toBe("POST /oauth/token refresh_token");
+    expect((await credentials.read())[standIn.origin]?.tokens?.access_token).not.toBe(tokens.access_token);
+  });
+  it("stops the idle limit while a refresh after a 401 takes longer than the limit, then exports", async () => {
+    const standIn = await StandIn.start();
+    const { credentials } = await storedLogin(standIn, false);
+    let exports = 0;
+    standIn.override = async ({ path }) => {
+      if (path === "/oauth/token") await pause(3 * TIMEOUTS.idleMs);
+      if (path !== EXPORT) return undefined;
+      return ++exports === 1 ? refused : archive;
+    };
+    const ran = await exportedWith(network, credentials.env(standIn));
+    expect(ran).toMatchObject({ status: 0, stderr: "", left: ["out.zip"] });
+    expect(standIn.requests).toEqual([
+      `GET ${EXPORT}`,
+      "GET /.well-known/oauth-authorization-server",
+      "POST /oauth/token refresh_token",
+      `GET ${EXPORT}`,
+    ]);
+  });
+
+  it("waits for a refresh after a 401 an interrupt arrives during, then sends nothing more", async () => {
+    const standIn = await StandIn.start();
+    const { credentials, tokens } = await storedLogin(standIn, false);
+    const refresh = gate();
+    standIn.override = async ({ path }) => {
+      if (path === "/oauth/token") await refresh.wait;
+      return path === EXPORT ? refused : undefined;
+    };
+    const { state, running } = interruptible(network, credentials.env(standIn));
+    await until(() => standIn.requests.includes("POST /oauth/token refresh_token"));
+    state.interrupt();
+    await pause(3 * TIMEOUTS.idleMs);
+    expect(state.settled).toBe(false);
+    refresh.open();
+    expect(await running).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the export was interrupted\n",
+      left: [],
+    });
+    expect(standIn.count(`GET ${EXPORT}`)).toBe(1);
+    expect((await credentials.read())[standIn.origin]?.tokens?.access_token).not.toBe(tokens.access_token);
+  });
+
+  it("sends the request again without waiting for the refused answer's body to cancel", async () => {
+    const standIn = await StandIn.start();
+    const { credentials } = await storedLogin(standIn, false);
+    let exports = 0;
+    const fetch: Fetch = async (input, init) => {
+      if (!input.endsWith(EXPORT)) return network(input, init);
+      if (++exports > 1) {
+        return new Response(ARCHIVE, { headers: { ...ZIP, "Content-Length": String(ARCHIVE.byteLength) } });
+      }
+      // A 401 whose body never finishes cancelling.
+      const never = new ReadableStream<Uint8Array>({ cancel: () => new Promise<void>(() => undefined) });
+      return new Response(never, { status: 401, headers: { "Content-Type": "application/json" } });
+    };
+    expect(await exportedWith(fetch, credentials.env(standIn))).toMatchObject({ status: 0, left: ["out.zip"] });
+    expect(exports).toBe(2);
+  });
+});

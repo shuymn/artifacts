@@ -17,7 +17,15 @@ import {
   type Timeouts,
 } from "./api.ts";
 import { readConfig, readOrigin, SET_TOKEN_OR_SIGN_IN, storesLogin, type Config, type Environment } from "./config.ts";
-import { CliError, EXIT, UsageError, type ExitStatus } from "./errors.ts";
+import { CliError, EXIT, LeftBehind, UsageError, type ExitStatus } from "./errors.ts";
+import {
+  EXPORT_CREATE,
+  EXPORT_LINK,
+  exportVersion,
+  processInterrupts,
+  type ExportOptions,
+  type OnInterrupt,
+} from "./export.ts";
 import { LOCK_OPTIONS, type LockBarriers } from "./lock.ts";
 import { login, logout, systemOpener, type LoginContext } from "./login.ts";
 import { OAUTH_REQUEST_MS } from "./oauth.ts";
@@ -67,6 +75,12 @@ export type Io = {
   readonly openBrowser?: (url: string) => void;
   readonly signIn?: Partial<SignInOptions>;
   readonly now?: () => number;
+  /** Where `export` learns of an interrupt; this process's SIGINT and SIGTERM by default. */
+  readonly onInterrupt?: OnInterrupt;
+  /** How `export` puts its archive at the target: a hard link, `node:fs` `link` by default. */
+  readonly link?: ExportOptions["link"];
+  /** Where no link can be made, how `export` creates the target it copies into; `open(path, "wx")` by default. */
+  readonly create?: ExportOptions["create"];
 };
 
 /** The release version: the root package's, which `bun build --compile` inlines into the binary. */
@@ -121,6 +135,16 @@ Commands:
   list [--archived only|include]      Every artifact, all pages; archived ones are left out unless asked for.
   get <id> [--version <n>]            The artifact and its latest version (or version n) with its files.
   pull <id> <dir> [--version <n>]     Write the latest version's files (or version n's) into a new or empty <dir>.
+  export <id> [--version <n>] [-o <file>]
+      Download the latest version (or version n) as a ZIP archive to <file>, by default <id>-v<n>.zip in the current
+      directory. An existing <file> is never replaced: export refuses it, and one that appears during the download
+      stays as it is while export fails. The archive goes to <file>.<random>.part first and into <file> only once
+      every byte the API announced in Content-Length has arrived; an answer without Content-Length is refused. The
+      download fails after 60 s without a byte, however long it takes in all. On a failure, or an interrupt during
+      the download, export exits 1 and removes its .part file, or names it when it cannot; once the archive is being
+      put in place, export finishes it despite an interrupt. A forced end (SIGKILL; on Windows, taskkill /F or closing
+      the console) leaves the .part file. A version with paths that cannot be extracted as stored (holding "\\", or a
+      file that another path uses as a directory) is refused, naming them. export takes no --json.
   public <id> on|off                  Serve every version at the artifact's public URL without sign-in, or stop.
   archive <id> on|off|auto            Archive the artifact, keep it out of the archive, or archive it by age.
   delete <id>                         Delete the artifact: every URL answers 404.
@@ -131,7 +155,7 @@ Commands:
   --version                           Print the CLI's version.
 
 Options:
-  --json   Print the API's JSON instead of text (list: every page's artifacts in one object).
+  --json   Print the API's JSON instead of text (list: every page's artifacts in one object; not export).
 
 Configuration (environment):
   ARTIFACTS_API_URL   The API origin, such as https://artifacts-api.example.com (http only for localhost).
@@ -164,6 +188,7 @@ const OPTIONS = {
   title: { type: "string" },
   description: { type: "string" },
   version: { type: "string" },
+  output: { type: "string", short: "o" },
   archived: { type: "string" },
   json: { type: "boolean" },
   help: { type: "boolean", short: "h" },
@@ -278,6 +303,20 @@ function issueLines(error: ApiError): string {
   return error.issues.map((issue) => `\n  ${issue.field}: ${issue.reason}`).join("");
 }
 
+/**
+ * `JSON.stringify` leaves C1 controls and line separators raw; as escapes the JSON means the same and a terminal shows
+ * them as text.
+ */
+function escapeRaw(json: string): string {
+  return json.replaceAll(
+    /[\u007f-\u009f\u2028\u2029]/gu,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/** A path the API named, quoted on one line. */
+const quoted = (path: string): string => escapeRaw(JSON.stringify(path));
+
 const COMMANDS: Readonly<Record<string, Command>> = {
   publish: {
     usage: "publish <dir> (--title <t> | --id <id>) [--title <t>] [--description <d>]",
@@ -358,6 +397,28 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         `pulled ${result.version.files.length} files of ${result.artifact.id} version ${result.version.number} ` +
           `into ${directory}\n`,
       );
+    },
+  },
+  export: {
+    usage: "export <id> [--version <n>] [-o <file>]",
+    args: 1,
+    options: ["version", "output"],
+    async run({ io, args, values, api, print }) {
+      const id = artifactId(args[0]);
+      if (values.output === "") throw new UsageError("-o takes a file name");
+      const options: ExportOptions = {
+        idleMs: (io.timeouts ?? TIMEOUTS).idleMs,
+        onInterrupt: io.onInterrupt ?? processInterrupts,
+        link: io.link ?? EXPORT_LINK,
+        create: io.create ?? EXPORT_CREATE,
+      };
+      const exported = await exportVersion(api(), id, versionNumber(values.version), values.output, options).catch(
+        (error: unknown) => {
+          throw exportError(error, id);
+        },
+      );
+      if (exported.note !== undefined) io.stderr(`artifacts: ${exported.note}\n`);
+      print(`exported ${id} version ${exported.version} to ${exported.file} (${exported.bytes} bytes)\n`);
     },
   },
   public: {
@@ -471,10 +532,35 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
 };
 
+/** An export's error answers in the command's words, keeping what it names as left behind. */
+function exportError(error: unknown, id: string): unknown {
+  if (error instanceof LeftBehind) return new LeftBehind(exportError(error.failure, id), error.notes);
+  if (!(error instanceof ApiError)) return error;
+  if (error.code === "not_extractable") {
+    const paths = error.paths.map((path) => `\n  ${quoted(path)}`).join("");
+    return new CliError(
+      `${error.code}: the version has paths that cannot be extracted as stored, since they hold "\\" or another ` +
+        `path uses them as a directory; export refuses it:${paths}`,
+    );
+  }
+  if (error.status === 404) {
+    return new CliError(
+      `${error.code}: there is no such version of ${id} to export; artifacts get ${id} names the latest`,
+    );
+  }
+  if (error.status === 503) {
+    return new CliError(`${error.code}: the API could not read the version's files; try again`);
+  }
+  return error;
+}
+
 /** The message for an error, without any token the command holds should any text ever carry one. */
 function errorText(error: unknown, platform: NodeJS.Platform, secrets: ReadonlySet<string>): string {
   let text: string;
-  if (error instanceof ApiError) {
+  if (error instanceof LeftBehind) {
+    // The failure first, then one line for each file it left behind.
+    text = [errorText(error.failure, platform, secrets), ...error.notes].join("\n  ");
+  } else if (error instanceof ApiError) {
     const where = storesLogin(platform)
       ? "check ARTIFACTS_TOKEN, or sign in again with artifacts login"
       : "check ARTIFACTS_TOKEN";
@@ -582,12 +668,7 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitStatus> 
       };
     },
     print: io.stdout,
-    // JSON.stringify leaves C1 controls and line separators raw; as escapes the JSON means the same and a terminal
-    // shows them as text.
-    json: (value) =>
-      io.stdout(
-        `${JSON.stringify(value, null, 2).replaceAll(/[\u007f-\u009f\u2028\u2029]/gu, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)}\n`,
-      ),
+    json: (value) => io.stdout(`${escapeRaw(JSON.stringify(value, null, 2))}\n`),
   };
   try {
     await command.run(context);

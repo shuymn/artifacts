@@ -28,3 +28,19 @@ export class UsageError extends CliError {
     super(message, EXIT.usage);
   }
 }
+
+/**
+ * A failure after which the command could not remove a file it made: the failure stays the message, and each note
+ * names a file left behind.
+ */
+export class LeftBehind extends CliError {
+  override readonly name: string = "LeftBehind";
+  readonly failure: unknown;
+  readonly notes: readonly string[];
+
+  constructor(failure: unknown, notes: readonly string[]) {
+    super(notes.join("\n"), failure instanceof CliError ? failure.exitStatus : EXIT.failure);
+    this.failure = failure;
+    this.notes = notes;
+  }
+}

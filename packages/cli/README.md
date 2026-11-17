@@ -43,6 +43,7 @@ export ARTIFACTS_API_URL=https://artifacts-api.example.com
 artifacts login                                    # signs in through the browser; or set ARTIFACTS_TOKEN
 artifacts help
 artifacts publish ./site --title "Quarterly chart"
+artifacts export <id>                              # the latest version as <id>-v<n>.zip; -o names another file
 artifacts grants                                   # every OAuth grant: publisher, client, redirect host, …
 artifacts revoke -- <grant>                        # revokes a grant by its ID and its tokens
 artifacts logout                                   # revokes the login's grant and removes the login
@@ -53,6 +54,18 @@ artifacts logout                                   # revokes the login's grant a
 refresh it as needed. While `ARTIFACTS_TOKEN` (an API token from `artifacts token <name>`) is set, commands use it and
 do not read the stored login. On Windows, which cannot keep the file private, `login` and `logout` refuse and every
 command needs `ARTIFACTS_TOKEN`.
+
+`artifacts export <id> [--version <n>] [-o <file>]` downloads a version as a ZIP archive, by default the latest
+version to `<id>-v<n>.zip` in the current directory. It never replaces a file: an existing target is refused before
+the download, and one that appears during it is left as it is while the command fails. The archive is written to
+`<file>.<random>.part` beside the target and put in place only once all the bytes the API announced in
+`Content-Length` have arrived; an answer without `Content-Length` is refused. The download fails after 60 s without a
+byte, however long it takes in all; refreshing a stored login beforehand does not count against the 60 s. On a
+failure, or Ctrl-C during the download, the command exits 1 and removes the part when it can, naming it when it cannot;
+once the archive is being put in place, Ctrl-C lets that finish and the command succeeds. A forced end (`kill -9`; on
+Windows, `taskkill /F` or closing the console) leaves the part behind. A version with paths that cannot be extracted
+as stored (holding `\`, or a file that another path uses as a directory) is refused, naming each path. `export` takes
+no `--json`.
 
 `artifacts grants` lists the OAuth grants, newest first: each one's ID, publisher name, client, redirect host,
 resource, creation and expiry, with `-` for a field the grant lacks. `artifacts revoke <grant>` revokes one by its ID;
