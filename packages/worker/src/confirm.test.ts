@@ -290,7 +290,9 @@ describe("section 10: the pages", () => {
 
   it("states what a delete removes and offers Delete, with a form without fields", async () => {
     const world = new World();
+    // Version 1 holds 2 files of 1,512 bytes, version 2 four of 1,813: the page names the latest version's.
     const id = await create(world, "Chart", { "a.css": "x".repeat(1_500) });
+    await world.updated(id, { base_version: 1, files: { "b.js": "y".repeat(300), "c.txt": "z" } });
     expect((await world.patch(id, { public: true })).status).toBe(200);
     const doc = await documentOf(await app(world, `/a/${id}/delete`));
     expect(textOf(one(byTag(doc, "h1")))).toBe("Delete this artifact?");
@@ -298,7 +300,8 @@ describe("section 10: the pages", () => {
     expect(infoOf(doc)).toEqual({
       Artifact: "Chart",
       ID: id,
-      Versions: "1 version, 2 files, 1.5 KB",
+      Versions: "2 versions",
+      "Latest version": "v2 · 4 files, 1.8 KB",
       Visibility: "Public",
     });
     const notice = one(byClass(doc, "notice"));

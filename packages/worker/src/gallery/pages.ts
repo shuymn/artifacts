@@ -583,10 +583,13 @@ export function visibilityPage(view: ConfirmationArtifact): Markup {
   return frame(text.title, null, main);
 }
 
-/** `GET /a/<id>/delete`: what deleting removes, and Delete. */
+/**
+ * `GET /a/<id>/delete`: what deleting removes, and Delete. The file count and size are the latest version's, on a row
+ * of their own: versions share files, so no sum over them would be what is stored.
+ */
 export function deletePage(view: ConfirmationArtifact): Markup {
   const { artifact, latest } = view;
-  const versions = `${counted(artifact.latest_version, "version")}, ${counted(latest.file_count, "file")}, ${byteSize(latest.total_bytes)}`;
+  const files = `v${latest.number} · ${counted(latest.file_count, "file")}, ${byteSize(latest.total_bytes)}`;
   const main = html`<main class="page page--popup">
     <hgroup class="page-heading">
       <h1>Delete this artifact?</h1>
@@ -596,7 +599,8 @@ export function deletePage(view: ConfirmationArtifact): Markup {
       ${[
         infoText("Artifact", artifact.title),
         infoText("ID", artifact.id),
-        infoText("Versions", versions),
+        infoText("Versions", counted(artifact.latest_version, "version")),
+        infoText("Latest version", files),
         infoText("Visibility", artifact.public ? "Public" : "Private"),
       ]}
     </dl>
