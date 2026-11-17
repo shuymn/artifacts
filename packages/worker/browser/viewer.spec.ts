@@ -269,6 +269,63 @@ test.describe("PL-58: the confirmation popup", () => {
     expect(methods.filter((method) => method !== "GET")).toEqual([]);
   });
 
+  // The window and the screen's available area, in screen coordinates, and where the 480 × 560 popup opens on them.
+  const PLACEMENTS = [
+    {
+      name: "centered on the window",
+      screen: { availLeft: 0, availTop: 25, availWidth: 1920, availHeight: 1055 },
+      window: { screenX: 200, screenY: 100, outerWidth: 1200, outerHeight: 800 },
+      popup: { left: "560", top: "220" },
+    },
+    {
+      name: "moved inside the screen past its right and bottom edges",
+      screen: { availLeft: 0, availTop: 25, availWidth: 1920, availHeight: 1055 },
+      window: { screenX: 1600, screenY: 700, outerWidth: 600, outerHeight: 500 },
+      popup: { left: "1440", top: "520" },
+    },
+    {
+      name: "moved inside a screen left of the primary past its left and top edges",
+      screen: { availLeft: -1440, availTop: 0, availWidth: 1440, availHeight: 900 },
+      window: { screenX: -1500, screenY: -30, outerWidth: 400, outerHeight: 300 },
+      popup: { left: "-1440", top: "0" },
+    },
+  ];
+
+  for (const placement of PLACEMENTS) {
+    test(`opens the popup ${placement.name}`, async ({ page }) => {
+      const id = await create("Probe", probe());
+      await page.addInitScript((geometry) => {
+        for (const [name, value] of Object.entries(geometry.screen)) {
+          Object.defineProperty(Screen.prototype, name, { configurable: true, get: () => value });
+        }
+        for (const [name, value] of Object.entries(geometry.window)) {
+          Object.defineProperty(window, name, { configurable: true, get: () => value });
+        }
+        // The calls, for the test to read; a window, so the script takes the popup as opened.
+        const opened: string[][] = [];
+        Object.defineProperty(window, "opened", { value: opened });
+        window.open = (...args: unknown[]) => {
+          opened.push(args.map(String));
+          return window;
+        };
+      }, placement);
+      await page.goto(`${contentOrigin(id)}/`);
+      await expect(page).toHaveTitle("probe");
+      await page.locator(".icon-button").click();
+      await page.getByText("Make public…").click();
+      const calls = await page.evaluate(() => {
+        const opened: unknown = Reflect.get(window, "opened");
+        return Array.isArray(opened) ? opened.map((call) => (Array.isArray(call) ? call.map(String) : [])) : [];
+      });
+      expect(calls.map((call) => call.slice(0, 2))).toEqual([[`${appOrigin()}/a/${id}/public`, "artifacts-confirm"]]);
+      const features = (calls[0]?.[2] ?? "").split(",").map((feature) => {
+        const [name, value = ""] = feature.split("=");
+        return [name, value];
+      });
+      expect(Object.fromEntries(features)).toEqual({ popup: "", width: "480", height: "560", ...placement.popup });
+    });
+  }
+
   test("leaves the page opened as a tab, without an opener, with its links", async ({ page, context }) => {
     const id = await create("Probe", probe());
     // A blocked popup: the item is followed as its link, a new tab without an opener.

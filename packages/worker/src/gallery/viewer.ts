@@ -138,8 +138,8 @@ function history(view: ViewerView): Markup {
  * admits by their hash. It holds no backslash: the template's text is its cooked string. It starts the iframe at the
  * page's URL with its fragment; after each load and same-document change it copies the iframe's URL and title to the
  * top window and follows `/_v/<n>/` in the header and the menu; it focuses the iframe once; it closes the menu when the
- * focus moves into the iframe; it opens the confirmation pages in a popup; and where the browser has no `popover`, it
- * opens and closes the menu and the history itself.
+ * focus moves into the iframe; it opens the confirmation pages in a popup centered on the window; and where the
+ * browser has no `popover`, it opens and closes the menu and the history itself.
  */
 const VIEWER_SCRIPT = html`<script>
   (() => {
@@ -159,6 +159,12 @@ const VIEWER_SCRIPT = html`<script>
     let lastUrl = null;
     let lastVersion = null;
     let focused = false;
+
+    // The popup's size, and its offset on one axis: centered on the window, inside the screen's available area.
+    const popupWidth = 480;
+    const popupHeight = 560;
+    const centered = (windowStart, windowSize, size, availStart, availSize) =>
+      Math.max(availStart, Math.min(Math.round(windowStart + (windowSize - size) / 2), availStart + availSize - size));
 
     const versionOf = (path) => {
       const match = pinned.exec(path);
@@ -251,7 +257,10 @@ const VIEWER_SCRIPT = html`<script>
     for (const link of document.querySelectorAll(".viewer-menu a[target=_blank]")) {
       link.addEventListener("click", (event) => {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        const popup = window.open(link.href, "artifacts-confirm", "popup,width=480,height=560");
+        const left = centered(window.screenX, window.outerWidth, popupWidth, screen.availLeft ?? 0, screen.availWidth);
+        const top = centered(window.screenY, window.outerHeight, popupHeight, screen.availTop ?? 0, screen.availHeight);
+        const size = "width=" + popupWidth + ",height=" + popupHeight;
+        const popup = window.open(link.href, "artifacts-confirm", "popup," + size + ",left=" + left + ",top=" + top);
         if (popup === null) return;
         event.preventDefault();
         close();
