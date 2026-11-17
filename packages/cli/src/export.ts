@@ -8,7 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { link, lstat, open, unlink, type FileHandle } from "node:fs/promises";
 
-import type { Api } from "./api.ts";
+import type { Api, IdleLimit } from "./api.ts";
 import { CliError, codeOf } from "./errors.ts";
 
 /** Subscribes a listener to the owner's interrupt and answers its unsubscribe. */
@@ -24,7 +24,7 @@ export const processInterrupts: OnInterrupt = (listener) => {
 };
 
 export type ExportOptions = {
-  /** How long the download may go without a byte. */
+  /** How long the download may wait on the network without a byte. */
   readonly idleMs: number;
   readonly onInterrupt: OnInterrupt;
   /** Makes a hard link; `node:fs` `link` outside tests. */
@@ -53,21 +53,45 @@ async function refuseExisting(target: string): Promise<void> {
   throw new CliError(`${shown} exists; export does not replace it, so name another file with -o`);
 }
 
-/** A promise that rejects with the signal's reason once it aborts, for racing a wait the signal may not end itself. */
-function abortion(signal: AbortSignal): Promise<never> {
-  const aborted = new Promise<never>((_, reject) => {
-    if (signal.aborted) reject(signal.reason);
-    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-  });
-  // Nothing may await it: an abort after the download is not an unhandled rejection.
-  aborted.catch(() => undefined);
-  return aborted;
+/**
+ * The download's idle limit, which an interrupt shares: the signal aborts with the limit's reason or the interrupt's.
+ * The limit runs only while the request or a read waits on the network.
+ */
+class Idle implements IdleLimit {
+  readonly #controller = new AbortController();
+  readonly #ms: number;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  readonly signal: AbortSignal = this.#controller.signal;
+  readonly aborted: Promise<never>;
+
+  constructor(ms: number) {
+    this.#ms = ms;
+    this.aborted = new Promise<never>((_, reject) => {
+      this.signal.addEventListener("abort", () => reject(this.signal.reason), { once: true });
+    });
+    // Nothing may be waiting on it when an interrupt comes after the download: that is no unhandled rejection.
+    this.aborted.catch(() => undefined);
+  }
+
+  start(): void {
+    clearTimeout(this.#timer);
+    this.#timer = setTimeout(() => {
+      this.abort(new CliError(`the download stalled: no bytes arrived for ${this.#ms / 1000} s`));
+    }, this.#ms);
+  }
+
+  stop(): void {
+    clearTimeout(this.#timer);
+  }
+
+  abort(reason: CliError): void {
+    this.#controller.abort(reason);
+  }
 }
 
 /**
- * Downloads the archive into `handle`, answering its length. `controller` aborts it: on `idleMs` without a byte, which
- * this arms, or on an interrupt. A failure of the request or of a read is reported as the abort's reason when there
- * was one, since the fetch may report an abort in its own words.
+ * Downloads the archive into `handle`, answering its length. A failure of the request or of a read is reported as the
+ * abort's reason when there was one, since the fetch may report an abort in its own words.
  */
 async function download(
   api: Api,
@@ -75,56 +99,42 @@ async function download(
   version: number,
   handle: FileHandle,
   shown: string,
-  controller: AbortController,
-  idleMs: number,
+  idle: Idle,
 ): Promise<number> {
-  const signal = controller.signal;
-  const aborted = abortion(signal);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const arm = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      controller.abort(new CliError(`the download stalled: no bytes arrived for ${idleMs / 1000} s`));
-    }, idleMs);
-  };
-  arm();
+  const signal = idle.signal;
+  const { body, length } = await api.exportArchive(id, version, idle).catch((error: unknown) => {
+    throw signal.aborted ? signal.reason : error;
+  });
+  // The headers arrived: the limit runs again for the first chunk.
+  idle.start();
+  const reader = body.getReader();
+  let received = 0;
   try {
-    const { body, length } = await Promise.race([api.exportArchive(id, version, signal), aborted]).catch(
-      (error: unknown) => {
-        throw signal.aborted ? signal.reason : error;
-      },
-    );
-    arm();
-    const reader = body.getReader();
-    let received = 0;
-    try {
-      for (;;) {
-        const chunk = await Promise.race([reader.read(), aborted]).catch(() => {
-          throw signal.aborted
-            ? signal.reason
-            : new CliError(`the download broke off after ${received} of ${length} bytes`);
-        });
-        if (chunk.done) break;
-        arm();
-        received += chunk.value.byteLength;
-        if (received > length) throw new CliError(`the API sent more than the ${length} bytes it announced`);
-        // writeFile on a handle writes the whole chunk at the current position.
-        await handle.writeFile(chunk.value).catch((error: unknown) => {
-          throw new CliError(`cannot write ${shown} (${codeOf(error) ?? "error"})`);
-        });
-      }
-    } finally {
-      // Ends the connection when the loop stopped early; after the last chunk it does nothing.
-      void reader.cancel().catch(() => undefined);
+    for (;;) {
+      const chunk = await Promise.race([reader.read(), idle.aborted]).catch(() => {
+        throw signal.aborted
+          ? signal.reason
+          : new CliError(`the download broke off after ${received} of ${length} bytes`);
+      });
+      if (chunk.done) break;
+      idle.start();
+      received += chunk.value.byteLength;
+      if (received > length) throw new CliError(`the API sent more than the ${length} bytes it announced`);
+      // A write is not bounded: an interrupt or the idle limit takes effect once it returns. Closing the file waits
+      // for a pending write anyway, so no cleanup could come sooner.
+      await handle.writeFile(chunk.value).catch((error: unknown) => {
+        throw new CliError(`cannot write ${shown} (${codeOf(error) ?? "error"})`);
+      });
     }
-    if (received !== length) {
-      throw new CliError(`the download ended after ${received} of the ${length} bytes the API announced`);
-    }
-    if (signal.aborted) throw signal.reason;
-    return received;
   } finally {
-    clearTimeout(timer);
+    // Ends the connection when the loop stopped early; after the last chunk it does nothing.
+    void reader.cancel().catch(() => undefined);
   }
+  if (received !== length) {
+    throw new CliError(`the download ended after ${received} of the ${length} bytes the API announced`);
+  }
+  if (signal.aborted) throw signal.reason;
+  return received;
 }
 
 /** Copies the part's bytes into `into`, the target's handle, at its current position. */
@@ -199,20 +209,22 @@ export async function exportVersion(
   const handle = await open(part, "wx").catch((error: unknown) => {
     throw new CliError(`cannot write ${shownPart} (${codeOf(error) ?? "error"})`);
   });
-  const controller = new AbortController();
+  const idle = new Idle(options.idleMs);
   // From here an interrupt aborts the download instead of ending the process, so the part is removed. Once the
   // download is whole, the part is put in place and removed whatever comes.
-  const unsubscribe = options.onInterrupt(() => {
-    controller.abort(new CliError("interrupted; the partial download was removed"));
-  });
+  const unsubscribe = options.onInterrupt(() =>
+    idle.abort(new CliError("interrupted; the partial download was removed")),
+  );
   let complete = false;
   try {
     let bytes: number;
     try {
-      bytes = await download(api, id, number, handle, shownPart, controller, options.idleMs);
+      bytes = await download(api, id, number, handle, shownPart, idle);
     } catch (error) {
       await handle.close().catch(() => undefined);
       throw error;
+    } finally {
+      idle.stop();
     }
     await handle.close().catch((error: unknown) => {
       throw new CliError(`cannot write ${shownPart} (${codeOf(error) ?? "error"})`);

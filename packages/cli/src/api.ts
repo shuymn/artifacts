@@ -95,6 +95,19 @@ export type VersionJson = {
   readonly files: readonly FileJson[];
 };
 
+/**
+ * Bounds a request by inactivity instead of a timeout, for an export, whose time grows with the version. `signal` ends
+ * the request, and the limit runs only between `start` and `stop`: resolving the credential, a refresh included, is
+ * bounded by the refresh's own limits and not counted against it.
+ */
+export type IdleLimit = {
+  readonly signal: AbortSignal;
+  /** Rejects with the signal's reason once it aborts, for racing a wait the signal may not end itself. */
+  readonly aborted: Promise<never>;
+  readonly start: () => void;
+  readonly stop: () => void;
+};
+
 /** An export's archive: its bytes as a stream, and the length its `Content-Length` announced. */
 export type Download = { readonly body: ReadableStream<Uint8Array>; readonly length: number };
 
@@ -285,8 +298,8 @@ export class Api {
   }
 
   /**
-   * Sends one request and reads its answer, each attempt under `timeoutMs`, or until `signal` aborts when it is given;
-   * after a 401, at most once more with the credential's renewed token.
+   * Sends one request and reads its answer, each attempt under `timeoutMs`, or under `idle` when it is given; after a
+   * 401, at most once more with the credential's renewed token. The credential is resolved before either limit starts.
    */
   async #call<T>(
     method: string,
@@ -294,7 +307,7 @@ export class Api {
     timeoutMs: number,
     read: (response: Response) => Promise<T>,
     body?: { readonly content: Blob | string; readonly type: string },
-    signal?: AbortSignal,
+    idle?: IdleLimit,
   ): Promise<T> {
     const send = (token: string) => {
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
@@ -302,24 +315,31 @@ export class Api {
       const init: RequestInit = {
         method,
         headers,
-        signal: signal ?? AbortSignal.timeout(timeoutMs),
+        signal: idle?.signal ?? AbortSignal.timeout(timeoutMs),
         redirect: "manual",
       };
       if (body !== undefined) init.body = body.content;
       return this.#fetch(`${this.#origin}${path}`, init);
     };
-    // A failure of the credential (a refresh) is its own CliError, never a lost answer of this request.
+    /** A wait under `idle`, which ends on its abort even where the fetch would not. */
+    const bounded = <R>(wait: Promise<R>): Promise<R> =>
+      idle === undefined ? wait : Promise.race([wait, idle.aborted]);
+    // A failure of the credential (a refresh) is its own CliError, never a lost answer of this request. A refresh is
+    // bounded by its own limits and awaited whole, outside `idle`, so none is left running when the request fails.
     const token = await this.#credential.token();
     try {
-      let response = await send(token);
+      idle?.start();
+      let response = await bounded(send(token));
       if (response.status === 401) {
+        idle?.stop();
         const renewed = await this.#credential.renew(token);
+        idle?.start();
         if (renewed !== undefined) {
           await response.body?.cancel().catch(() => undefined);
-          response = await send(renewed);
+          response = await bounded(send(renewed));
         }
       }
-      return await read(response);
+      return await bounded(read(response));
     } catch (error) {
       if (error instanceof CliError) throw error;
       throw lost(error, timeoutMs);
@@ -412,11 +432,11 @@ export class Api {
 
   /**
    * `GET …/versions/{n}/export` (design.md section 8, "Export"): the archive as a stream and the length its
-   * `Content-Length` announces. `signal`, which the caller aborts after `idleMs` without a byte, ends the request and
-   * its body in place of a timeout, since an export's time grows with the version.
+   * `Content-Length` announces, under `idle` in place of a timeout. `idle` still runs when this answers, and its signal
+   * ends the body.
    */
-  async exportArchive(id: string, version: number, signal: AbortSignal): Promise<Download> {
+  async exportArchive(id: string, version: number, idle: IdleLimit): Promise<Download> {
     const route = `/v1/artifacts/${segment(id)}/versions/${version}/export`;
-    return this.#call("GET", route, this.#timeouts.idleMs, readDownload, undefined, signal);
+    return this.#call("GET", route, this.#timeouts.idleMs, readDownload, undefined, idle);
   }
 }

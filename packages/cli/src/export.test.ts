@@ -1,6 +1,6 @@
 // PL-63's failures against a local stand-in for the API, which the Worker cannot be made to answer: a stream cut midway
-// or shorter than its Content-Length, a stall, a 409 naming paths, an interrupt and the other error answers. Each leaves
-// the directory as it was. The Worker answers in e2e.test.ts.
+// or shorter than its Content-Length, a stall, a 409 naming paths, an interrupt, the other error answers, and a stored
+// login whose refresh is slow. Each leaves the directory as it was. The Worker answers in e2e.test.ts.
 import { readdir } from "node:fs/promises";
 import type { RequestListener, ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { Fetch } from "./api.ts";
+import { Credentials, gate, StandIn, until, type Answer } from "./login-test-support.ts";
 import { cli, ID, local, tempDir, TOKEN, type RunOptions } from "./test-support.ts";
 
 const network: Fetch = (input, init) => fetch(input, init);
@@ -27,17 +28,21 @@ function start(response: ServerResponse, sent: number): void {
   response.write(ARCHIVE.subarray(0, sent));
 }
 
-/** `export` of version 1 into a new directory against `handler`; the directory's entries afterwards. */
-async function exported(handler: RequestListener, options: RunOptions = {}) {
+/** `export` of version 1 into a new directory with `fetch`; the directory's entries afterwards. */
+async function exportedWith(fetch: Fetch, env: Record<string, string>, options: RunOptions = {}) {
   const directory = await tempDir();
-  const env = await local(handler);
   const ran = await cli(["export", ID, "--version", "1", "-o", join(directory, "out.zip")], {
     env,
-    fetch: network,
+    fetch,
     timeouts: TIMEOUTS,
     ...options,
   });
   return { ...ran, left: await readdir(directory) };
+}
+
+/** `export` of version 1 into a new directory against `handler`; the directory's entries afterwards. */
+async function exported(handler: RequestListener, options: RunOptions = {}) {
+  return exportedWith(network, await local(handler), options);
 }
 
 describe("export against a stand-in", () => {
@@ -169,5 +174,74 @@ describe("export against a stand-in", () => {
         "artifacts: the API answered without a Content-Length, so a cut archive could not be told from a whole one\n",
       left: [],
     });
+  });
+});
+
+/** A stored login whose access token has expired, so the next command refreshes it first. */
+async function expiring(standIn: StandIn) {
+  const credentials = await Credentials.create();
+  const { client, tokens } = standIn.issue();
+  await credentials.put(standIn.origin, { client, tokens, expires: Date.now() });
+  return { credentials, tokens };
+}
+
+describe("export with a stored login", () => {
+  const EXPORT = `/v1/artifacts/${ID}/versions/1/export`;
+  const body = "archive bytes";
+  /** The stand-in answers JSON: the archive is the JSON string, with its length. */
+  const archive: Answer = {
+    status: 200,
+    body,
+    headers: { ...ZIP, "Content-Length": String(Buffer.byteLength(JSON.stringify(body))) },
+  };
+
+  it("starts the idle limit when the request starts, not while a refresh resolves the credential", async () => {
+    const standIn = await StandIn.start();
+    const { credentials } = await expiring(standIn);
+    standIn.override = async ({ path }) => {
+      if (path === "/oauth/token") await pause(3 * TIMEOUTS.idleMs);
+      return path === EXPORT ? archive : undefined;
+    };
+    const ran = await exportedWith(network, credentials.env(standIn));
+    expect(ran).toMatchObject({ status: 0, stderr: "", left: ["out.zip"] });
+    expect(standIn.requests).toEqual([
+      "GET /.well-known/oauth-authorization-server",
+      "POST /oauth/token refresh_token",
+      `GET ${EXPORT}`,
+    ]);
+  });
+
+  it("waits for a refresh an interrupt arrives during, then sends nothing and removes its part", async () => {
+    const standIn = await StandIn.start();
+    const { credentials, tokens } = await expiring(standIn);
+    const refresh = gate();
+    standIn.override = async ({ path }) => {
+      if (path === "/oauth/token") await refresh.wait;
+      return undefined;
+    };
+    let interrupt: (() => void) | undefined;
+    let settled = false;
+    const running = exportedWith(network, credentials.env(standIn), {
+      onInterrupt: (listener) => {
+        interrupt = listener;
+        return () => undefined;
+      },
+    }).finally(() => {
+      settled = true;
+    });
+    await until(() => standIn.requests.includes("POST /oauth/token refresh_token"));
+    interrupt?.();
+    // The refresh is still under way, so the export waits for it, and the idle limit does not count it.
+    await pause(3 * TIMEOUTS.idleMs);
+    expect(settled).toBe(false);
+    refresh.open();
+    expect(await running).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: interrupted; the partial download was removed\n",
+      left: [],
+    });
+    expect(standIn.requests.at(-1)).toBe("POST /oauth/token refresh_token");
+    expect((await credentials.read())[standIn.origin]?.tokens?.access_token).not.toBe(tokens.access_token);
   });
 });
