@@ -383,7 +383,9 @@ Any form or request the frame page could send, the artifact's script could send 
 confirmation page in a small popup window, `window.open(url, "artifacts-confirm",
 "popup,width=480,height=560,left=<x>,top=<y>")`, centered on the browser window: `x` is `screenX + (outerWidth - 480) /
 2` and `y` is `screenY + (outerHeight - 560) / 2`, rounded and then moved, where they would put the popup past an edge
-of the screen's available area (`screen.availLeft`, `availTop`, `availWidth`, `availHeight`), back inside it. The item
+of the screen's available area (`screen.availLeft`, `availTop`, `availWidth`, `availHeight`), back inside it. On an
+axis whose origin the browser does not give (`availLeft` or `availTop` missing), the area's place is unknown, so the
+centered value stays: taking the origin as 0 would pull a window on a screen left of or above the primary onto it. The item
 is also a plain link with `target="_blank"` to the same URL, followed when the script does not run or the popup is
 blocked. The popup is a top-level window on the app host, so the Access cookie is first-party in both layouts and
 nothing frames the page. Two alternatives were rejected:

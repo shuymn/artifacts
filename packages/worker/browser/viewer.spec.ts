@@ -301,8 +301,14 @@ test.describe("PL-58: the confirmation popup", () => {
     expect(methods.filter((method) => method !== "GET")).toEqual([]);
   });
 
-  // The window and the screen's available area, in screen coordinates, and where the 480 × 560 popup opens on them.
-  const PLACEMENTS = [
+  // The window and the screen's available area, in screen coordinates, and where the 480 × 560 popup opens on them. A
+  // `null` removes the property, as from a browser that does not give it.
+  const PLACEMENTS: {
+    name: string;
+    screen: Record<"availLeft" | "availTop" | "availWidth" | "availHeight", number | null>;
+    window: Record<"screenX" | "screenY" | "outerWidth" | "outerHeight", number>;
+    popup: { left: string; top: string };
+  }[] = [
     {
       name: "centered on the window",
       screen: { availLeft: 0, availTop: 25, availWidth: 1920, availHeight: 1055 },
@@ -321,6 +327,12 @@ test.describe("PL-58: the confirmation popup", () => {
       window: { screenX: -1500, screenY: -30, outerWidth: 400, outerHeight: 300 },
       popup: { left: "-1440", top: "0" },
     },
+    {
+      name: "centered where the browser gives no origin for the available area",
+      screen: { availLeft: null, availTop: null, availWidth: 1920, availHeight: 1055 },
+      window: { screenX: -1300, screenY: -200, outerWidth: 1200, outerHeight: 800 },
+      popup: { left: "-940", top: "-80" },
+    },
   ];
 
   for (const placement of PLACEMENTS) {
@@ -328,7 +340,8 @@ test.describe("PL-58: the confirmation popup", () => {
       const id = await create("Probe", probe());
       await page.addInitScript((geometry) => {
         for (const [name, value] of Object.entries(geometry.screen)) {
-          Object.defineProperty(Screen.prototype, name, { configurable: true, get: () => value });
+          if (value === null) Reflect.deleteProperty(Screen.prototype, name);
+          else Object.defineProperty(Screen.prototype, name, { configurable: true, get: () => value });
         }
         for (const [name, value] of Object.entries(geometry.window)) {
           Object.defineProperty(window, name, { configurable: true, get: () => value });
@@ -343,6 +356,8 @@ test.describe("PL-58: the confirmation popup", () => {
       }, placement);
       await page.goto(`${contentOrigin(id)}/`);
       await expect(page).toHaveTitle("probe");
+      const absent = Object.entries(placement.screen).flatMap(([name, value]) => (value === null ? [name] : []));
+      expect(await page.evaluate((names) => names.filter((name) => name in screen), absent)).toEqual([]);
       await page.locator(".icon-button").click();
       await page.getByText("Make public…").click();
       const calls = await page.evaluate(() => {
