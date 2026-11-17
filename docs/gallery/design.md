@@ -36,7 +36,8 @@ save git shows the file changed by that one line; Pencil opens the file with or 
   validation and `:user-invalid` give its feedback; the confirmation forms (`confirm-public`, `confirm-delete`), which
   post to themselves without script; and the result page's one script, allowed by its hash, which sends the window
   that opened it back to the artifact or the gallery ([design.md](../design.md), section 10). The viewer is a frame
-  with a script by nature; its menu is a `popover` opened by `popovertarget`, which needs none.
+  with a script by nature; its menu is a `popover` opened by `popovertarget`, which needs none. Where the browser has
+  no `popover` (Safari 16.4 to 16.6), the script opens and closes the menu and the history instead, toggling `hidden`.
 - **Text scales with the user's setting.** Each page has `<meta name="text-scale" content="scale">`, no rule sets a
   root `font-size`, and text and the spacing around it are in `rem`.
 - **Fonts are served by the Worker**: IBM Plex Sans and IBM Plex Mono (Latin subsets, `woff2`) in a separate
