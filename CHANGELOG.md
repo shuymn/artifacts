@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/shuymn/artifacts/compare/v0.10.2...v0.11.0) (2026-11-17)
+
+
+### Features
+
+* **gallery:** show times in the request's zone ([fe8d0cd](https://github.com/shuymn/artifacts/commit/fe8d0cd992219fc5ff8a1ac11f546c03b96b8f32))
+* **gallery:** show times in the viewer's time zone ([348dfe5](https://github.com/shuymn/artifacts/commit/348dfe5f18aedc05161e93692061c2a88153b11e))
+
 ## [0.10.2](https://github.com/shuymn/artifacts/compare/v0.10.1...v0.10.2) (2026-11-17)
 
 
