@@ -233,9 +233,10 @@ do in CSS.
   focus moves into the page; History opens its list beside the menu, marking the shown version with
   `aria-current="page"`. Delete is in `color.danger`. The items of the menu and the history show the focus ring of
   links.
-- **Confirmation pages** are laid out for a window 480 px wide, the size the viewer opens them at: the column takes the
-  window's width less the padding, and the buttons wrap. In a wider window, as from the artifact page's own links, the
-  column keeps `size.prose`. Cancel closes the viewer's popup; in a tab it opens the artifact's page.
+- **Confirmation pages** are laid out for a window 480 px wide, the size the viewer opens them at, centered on the
+  viewer's window: the column takes the window's width less the padding, and the buttons wrap. In a wider window, as
+  from the artifact page's own links, the column keeps `size.prose`. Cancel closes the viewer's popup; in a tab it
+  opens the artifact's page.
 - **The result page** shows its links; its script, where a window opened it, sends that window to the link marked
   `data-opener` and closes itself, so the static design shows the page as a tab without an opener keeps it.
 - **Focus.** Links, the scrollable table regions, the input, the buttons, the viewer's icon button and its menu items
