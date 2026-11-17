@@ -122,6 +122,28 @@ test.describe("PL-55: the frame's script", () => {
     expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
   });
 
+  test("leaves the focus on what the owner focused before the iframe's first load", async ({ page }) => {
+    const id = await create("Probe", probe());
+    const url = `${contentOrigin(id)}/`;
+    // The iframe's request waits until the owner has focused the menu button.
+    const held = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    await page.route(url, async (route) => {
+      if (route.request().frame() !== page.mainFrame()) {
+        held.resolve();
+        await released.promise;
+      }
+      await route.continue();
+    });
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await held.promise;
+    await page.locator(".icon-button").focus();
+    released.resolve();
+    // The frame copies the iframe's title at its load, where it decides on the focus.
+    await expect(page).toHaveTitle("probe");
+    expect(await page.evaluate(() => document.activeElement?.className)).toBe("icon-button");
+  });
+
   test("follows a navigation to a pinned version and back in the header and the menu", async ({ page }) => {
     const id = await create("Probe", probe());
     await update(id, 1, { "index.html": "<!doctype html><title>second</title><a id='pinned' href='/_v/1/'>v1</a>" });
