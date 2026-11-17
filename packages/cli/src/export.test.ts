@@ -1,7 +1,7 @@
-// PL-63's failures against a local stand-in for the API, which the Worker cannot be made to answer: a stream cut midway
-// or shorter than its Content-Length, a stall, a 409 naming paths, an interrupt, the other error answers, and a stored
-// login whose refresh is slow. Each leaves the directory as it was, or names its part when it cannot remove it. The
-// Worker answers in e2e.test.ts.
+// PL-63's failures against a local stand-in for the API, which the Worker cannot be made to answer: a stream cut midway,
+// shorter or longer than its Content-Length or of another type, a stall, a 409 naming paths, an interrupt, the other
+// error answers, a part that cannot be removed, and a stored login whose refresh is slow. Each failure leaves the
+// directory as it was, or names what it could not remove. The Worker answers in e2e.test.ts.
 import { chmod, readdir } from "node:fs/promises";
 import type { RequestListener, ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -14,14 +14,17 @@ import { cli, ID, local, tempDir, TOKEN, type RunOptions } from "./test-support.
 
 const network: Fetch = (input, init) => fetch(input, init);
 const TIMEOUTS = { requestMs: 5000, publishMs: 5000, fileMs: 5000, idleMs: 200 };
-/** Permission checks do not hold for root, which the test that makes a directory read-only needs. */
-const ROOT = process.getuid?.() === 0;
 const ARCHIVE = Uint8Array.from({ length: 1000 }, (_, i) => i % 251);
 const ZIP = { "Content-Type": "application/zip" };
+const ENV = { ARTIFACTS_API_URL: "https://artifacts-api.example.com", ARTIFACTS_TOKEN: TOKEN };
+/** Permission checks do not hold for root, which the tests that make a file or directory unusable need. */
+const ROOT = process.getuid?.() === 0;
 
-/** The archive's first 600 bytes under a Content-Length of its whole length, ending cleanly. */
-const shortBody: Fetch = async () =>
-  new Response(ARCHIVE.subarray(0, 600), { headers: { ...ZIP, "Content-Length": String(ARCHIVE.byteLength) } });
+/** An answer of `bytes` under a Content-Length of the archive's whole length, ending cleanly. */
+const announcing =
+  (bytes: Uint8Array): Fetch =>
+  async () =>
+    new Response(bytes, { headers: { ...ZIP, "Content-Length": String(ARCHIVE.byteLength) } });
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -63,16 +66,21 @@ describe("export against a stand-in", () => {
   });
 
   it("fails on a stream that ends cleanly short of its Content-Length, leaving nothing", async () => {
-    const directory = await tempDir();
-    const ran = await cli(["export", ID, "--version", "1", "-o", join(directory, "out.zip")], {
-      env: { ARTIFACTS_API_URL: "https://artifacts-api.example.com", ARTIFACTS_TOKEN: TOKEN },
-      fetch: shortBody,
-    });
-    expect(ran).toMatchObject({
+    expect(await exportedWith(announcing(ARCHIVE.subarray(0, 600)), ENV)).toEqual({
       status: 1,
+      stdout: "",
       stderr: "artifacts: the download ended after 600 of the 1000 bytes the API announced\n",
+      left: [],
     });
-    expect(await readdir(directory)).toEqual([]);
+  });
+
+  it("stops at the first byte past its Content-Length, leaving nothing", async () => {
+    expect(await exportedWith(announcing(new Uint8Array(1200)), ENV)).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the API sent more than the 1000 bytes it announced\n",
+      left: [],
+    });
   });
 
   it.each([
@@ -102,7 +110,7 @@ describe("export against a stand-in", () => {
   });
 
   it("prints each path of a 409 not_extractable on its own line, escaped", async () => {
-    const paths = ["a", "a\\b", "c\u0085d e\u0007"];
+    const paths = ["a", "a\\b", "c\u0085d\u2028e\u2029f\u0007"];
     const ran = await exported((_request, response) => {
       response.writeHead(409, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ error: { code: "not_extractable", message: "m", paths } }));
@@ -115,7 +123,7 @@ describe("export against a stand-in", () => {
         "or another path uses them as a directory; export refuses it:\n" +
         '  "a"\n' +
         '  "a\\\\b"\n' +
-        '  "c\\u0085d\\u2028e\\u0007"\n',
+        '  "c\\u0085d\\u2028e\\u2029f\\u0007"\n',
       left: [],
     });
   });
@@ -136,12 +144,7 @@ describe("export against a stand-in", () => {
         },
       },
     );
-    expect(ran).toEqual({
-      status: 1,
-      stdout: "",
-      stderr: "artifacts: the export was interrupted\n",
-      left: [],
-    });
+    expect(ran).toEqual({ status: 1, stdout: "", stderr: "artifacts: the export was interrupted\n", left: [] });
     expect(listening).toBe(0);
   });
 
@@ -177,6 +180,33 @@ describe("export against a stand-in", () => {
         "artifacts: the API answered without a Content-Length, so a cut archive could not be told from a whole one\n",
       left: [],
     });
+  });
+
+  it("refuses a 200 of another type than application/zip, leaving nothing", async () => {
+    const ran = await exported((_request, response) => {
+      response.writeHead(200, { "Content-Type": "text/html", "Content-Length": String(ARCHIVE.byteLength) });
+      response.end(ARCHIVE);
+    });
+    expect(ran).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the API answered in a shape this CLI does not know\n",
+      left: [],
+    });
+  });
+
+  it("prints no token, when it succeeds or when the API echoes the token in an error", async () => {
+    const whole = await exported((_request, response) => {
+      start(response, ARCHIVE.byteLength);
+      response.end();
+    });
+    expect(whole).toMatchObject({ status: 0, left: ["out.zip"] });
+    const echoed = await exported((_request, response) => {
+      response.writeHead(500, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: { code: "internal", message: `refused ${TOKEN}` } }));
+    });
+    expect(echoed).toMatchObject({ status: 1, stderr: "artifacts: internal: refused [token]\n" });
+    expect(`${whole.stdout}${whole.stderr}${echoed.stdout}${echoed.stderr}`).not.toContain(TOKEN);
   });
 
   it.skipIf(ROOT)("names its part when it cannot remove it, after the failure that ended the export", async () => {
