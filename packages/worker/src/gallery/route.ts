@@ -23,7 +23,7 @@ const DAY_MS = 86_400_000;
 /**
  * What a page adds to the gallery's CSP (ISO-5). `forms`: its form posts to the page itself, and to `origin` when given
  * (the consent page's client, design.md section 7; the confirmation forms post to themselves, section 10). `script`:
- * the `sha256-…` source of its one inline script (the confirmation result page's).
+ * the `sha256-…` source of its one inline script (the confirmation pages' and their result page's).
  */
 export type PagePolicy = {
   readonly forms?: { readonly origin?: string };

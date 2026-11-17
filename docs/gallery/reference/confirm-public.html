@@ -63,5 +63,13 @@
         </div>
       </form>
     </main>
+    <script>
+      document.querySelector(".form__actions a").addEventListener("click", (event) => {
+        if (window.opener === null || event.button !== 0) return;
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        window.close();
+        if (window.closed) event.preventDefault();
+      });
+    </script>
   </body>
 </html>

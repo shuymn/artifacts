@@ -32,13 +32,12 @@ function versionLine(shown: number, latest: number): string {
   return shown === latest ? `v${shown} · latest` : `v${shown} of ${latest}`;
 }
 
-/** A link of the menu or the history: its icon, its label and an optional trailing icon. */
+/** A link of the menu or the history: its icon and its label. */
 function item(
   href: string,
   lead: IconName,
   label: Value,
   options: {
-    readonly trailing?: IconName;
     readonly danger?: boolean;
     /** A confirmation page: the script opens it in a popup, the link in a new tab. */
     readonly popup?: boolean;
@@ -52,9 +51,7 @@ function item(
     ${options.id !== undefined && html`id="${options.id}"`}
     ${options.popup === true && html`target="_blank"`}
     ${options.current === true && html`aria-current="page"`}
-    >${icon(lead, "menu-item__icon")}<span class="menu-item__label">${label}</span>${
-      options.trailing !== undefined && icon(options.trailing, "menu-item__trailing")
-    }</a
+    >${icon(lead, "menu-item__icon")}<span class="menu-item__label">${label}</span></a
   >`;
 }
 
@@ -90,7 +87,7 @@ function menu(view: ViewerView): Markup {
     <p class="viewer-menu__shown">${shownLine(shown, latest)}</p>
     <ul role="list">
       <li>${item(`${view.app}/`, "arrow-left", "Back to gallery")}</li>
-      <li>${item(page, "info", "Artifact details", { trailing: "arrow-up-right" })}</li>
+      <li>${item(page, "info", "Artifact details")}</li>
       <li>
         <button class="menu-item" type="button" popovertarget="viewer-history">
           ${icon("history", "menu-item__icon")}<span class="menu-item__label">History</span>${icon(
@@ -132,7 +129,7 @@ function history(view: ViewerView): Markup {
       ${listed.map((version) => historyItem(version, latest, shown.number))}
     </ul>
     <hr class="viewer-history__divider" />
-    ${item(`${artifact.gallery_url}#versions`, "layout-grid", "All versions in gallery", { trailing: "arrow-up-right" })}
+    ${item(`${artifact.gallery_url}#versions`, "layout-grid", "All versions in gallery")}
   </div>`;
 }
 
@@ -141,8 +138,8 @@ function history(view: ViewerView): Markup {
  * admits by their hash. It holds no backslash: the template's text is its cooked string. It starts the iframe at the
  * page's URL with its fragment; after each load and same-document change it copies the iframe's URL and title to the
  * top window and follows `/_v/<n>/` in the header and the menu; it focuses the iframe once; it closes the menu when the
- * focus moves into the iframe; it opens the confirmation pages in a popup; and where the browser has no `popover`, it
- * opens and closes the menu and the history itself.
+ * focus moves into the iframe; it opens the confirmation pages in a popup centered on the window; and where the
+ * browser has no `popover`, it opens and closes the menu and the history itself.
  */
 const VIEWER_SCRIPT = html`<script>
   (() => {
@@ -162,6 +159,16 @@ const VIEWER_SCRIPT = html`<script>
     let lastUrl = null;
     let lastVersion = null;
     let focused = false;
+
+    // The popup's size, and its offset on one axis: centered on the window, then moved inside the screen's available
+    // area where the browser gives its origin; without the origin the area's place is unknown, so the offset stays.
+    const popupWidth = 480;
+    const popupHeight = 560;
+    const centered = (windowStart, windowSize, size, availStart, availSize) => {
+      const middle = Math.round(windowStart + (windowSize - size) / 2);
+      if (typeof availStart !== "number") return middle;
+      return Math.max(availStart, Math.min(middle, availStart + availSize - size));
+    };
 
     const versionOf = (path) => {
       const match = pinned.exec(path);
@@ -254,7 +261,10 @@ const VIEWER_SCRIPT = html`<script>
     for (const link of document.querySelectorAll(".viewer-menu a[target=_blank]")) {
       link.addEventListener("click", (event) => {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        const popup = window.open(link.href, "artifacts-confirm", "popup,width=480,height=560");
+        const left = centered(window.screenX, window.outerWidth, popupWidth, screen.availLeft, screen.availWidth);
+        const top = centered(window.screenY, window.outerHeight, popupHeight, screen.availTop, screen.availHeight);
+        const size = "width=" + popupWidth + ",height=" + popupHeight;
+        const popup = window.open(link.href, "artifacts-confirm", "popup," + size + ",left=" + left + ",top=" + top);
         if (popup === null) return;
         event.preventDefault();
         close();

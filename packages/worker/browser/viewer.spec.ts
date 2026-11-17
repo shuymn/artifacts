@@ -1,5 +1,8 @@
-// The viewer frame's script in browsers (design.md section 6, "The script"; PL-55), and the confirmation popup it
-// opens (section 10; PL-58's browser part), against the Worker in the local runtime.
+// The viewer frame's script in browsers (design.md section 6, "The script"; PL-55), the page's color scheme in the
+// frame (section 6, "Color scheme"; PL-54's browser part), and the confirmation popup the script opens (section 10;
+// PL-56's and PL-58's browser parts), against the Worker in the local runtime.
+import { inflateSync } from "node:zlib";
+
 import { expect, test, type Frame, type Page } from "@playwright/test";
 
 import { appOrigin, contentOrigin, create, update, withoutPopover } from "./support.ts";
@@ -32,6 +35,30 @@ async function framedAt(page: Page, path: string): Promise<Frame> {
   const frame = find();
   if (frame === undefined) throw new Error(`no frame at ${path}`);
   return frame;
+}
+
+/**
+ * Whether the browser shows the point (x, y) of the viewport light or dark, by the sum of its color's channels in a
+ * screenshot of it. The PNG's first pixel is stored as is whatever its row's filter, since every filter predicts it
+ * from zeros.
+ */
+async function shownAt(page: Page, x: number, y: number): Promise<"light" | "dark"> {
+  const png = await page.screenshot({ clip: { x, y, width: 1, height: 1 } });
+  const data: Buffer[] = [];
+  let format = "";
+  for (let offset = 8; offset < png.length;) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString("latin1", offset + 4, offset + 8);
+    const body = png.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") format = `${body.readUInt8(8)}/${body.readUInt8(9)}`;
+    if (type === "IDAT") data.push(body);
+    offset += 12 + length;
+  }
+  // Eight bits per channel, RGB or RGBA.
+  if (format !== "8/2" && format !== "8/6") throw new Error(`a screenshot in an unexpected format: ${format}`);
+  const pixels = inflateSync(Buffer.concat(data));
+  const sum = pixels.readUInt8(1) + pixels.readUInt8(2) + pixels.readUInt8(3);
+  return sum >= 3 * 128 ? "light" : "dark";
 }
 
 /** Whether a panel shows, by its box: popover and `hidden` both remove it from the layout. */
@@ -238,6 +265,61 @@ test.describe("PL-55: the frame's script", () => {
   });
 });
 
+// Design.md section 6, "Color scheme": the page follows the browser's preference as at the top level; the header does
+// not. The page takes either scheme and paints no background, so what shows in the frame is the canvas of the scheme
+// it uses: transparent over the iframe's background where the two schemes match, opaque in the page's otherwise.
+const PLAIN = {
+  "index.html": `<!doctype html><meta name="color-scheme" content="light dark"><title>plain</title><p>plain</p>`,
+};
+
+const prefersDark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+
+/** The frame page at the plain page: what the browser prefers, what the page sees and shows, and the header. */
+async function schemes(page: Page, id: string) {
+  await page.goto(`${contentOrigin(id)}/`);
+  await expect(page).toHaveTitle("plain");
+  const inner = await framedAt(page, "/");
+  const frame = await page.locator("#viewer-frame").boundingBox();
+  const header = await page.locator(".viewer-header").boundingBox();
+  if (frame === null || header === null) throw new Error("the frame page has no frame or no header");
+  return {
+    browser: (await page.evaluate(prefersDark)) ? "dark" : "light",
+    sees: (await inner.evaluate(prefersDark)) ? "dark" : "light",
+    shows: await shownAt(page, frame.x + frame.width / 2, frame.y + frame.height / 2),
+    header: await shownAt(page, header.x + 2, header.y + 2),
+  };
+}
+
+test.describe("PL-54: the page's color scheme", () => {
+  // One test for both, so it fails whichever scheme the iframe would hold the page in.
+  test("shows the page in the browser's light and then dark preference, under the dark header", async ({
+    page,
+    browserName,
+    playwright,
+  }) => {
+    const id = await create("Plain", PLAIN);
+    for (const scheme of ["light", "dark"] as const) {
+      const expected = { browser: scheme, sees: scheme, shows: scheme, header: "dark" };
+      if (browserName !== "chromium") {
+        await page.emulateMedia({ colorScheme: scheme });
+        expect(await schemes(page, id)).toEqual(expected);
+        continue;
+      }
+      // Chromium applies an emulated preference in every frame, over the iframe's color scheme, so it runs on its own
+      // preference without emulation: light by default, dark with `--force-dark-mode`, which its headless shell
+      // ignores and its full build takes.
+      const own = await playwright.chromium.launch(
+        scheme === "dark" ? { channel: "chromium", args: ["--force-dark-mode"] } : {},
+      );
+      try {
+        expect(await schemes(await own.newPage({ colorScheme: null }), id)).toEqual(expected);
+      } finally {
+        await own.close();
+      }
+    }
+  });
+});
+
 test.describe("PL-58: the confirmation popup", () => {
   test("sends the viewer to the artifact, then to the gallery, and closes", async ({ page }) => {
     const id = await create("Probe", probe());
@@ -269,6 +351,78 @@ test.describe("PL-58: the confirmation popup", () => {
     expect(methods.filter((method) => method !== "GET")).toEqual([]);
   });
 
+  // The window and the screen's available area, in screen coordinates, and where the 480 × 560 popup opens on them. A
+  // `null` removes the property, as from a browser that does not give it.
+  const PLACEMENTS: {
+    name: string;
+    screen: Record<"availLeft" | "availTop" | "availWidth" | "availHeight", number | null>;
+    window: Record<"screenX" | "screenY" | "outerWidth" | "outerHeight", number>;
+    popup: { left: string; top: string };
+  }[] = [
+    {
+      name: "centered on the window",
+      screen: { availLeft: 0, availTop: 25, availWidth: 1920, availHeight: 1055 },
+      window: { screenX: 200, screenY: 100, outerWidth: 1200, outerHeight: 800 },
+      popup: { left: "560", top: "220" },
+    },
+    {
+      name: "moved inside the screen past its right and bottom edges",
+      screen: { availLeft: 0, availTop: 25, availWidth: 1920, availHeight: 1055 },
+      window: { screenX: 1600, screenY: 700, outerWidth: 600, outerHeight: 500 },
+      popup: { left: "1440", top: "520" },
+    },
+    {
+      name: "moved inside a screen left of the primary past its left and top edges",
+      screen: { availLeft: -1440, availTop: 0, availWidth: 1440, availHeight: 900 },
+      window: { screenX: -1500, screenY: -30, outerWidth: 400, outerHeight: 300 },
+      popup: { left: "-1440", top: "0" },
+    },
+    {
+      name: "centered where the browser gives no origin for the available area",
+      screen: { availLeft: null, availTop: null, availWidth: 1920, availHeight: 1055 },
+      window: { screenX: -1300, screenY: -200, outerWidth: 1200, outerHeight: 800 },
+      popup: { left: "-940", top: "-80" },
+    },
+  ];
+
+  for (const placement of PLACEMENTS) {
+    test(`opens the popup ${placement.name}`, async ({ page }) => {
+      const id = await create("Probe", probe());
+      await page.addInitScript((geometry) => {
+        for (const [name, value] of Object.entries(geometry.screen)) {
+          if (value === null) Reflect.deleteProperty(Screen.prototype, name);
+          else Object.defineProperty(Screen.prototype, name, { configurable: true, get: () => value });
+        }
+        for (const [name, value] of Object.entries(geometry.window)) {
+          Object.defineProperty(window, name, { configurable: true, get: () => value });
+        }
+        // The calls, for the test to read; a window, so the script takes the popup as opened.
+        const opened: string[][] = [];
+        Object.defineProperty(window, "opened", { value: opened });
+        window.open = (...args: unknown[]) => {
+          opened.push(args.map(String));
+          return window;
+        };
+      }, placement);
+      await page.goto(`${contentOrigin(id)}/`);
+      await expect(page).toHaveTitle("probe");
+      const absent = Object.entries(placement.screen).flatMap(([name, value]) => (value === null ? [name] : []));
+      expect(await page.evaluate((names) => names.filter((name) => name in screen), absent)).toEqual([]);
+      await page.locator(".icon-button").click();
+      await page.getByText("Make public…").click();
+      const calls = await page.evaluate(() => {
+        const opened: unknown = Reflect.get(window, "opened");
+        return Array.isArray(opened) ? opened.map((call) => (Array.isArray(call) ? call.map(String) : [])) : [];
+      });
+      expect(calls.map((call) => call.slice(0, 2))).toEqual([[`${appOrigin()}/a/${id}/public`, "artifacts-confirm"]]);
+      const features = (calls[0]?.[2] ?? "").split(",").map((feature) => {
+        const [name, value = ""] = feature.split("=");
+        return [name, value];
+      });
+      expect(Object.fromEntries(features)).toEqual({ popup: "", width: "480", height: "560", ...placement.popup });
+    });
+  }
+
   test("leaves the page opened as a tab, without an opener, with its links", async ({ page, context }) => {
     const id = await create("Probe", probe());
     // A blocked popup: the item is followed as its link, a new tab without an opener.
@@ -286,5 +440,124 @@ test.describe("PL-58: the confirmation popup", () => {
     await expect(tab.getByRole("link", { name: "All artifacts" })).toBeVisible();
     expect(tab.isClosed()).toBe(false);
     expect(page.url()).toBe(`${contentOrigin(id)}/`);
+  });
+
+  test("closes the popup on Cancel without following the link or changing the artifact", async ({ page, context }) => {
+    const id = await create("Probe", probe());
+    const followed: string[] = [];
+    context.on("request", (request) => {
+      if (request.url() === `${appOrigin()}/a/${id}`) followed.push(request.url());
+    });
+    await page.goto(`${contentOrigin(id)}/`);
+    await expect(page).toHaveTitle("probe");
+    for (const [item, path] of [
+      ["Make public…", "public"],
+      ["Delete…", "delete"],
+    ] as const) {
+      await page.locator(".icon-button").click();
+      const [popup] = await Promise.all([page.waitForEvent("popup"), page.getByText(item).click()]);
+      await expect(popup).toHaveURL(`${appOrigin()}/a/${id}/${path}`);
+      await Promise.all([popup.waitForEvent("close"), popup.getByRole("link", { name: "Cancel" }).click()]);
+    }
+    expect(followed).toEqual([]);
+    expect(page.url()).toBe(`${contentOrigin(id)}/`);
+    // Still private, and still there.
+    await page.reload();
+    await expect(page.locator("#viewer-menu a[target=_blank]").first()).toHaveText("Make public…");
+  });
+
+  // Design.md section 10, "Cancel's script": the clicks on Cancel that close the window instead of following the link.
+  // The window's opener and `close()` are stand-ins, so one page tries each case: `closes: false` is a browser that keeps
+  // the window open. `close` is whether the script called `close()`, `prevented` whether it stopped the link.
+  type CancelClick = {
+    name: string;
+    opener: boolean;
+    closes: boolean;
+    click: Pick<MouseEventInit, "button" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">;
+  };
+  const CANCEL_CLICKS: [CancelClick, { close: boolean; prevented: boolean }][] = [
+    [
+      { name: "a left click with an opener", opener: true, closes: true, click: {} },
+      { close: true, prevented: true },
+    ],
+    [
+      { name: "without an opener", opener: false, closes: true, click: {} },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "with Meta", opener: true, closes: true, click: { metaKey: true } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "with Control", opener: true, closes: true, click: { ctrlKey: true } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "with Shift", opener: true, closes: true, click: { shiftKey: true } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "with Alt", opener: true, closes: true, click: { altKey: true } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "of the middle button", opener: true, closes: true, click: { button: 1 } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "where the browser keeps the window open", opener: true, closes: false, click: {} },
+      { close: true, prevented: false },
+    ],
+  ];
+
+  test("closes the window on Cancel only on a left click with an opener, and follows the link otherwise", async ({
+    page,
+  }) => {
+    const id = await create("Probe", probe());
+    for (const path of ["public", "delete"]) {
+      await page.goto(`${appOrigin()}/a/${id}/${path}`);
+      for (const [setup, expected] of CANCEL_CLICKS) {
+        const outcome = await page.evaluate(({ opener, closes, click }) => {
+          const seen = { close: false, prevented: false };
+          let closed = false;
+          Object.defineProperty(window, "opener", { configurable: true, get: () => (opener ? window : null) });
+          Object.defineProperty(window, "closed", { configurable: true, get: () => closed });
+          window.close = () => {
+            seen.close = true;
+            closed = closes;
+          };
+          // After the page's listener on Cancel: whether it stopped the link, then stop it so the page stays.
+          document.addEventListener(
+            "click",
+            (event) => {
+              seen.prevented = event.defaultPrevented;
+              event.preventDefault();
+            },
+            { once: true },
+          );
+          const cancel = document.querySelector(".form__actions a");
+          cancel?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...click }));
+          return seen;
+        }, setup);
+        expect({ path, case: setup.name, ...outcome }).toEqual({ path, case: setup.name, ...expected });
+      }
+    }
+  });
+
+  test("follows Cancel as its link in a tab without an opener", async ({ page, context }) => {
+    const id = await create("Probe", probe());
+    // A blocked popup: the item is followed as its link, a new tab without an opener.
+    await page.addInitScript(() => {
+      window.open = () => null;
+    });
+    await page.goto(`${contentOrigin(id)}/`);
+    await expect(page).toHaveTitle("probe");
+    await page.locator(".icon-button").click();
+    const [tab] = await Promise.all([context.waitForEvent("page"), page.getByText("Delete…").click()]);
+    await expect(tab).toHaveURL(`${appOrigin()}/a/${id}/delete`);
+    expect(await tab.evaluate(() => window.opener)).toBeNull();
+    await tab.getByRole("link", { name: "Cancel" }).click();
+    await expect(tab).toHaveURL(`${appOrigin()}/a/${id}`);
+    expect(tab.isClosed()).toBe(false);
   });
 });

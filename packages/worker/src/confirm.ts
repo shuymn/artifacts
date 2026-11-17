@@ -14,7 +14,7 @@ import { readBytes } from "./body.ts";
 import { scriptSource } from "./encoding.ts";
 import type { OperationErrorCode } from "./errors.ts";
 import type { Markup } from "./gallery/html.ts";
-import { deletePage, RESULT_SCRIPT_TEXT, resultPage, visibilityPage } from "./gallery/pages.ts";
+import { CONFIRM_SCRIPT_TEXT, deletePage, RESULT_SCRIPT_TEXT, resultPage, visibilityPage } from "./gallery/pages.ts";
 import type { PagePolicy } from "./gallery/route.ts";
 import { appOrigin } from "./hosts.ts";
 import { logEvent } from "./log.ts";
@@ -99,12 +99,12 @@ function refused(reason: ConfirmRefusal, status: number): ConfirmationAnswer {
   return failure(status);
 }
 
-/** `GET` and `HEAD`: the page for the artifact as it is now, with its one form. */
+/** `GET` and `HEAD`: the page for the artifact as it is now, with its one form and Cancel's script. */
 async function show(request: Request, confirmation: Confirmation, deps: OperationDeps): Promise<ConfirmationAnswer> {
   const found = await getForConfirmation(deps, { id: confirmation.id });
   if (!found.ok) return failure(STATUS[found.error.code]);
   const page = confirmation.action === "public" ? visibilityPage(found.value) : deletePage(found.value);
-  return htmlAnswer(request, page, { forms: {} });
+  return htmlAnswer(request, page, { forms: {}, script: await scriptSource(CONFIRM_SCRIPT_TEXT) });
 }
 
 /** The form's fields, read through the count (RES-1), or the status that refuses the body. */

@@ -11,8 +11,8 @@
  * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
  * ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * Of these, arrow-left, arrow-up-right, check, chevron-right, download, ellipsis (Feather's more-horizontal), info, lock
- * and trash-2 are derived from the
+ * Of these, arrow-left, check, chevron-right, download, ellipsis (Feather's more-horizontal), info, lock and trash-2
+ * are derived from the
  * Feather project: The MIT License (MIT). Copyright (c) 2013-present Cole Bemis. Permission is hereby granted, free of
  * charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish,
@@ -28,7 +28,6 @@ import { html, type Markup } from "./html.ts";
 
 const SHAPES = {
   "arrow-left": html`<path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>`,
-  "arrow-up-right": html`<path d="M7 7h10v10"></path><path d="M7 17 17 7"></path>`,
   check: html`<path d="M20 6 9 17l-5-5"></path>`,
   "chevron-right": html`<path d="m9 18 6-6-6-6"></path>`,
   download: html`<path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path

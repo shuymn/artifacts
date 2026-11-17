@@ -3133,7 +3133,7 @@
               "id": "Hwtlm",
               "type": "ref",
               "ref": "UKq8n",
-              "name": "Open in gallery",
+              "name": "Artifact details",
               "width": "fill_container",
               "descendants": {
                 "u6Omz": {
@@ -3143,7 +3143,7 @@
                   "content": "Artifact details"
                 },
                 "h06LPy": {
-                  "enabled": true,
+                  "enabled": false,
                   "icon": "arrow-up-right"
                 }
               }
@@ -3420,7 +3420,7 @@
                   "content": "All versions in gallery"
                 },
                 "h06LPy": {
-                  "enabled": true,
+                  "enabled": false,
                   "icon": "arrow-up-right"
                 }
               }

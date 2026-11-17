@@ -35,7 +35,7 @@ import {
   type Chrome,
   type ConsentView,
 } from "./pages.ts";
-import { decodeEntities, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
+import { byClass, decodeEntities, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
 import { viewerPage, type ViewerView } from "./viewer.ts";
 
 import viewerCss from "./viewer.css?raw";
@@ -460,5 +460,14 @@ describe("the viewer's template and reference page", () => {
     ).toBe(viewerCss.trim());
     const link = headOf(want)?.children.find((child) => child.tag === "link");
     expect(link?.attributes.get("href")).toBe(VIEWER_CSS_LINK);
+  });
+
+  // The other items navigate in the same tab, or open a confirmation in a popup: a trailing icon would promise
+  // something they do not do (docs/gallery/design.md, `menu-item`).
+  it("ends only History, which opens a list, with a trailing icon", async () => {
+    for (const root of await Promise.all([parseHtml(viewerHtml), parseHtml(viewerPage(VIEWER).text)])) {
+      const trailed = byClass(root, "menu-item").filter((item) => byClass(item, "menu-item__trailing").length > 0);
+      expect(trailed.map(textOf)).toEqual(["History"]);
+    }
   });
 });

@@ -266,7 +266,6 @@ describe("section 10: the pages", () => {
     ]);
     const cancel = one(byClass(doc, "button--secondary"));
     expect([cancel.tag, textOf(cancel), cancel.attributes.get("href")]).toEqual(["a", "Cancel", `/a/${id}`]);
-    expect(byTag(doc, "script")).toEqual([]);
   });
 
   it("offers Make private for a public artifact, posting public=false", async () => {
@@ -374,8 +373,14 @@ describe("section 10: the pages", () => {
           .filter((name) => name.startsWith("on")),
       ).toEqual([]);
     }
-    // The result page's one script is its own; the title added none.
-    expect(byTag(await documentOf(await post(world, `/a/${id}/public`, "public=false")), "script")).toHaveLength(1);
+    // Each page's one script is its own; the title added none.
+    for (const response of [
+      await app(world, `/a/${id}/public`),
+      await app(world, `/a/${id}/delete`),
+      await post(world, `/a/${id}/public`, "public=false"),
+    ]) {
+      expect(byTag(await documentOf(response), "script")).toHaveLength(1);
+    }
   });
 });
 
@@ -439,6 +444,9 @@ describe("section 10: headers", () => {
     expect(answers.map(([, response]) => response.status)).toEqual([
       200, 200, 200, 200, 200, 200, 404, 405, 403, 403, 403, 400, 413, 503, 503, 500, 503, 503,
     ]);
+    // The form pages admit exactly Cancel's script, by the hash of the script a page carries, `HEAD` and a refused
+    // `If-None-Match` included.
+    const cancelSource = { "script-src": (await scriptOf(await app(world, `/a/${id}/delete`))).hash };
     // The result page's script, by its hash (its value is checked against the script's in the result page's tests).
     const scriptHash = { "script-src": expect.stringMatching(/^'sha256-[A-Za-z0-9+/]{43}='$/) };
     for (const [kind, response] of answers) {
@@ -454,7 +462,7 @@ describe("section 10: headers", () => {
       expect(policyOf(response)).toEqual({
         ...BASE_POLICY,
         "form-action": kind === "form" ? "'self'" : "'none'",
-        ...(kind === "result" ? scriptHash : {}),
+        ...(kind === "result" ? scriptHash : kind === "form" ? cancelSource : {}),
       });
     }
   });
@@ -605,7 +613,7 @@ describe("section 10: the POST", () => {
   });
 });
 
-/** The result page's one script: its text and the policy's source for it. */
+/** A page's one script, a confirmation page's or the result page's: its text and the policy's source for it. */
 async function scriptOf(response: Response): Promise<{ text: string; source: string | undefined; hash: string }> {
   const source = policyOf(response.clone())["script-src"];
   const doc = await documentOf(response);
@@ -624,6 +632,40 @@ const linksOf = (doc: HtmlNode) =>
     const link = one(byTag(value, "a"));
     return [textOf(link), link.attributes.get("href")];
   });
+
+// PL-56, ISO-5.
+describe("section 10: Cancel's script", () => {
+  it("admits its one script by its hash, the same bytes on both pages for every artifact", async () => {
+    const world = new World();
+    const hidden = await create(world, "Private");
+    const shown = await create(world, "Public");
+    expect((await world.patch(shown, { public: true })).status).toBe(200);
+    const scripts = await Promise.all(
+      [...PATHS(hidden), ...PATHS(shown)].map(async (path) => scriptOf(await app(world, path))),
+    );
+    for (const script of scripts) expect(script.source).toBe(script.hash);
+    expect(new Set(scripts.map((script) => script.text)).size).toBe(1);
+    // The result page's script is another; neither policy admits the other's.
+    const result = await scriptOf(await post(world, `/a/${hidden}/public`, "public=true"));
+    expect(result.hash).not.toBe(scripts[0]?.hash);
+  });
+
+  // Design.md section 10: the script acts on the click on Cancel alone, and only closes its own window.
+  it("selects Cancel alone, closes only its own window and reads no location", async () => {
+    const world = new World();
+    const id = await create(world);
+    for (const path of PATHS(id)) {
+      const actions = one(byClass(await documentOf(await app(world, path)), "form__actions"));
+      expect(byTag(actions, "a").map(textOf)).toEqual(["Cancel"]);
+      const { text } = await scriptOf(await app(world, path));
+      expect([...text.matchAll(/document\.\w+\([^)]*\)/g)].map((match) => match[0])).toEqual([
+        'document.querySelector(".form__actions a")',
+      ]);
+      expect([...text.matchAll(/[\w.]*close\(\)/g)].map((match) => match[0])).toEqual(["window.close()"]);
+      expect(text).not.toMatch(/location|opener\./);
+    }
+  });
+});
 
 // PL-58, ISO-5.
 describe("section 10: the result page", () => {
