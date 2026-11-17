@@ -43,6 +43,10 @@ export default defineConfig({
         // The build and deployment scripts, in Node as they run.
         test: { name: "scripts", include: ["scripts/**/*.test.ts"], environment: "node" },
       },
+      {
+        // The browser tests' own harness code, in Node without a browser; Playwright runs only `*.spec.ts`.
+        test: { name: "browser-harness", include: ["browser/**/*.test.ts"], environment: "node" },
+      },
     ],
   },
 });
