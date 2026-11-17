@@ -395,8 +395,13 @@ and the threats are the three adversaries below, not untrusted users.
   counting open bodies; a response cancelled mid-file, its body cancelled and no later `get`; a `get` that fails,
   stalls or finds no object, on the first file and on a later one; a body that stalls between chunks; an object
   shorter and one longer than its listing; `src/archive.test.ts`: a cancellation before the first entry and one while
-  a body's open is pending) (PL-62). The runtime tells the export of a cancelled response at its next
-  write, so a body that R2 stalls as the client goes away ends at the R2 timeout, and is logged as one.
+  a body's open is pending) (PL-62). A served file's body (a content or public host, the REST file route) likewise
+  waits the R2 timeout at most for each chunk and cancels the body on every exit, and a failure after the headers
+  aborts the transfer: _Enforced (main)_ in `src/objects.ts`, `src/operations.ts`, pinned by behavior
+  (`src/serve.test.ts`, `src/rest.test.ts`: a body that fails or stalls midway, one shorter and one longer than its
+  listing; `src/serve.test.ts`: a stalled body cancelled, and the client going away cancelling the body unlogged). The
+  runtime tells either of a cancelled response at its next write, so a body that R2 stalls as the client goes away ends
+  at the R2 timeout, and is logged as one.
 
 ### Data (DATA)
 

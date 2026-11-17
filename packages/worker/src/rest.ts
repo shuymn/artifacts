@@ -263,7 +263,7 @@ async function file(
   if (request.method === "HEAD") return new Response(null, { headers });
   const object = await openFile(deps, id, found);
   if (!object.ok) return operationError(object.error);
-  return new Response(object.value.body, { headers });
+  return new Response(object.value, { headers });
 }
 
 /** `GET …/versions/{n}/export`: the version's ZIP archive, streamed; a `HEAD` reads no object (section 8, "Export"). */

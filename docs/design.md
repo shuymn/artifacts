@@ -297,8 +297,8 @@ no limit on versions.
 - No `Content-Security-Policy` on artifacts: a page is the agent's code and may load from CDNs. The viewer frame, the
   Worker's own page, carries one (below).
 - `GET` and `HEAD` only (ISO-3); an unknown file answers a plain 404, except the icon below, and a storage failure a
-  plain 503 or 500 (section 8, "Errors"). `Range` is not supported in the first release, so audio and video cannot
-  seek.
+  plain 503 or 500, or after the headers an aborted transfer (section 8, "Errors"). `Range` is not supported in the
+  first release, so audio and video cannot seek.
 - **Icon:** browsers request `/favicon.ico` on their own. When the latest version has no `favicon.ico` (and no
   `favicon.ico/index.html`, which answers its 308), the host answers that path with the gallery's icon (section 10)
   instead of 404. The fallback comes where the 404 would: after Access, the public flag and existence, read in the same
@@ -973,9 +973,14 @@ same object.
 **Storage failures:** an R2 read that fails or stalls (a served file, the REST file route, `read_file`, an export's
 first `get`) is `unavailable`, which a retry may mend, as is a D1 read or an upload (the `head` and `put` of each new
 object) that times out (RES-2). A D1 read or an upload that fails otherwise is `internal`, and so is an object a version
-lists that R2 does not hold or holds at another length: an inconsistency rather than an outage. OAuth storage answers
-as section 7 states. Each failure logs `operation.failed` with its class, and a browser host (section 6) answers its
-status in plain text.
+lists that R2 does not hold or holds at another length: an inconsistency rather than an outage. OAuth storage answers as
+section 7 states. Each failure logs `operation.failed` with its class, and a browser host (section 6) answers its status
+in plain text. These are failures before the response begins. A served file (a content or public host, the REST file
+route) then streams its object as the export does: each chunk waits at most the R2 timeout, and a read that fails or
+stalls, or bytes short of or past the listed size, error the stream, so the client sees an aborted transfer under the
+`Content-Length` it was given, never a whole-looking one, and logs `operation.failed` with its class. The client going
+away cancels the body unlogged, except while R2 stalls, when the body ends at the R2 timeout and logs `timeout` (Export,
+above). `read_file` reads the whole body, at most 1 MiB, before it answers.
 
 **Transport and protocol errors** come before or around an operation: 401 `unauthorized` with
 `WWW-Authenticate: Bearer`, which names the route's protected resource metadata where OAuth is on (section 7), 403 for

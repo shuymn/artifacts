@@ -4,6 +4,7 @@ import { assetPath } from "./gallery/assets.ts";
 import favicon from "./gallery/favicon.ico";
 import {
   APP_HOST,
+  brokenBodies,
   BucketProbe,
   captureLogs,
   CONTENT_SUFFIX,
@@ -11,6 +12,7 @@ import {
   never,
   objectKeys,
   PUBLIC_SUFFIX,
+  readToEnd,
   World,
 } from "./test-support.ts";
 
@@ -592,4 +594,89 @@ describe("section 8: a served file's R2 read", () => {
       ]);
     },
   );
+});
+
+// Design.md section 8, "Storage failures": after the headers, a body that fails, stalls, or holds fewer or more bytes
+// than the stored size aborts the transfer and logs `operation.failed`; the client never gets a clean short or long 200.
+describe("section 8: a served file's body after the headers", () => {
+  it.each(brokenBodies("text"))(
+    "aborts a content and a public host's transfer when the body %s, and logs it",
+    async (_label, body, reason) => {
+      const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+      const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": "text" } })).artifact.id;
+      await world.patch(id, { public: true });
+      const bucket = new BucketProbe();
+      world.env = { ...world.env, FILES: bucket.binding };
+      bucket.behave = (op) => (op === "get" ? Promise.resolve({ body: body() }) : undefined);
+      const logs = captureLogs();
+      for (const request of [() => world.content(id, "/a.txt"), () => world.public(id, "/a.txt")]) {
+        const response = await request();
+        expect([response.status, response.headers.get("Content-Length")]).toEqual([200, "4"]);
+        expect(await readToEnd(response)).toMatchObject({ aborted: true });
+      }
+      const event = { event: "operation.failed", reason, error: "other", artifact: id };
+      expect(logEvents(logs.lines)).toEqual([event, event]);
+    },
+  );
+
+  it("cancels a body that stalls past the timeout", async () => {
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+    const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": "text" } })).artifact.id;
+    const bucket = new BucketProbe();
+    world.env = { ...world.env, FILES: bucket.binding };
+    const cancelled = Promise.withResolvers<"cancelled">();
+    const stalled = new ReadableStream<Uint8Array>({
+      start: (controller) => controller.enqueue(new TextEncoder().encode("te")),
+      cancel: () => cancelled.resolve("cancelled"),
+    });
+    bucket.behave = (op) => (op === "get" ? Promise.resolve({ body: stalled }) : undefined);
+    captureLogs();
+    expect(await readToEnd(await world.content(id, "/a.txt"))).toEqual({ text: "te", aborted: true });
+    expect(await Promise.race([cancelled.promise, new Promise((resolve) => setTimeout(resolve, 500, "open"))])).toBe(
+      "cancelled",
+    );
+  });
+
+  // The runtime tells the pipe of a cancelled response at its next write, so the body sends one more chunk after the
+  // client goes away; that write cancels the body, while the read after it waits. That read then ends short, which is
+  // not a failure, and no timer is left to report a stall.
+  it("cancels the body when the client goes away, without a log", async () => {
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+    const stored = "x".repeat(100_000);
+    const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": stored } })).artifact.id;
+    const bucket = new BucketProbe();
+    world.env = { ...world.env, FILES: bucket.binding };
+    const goOn = Promise.withResolvers<void>();
+    const cancelled = Promise.withResolvers<"cancelled">();
+    let pulls = 0;
+    const flowing = new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          pulls++;
+          if (pulls === 2) await goOn.promise;
+          if (pulls > 2) await never();
+          controller.enqueue(new TextEncoder().encode("x".repeat(10)));
+        },
+        cancel: () => cancelled.resolve("cancelled"),
+      },
+      { highWaterMark: 0 },
+    );
+    bucket.behave = (op) => (op === "get" ? Promise.resolve({ body: flowing }) : undefined);
+    const logs = captureLogs();
+    const response = await world.content(id, "/a.txt");
+    expect(response.status).toBe(200);
+    const reader = response.body?.getReader();
+    if (reader === undefined) throw new Error("no body");
+    expect((await reader.read()).done).toBe(false);
+    await reader.cancel();
+    goOn.resolve();
+    expect(await Promise.race([cancelled.promise, new Promise((resolve) => setTimeout(resolve, 500, "open"))])).toBe(
+      "cancelled",
+    );
+    // Cancelled while its third read waited, long before its 100,000 bytes.
+    expect(pulls).toBe(3);
+    // Past the R2 timeout: a read left waiting would fail and log by now.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(logEvents(logs.lines)).toEqual([]);
+  });
 });

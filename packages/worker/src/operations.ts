@@ -51,6 +51,7 @@ import {
   deletePrefix,
   getObject,
   readBody,
+  responseBody,
   sha256Hex,
   StorageError,
   streamBody,
@@ -212,6 +213,15 @@ function versionJson(deps: OperationDeps, id: ArtifactId, row: VersionRow, files
   return files === undefined ? json : { ...json, files: files.map(fileJson) };
 }
 
+/** `operation.failed` for a failure, its class only (DATA-1): a storage failure's reason, `error` for anything else. */
+function logFailed(error: unknown, fields: { readonly artifact?: ArtifactId; readonly version?: number }): void {
+  logEvent("operation.failed", {
+    reason: error instanceof StorageError ? error.failure : "error",
+    error: errorName(error),
+    ...fields,
+  });
+}
+
 /**
  * Storage failures that `readObject` has not answered: a timeout is `unavailable` (RES-2), anything else `internal`;
  * the log carries the class only.
@@ -220,9 +230,8 @@ async function guarded<T>(artifact: ArtifactId | undefined, work: () => Promise<
   try {
     return await work();
   } catch (error) {
-    const reason = error instanceof StorageError ? error.failure : "error";
-    logEvent("operation.failed", { reason, error: errorName(error), ...(artifact === undefined ? {} : { artifact }) });
-    return fail({ code: reason === "timeout" ? "unavailable" : "internal" });
+    logFailed(error, artifact === undefined ? {} : { artifact });
+    return fail({ code: error instanceof StorageError && error.failure === "timeout" ? "unavailable" : "internal" });
   }
 }
 
@@ -236,7 +245,7 @@ async function readObject<T>(artifact: ArtifactId, work: () => Promise<T>): Prom
     return succeed(await work());
   } catch (error) {
     if (!(error instanceof StorageError) || error.inconsistent) throw error;
-    logEvent("operation.failed", { reason: error.failure, error: errorName(error), artifact });
+    logFailed(error, { artifact });
     return fail({ code: "unavailable" });
   }
 }
@@ -624,9 +633,21 @@ function matchFile(id: ArtifactId, path: ResolvedPath, found: readonly FileRow[]
   return undefined;
 }
 
-/** A looked-up file's bytes, under the R2 timeout. */
-export async function openFile(deps: OperationDeps, id: ArtifactId, file: FileJson): Promise<Result<R2ObjectBody>> {
-  return guarded(id, () => readObject(id, () => getObject(objectStore(deps), id, file.sha256)));
+/**
+ * A looked-up file's bytes as a response streams them: the `get` under the R2 timeout, an operation error when it fails,
+ * then each chunk under the R2 timeout and exactly the listed size, a failure after that aborting the stream and logging
+ * `operation.failed` as a failed read logs it (design.md section 8, "Storage failures").
+ */
+export async function openFile(
+  deps: OperationDeps,
+  id: ArtifactId,
+  file: FileJson,
+): Promise<Result<ReadableStream<Uint8Array>>> {
+  const store = objectStore(deps);
+  const failed = (error: unknown) => logFailed(error, { artifact: id });
+  return guarded(id, () =>
+    readObject(id, async () => responseBody(store, (await getObject(store, id, file.sha256)).body, file.size, failed)),
+  );
 }
 
 /** A looked-up file's bytes, fetched and read whole under the R2 timeout (MCP's `read_file`, after its size bound). */
@@ -692,13 +713,7 @@ export async function exportVersion(deps: OperationDeps, input: ExportInput): Pr
         first: firstBody.value,
         open,
         read: (reader, size) => streamBody(store, reader, size),
-        failed: (error) =>
-          logEvent("operation.failed", {
-            reason: error instanceof StorageError ? error.failure : "error",
-            error: errorName(error),
-            artifact: id,
-            version: number,
-          }),
+        failed: (error) => logFailed(error, { artifact: id, version: number }),
       },
       length,
     );

@@ -443,6 +443,69 @@ export function r2Error(code: number, carrier: "both" | "property" | "message" =
 /** Never settles: a call that hangs until the timeout. */
 export const never = (): Promise<never> => new Promise(() => {});
 
+const encoded = (text: string) => new TextEncoder().encode(text);
+
+/**
+ * Bodies an R2 `get` can bring for a file stored as `stored`, each failing only after a response's headers, with the
+ * reason `operation.failed` logs: a read that fails midway, one that stalls past the R2 timeout after its first bytes,
+ * and bytes short of and past the stored size.
+ */
+export function brokenBodies(
+  stored: string,
+): [label: string, body: () => ReadableStream<Uint8Array>, reason: string][] {
+  const half = stored.slice(0, Math.ceil(stored.length / 2));
+  return [
+    [
+      "fails midway",
+      () => {
+        let pulls = 0;
+        return new ReadableStream({
+          pull(controller) {
+            if (++pulls === 1) controller.enqueue(encoded(half));
+            else controller.error(new Error("cut"));
+          },
+        });
+      },
+      "error",
+    ],
+    [
+      "stalls midway",
+      () => new ReadableStream({ start: (controller) => controller.enqueue(encoded(half)) }),
+      "timeout",
+    ],
+    ["ends short", () => new Response(stored.slice(0, -1)).body ?? new ReadableStream(), "error"],
+    ["runs past", () => new Response(`${stored}!`).body ?? new ReadableStream(), "error"],
+  ];
+}
+
+/**
+ * A response's body read to its end, or `hung` when it neither ends nor fails within `ms`: the text it gave, and
+ * whether it ended in an error, as a client sees an aborted transfer.
+ */
+export async function readToEnd(
+  response: Response,
+  ms = 1_000,
+): Promise<{ readonly text: string; readonly aborted: boolean } | "hung"> {
+  const reader = response.body?.getReader();
+  if (reader === undefined) return { text: "", aborted: false };
+  const decoder = new TextDecoder();
+  const read = async () => {
+    let text = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return { text, aborted: false };
+        text += decoder.decode(value, { stream: true });
+      }
+    } catch {
+      return { text, aborted: true };
+    }
+  };
+  const result = await Promise.race([read(), new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), ms))]);
+  if (result === "hung") reader.cancel().catch(() => {});
+  return result;
+}
+
 /**
  * Wraps the real database so that batches can be held, delayed or extended with a failing statement (which makes D1
  * roll the whole batch back).

@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  brokenBodies,
   BucketProbe,
   captureLogs,
   clearStorage,
@@ -11,6 +12,7 @@ import {
   logEvents,
   never,
   objectKeys,
+  readToEnd,
   snapshot,
   START,
   World,
@@ -207,6 +209,25 @@ describe("REST contract", () => {
       bucket.behave = () => undefined;
       const served = await world.api("GET", path);
       expect([served.status, await served.text()]).toEqual([200, "text"]);
+    },
+  );
+
+  // Section 8, "Storage failures": after the headers, a body that fails, stalls, or holds fewer or more bytes than the
+  // stored size aborts the transfer and logs `operation.failed`.
+  it.each(brokenBodies("text"))(
+    "aborts the file route's transfer when the body %s, and logs it",
+    async (_label, body, reason) => {
+      const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+      const { artifact } = await world.created({ title: "t", files: { "index.html": "i", "a.txt": "text" } });
+      const bucket = withBucket(world);
+      bucket.behave = (op) => (op === "get" ? Promise.resolve({ body: body() }) : undefined);
+      const logs = captureLogs();
+      const response = await world.api("GET", `/v1/artifacts/${artifact.id}/versions/1/files/a.txt`);
+      expect([response.status, response.headers.get("Content-Length")]).toEqual([200, "4"]);
+      expect(await readToEnd(response)).toMatchObject({ aborted: true });
+      expect(logEvents(logs.lines)).toEqual([
+        { event: "operation.failed", reason, error: "other", artifact: artifact.id },
+      ]);
     },
   );
 
