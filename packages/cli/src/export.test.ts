@@ -238,12 +238,29 @@ describe("export against a stand-in", () => {
   });
 });
 
-/** A stored login whose access token has expired, so the next command refreshes it first. */
-async function expiring(standIn: StandIn) {
+/**
+ * A stored login: its access token expired, so the next command refreshes it first, or valid for an hour, so a refresh
+ * follows only a 401.
+ */
+async function storedLogin(standIn: StandIn, expired: boolean) {
   const credentials = await Credentials.create();
   const { client, tokens } = standIn.issue();
-  await credentials.put(standIn.origin, { client, tokens, expires: Date.now() });
+  await credentials.put(standIn.origin, { client, tokens, expires: Date.now() + (expired ? 0 : 3_600_000) });
   return { credentials, tokens };
+}
+
+/** Starts an export with `fetch`, interrupted when the test calls `interrupt`; `settled` tells whether it ended. */
+function interruptible(fetch: Fetch, env: Record<string, string>) {
+  const state = { interrupt: (): void => undefined, settled: false };
+  const running = exportedWith(fetch, env, {
+    onInterrupt: (listener) => {
+      state.interrupt = listener;
+      return () => undefined;
+    },
+  }).finally(() => {
+    state.settled = true;
+  });
+  return { state, running };
 }
 
 describe("export with a stored login", () => {
@@ -255,10 +272,11 @@ describe("export with a stored login", () => {
     body,
     headers: { ...ZIP, "Content-Length": String(Buffer.byteLength(JSON.stringify(body))) },
   };
+  const refused: Answer = { status: 401, body: { error: { code: "unauthorized", message: "a valid bearer token" } } };
 
   it("starts the idle limit when the request starts, not while a refresh resolves the credential", async () => {
     const standIn = await StandIn.start();
-    const { credentials } = await expiring(standIn);
+    const { credentials } = await storedLogin(standIn, true);
     standIn.override = async ({ path }) => {
       if (path === "/oauth/token") await pause(3 * TIMEOUTS.idleMs);
       return path === EXPORT ? archive : undefined;
@@ -274,27 +292,18 @@ describe("export with a stored login", () => {
 
   it("waits for a refresh an interrupt arrives during, then sends nothing and removes its part", async () => {
     const standIn = await StandIn.start();
-    const { credentials, tokens } = await expiring(standIn);
+    const { credentials, tokens } = await storedLogin(standIn, true);
     const refresh = gate();
     standIn.override = async ({ path }) => {
       if (path === "/oauth/token") await refresh.wait;
       return undefined;
     };
-    let interrupt: (() => void) | undefined;
-    let settled = false;
-    const running = exportedWith(network, credentials.env(standIn), {
-      onInterrupt: (listener) => {
-        interrupt = listener;
-        return () => undefined;
-      },
-    }).finally(() => {
-      settled = true;
-    });
+    const { state, running } = interruptible(network, credentials.env(standIn));
     await until(() => standIn.requests.includes("POST /oauth/token refresh_token"));
-    interrupt?.();
+    state.interrupt();
     // The refresh is still under way, so the export waits for it, and the idle limit does not count it.
     await pause(3 * TIMEOUTS.idleMs);
-    expect(settled).toBe(false);
+    expect(state.settled).toBe(false);
     refresh.open();
     expect(await running).toEqual({
       status: 1,
@@ -303,6 +312,48 @@ describe("export with a stored login", () => {
       left: [],
     });
     expect(standIn.requests.at(-1)).toBe("POST /oauth/token refresh_token");
+    expect((await credentials.read())[standIn.origin]?.tokens?.access_token).not.toBe(tokens.access_token);
+  });
+  it("stops the idle limit while a refresh after a 401 takes longer than the limit, then exports", async () => {
+    const standIn = await StandIn.start();
+    const { credentials } = await storedLogin(standIn, false);
+    let exports = 0;
+    standIn.override = async ({ path }) => {
+      if (path === "/oauth/token") await pause(3 * TIMEOUTS.idleMs);
+      if (path !== EXPORT) return undefined;
+      return ++exports === 1 ? refused : archive;
+    };
+    const ran = await exportedWith(network, credentials.env(standIn));
+    expect(ran).toMatchObject({ status: 0, stderr: "", left: ["out.zip"] });
+    expect(standIn.requests).toEqual([
+      `GET ${EXPORT}`,
+      "GET /.well-known/oauth-authorization-server",
+      "POST /oauth/token refresh_token",
+      `GET ${EXPORT}`,
+    ]);
+  });
+
+  it("waits for a refresh after a 401 an interrupt arrives during, then sends nothing more", async () => {
+    const standIn = await StandIn.start();
+    const { credentials, tokens } = await storedLogin(standIn, false);
+    const refresh = gate();
+    standIn.override = async ({ path }) => {
+      if (path === "/oauth/token") await refresh.wait;
+      return path === EXPORT ? refused : undefined;
+    };
+    const { state, running } = interruptible(network, credentials.env(standIn));
+    await until(() => standIn.requests.includes("POST /oauth/token refresh_token"));
+    state.interrupt();
+    await pause(3 * TIMEOUTS.idleMs);
+    expect(state.settled).toBe(false);
+    refresh.open();
+    expect(await running).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "artifacts: the export was interrupted\n",
+      left: [],
+    });
+    expect(standIn.count(`GET ${EXPORT}`)).toBe(1);
     expect((await credentials.read())[standIn.origin]?.tokens?.access_token).not.toBe(tokens.access_token);
   });
 });
