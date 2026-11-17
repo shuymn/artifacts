@@ -4,6 +4,12 @@ import { request } from "node:http";
 /** The variable server.ts passes the harness's port in. */
 export const PORT_VARIABLE = "ARTIFACTS_BROWSER_PORT";
 
+/**
+ * The time zone the harness attaches to every request as `request.cf.timezone`: nine hours from UTC all year, so a
+ * time the Worker writes in it never reads as its UTC instant, wherever and whenever the tests run.
+ */
+export const TIME_ZONE = "Asia/Tokyo";
+
 /** The API token the Worker accepts, for publishing; local to the test run. */
 export const TOKEN = `art_${"b".repeat(32)}`;
 

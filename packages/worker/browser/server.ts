@@ -5,11 +5,14 @@
  * is known only once it listens; the configuration is then updated with it, which keeps the port.
  */
 import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createTestHarness } from "wrangler";
 
-import { PORT_VARIABLE, TOKEN } from "./support.ts";
+import { PORT_VARIABLE, TIME_ZONE, TOKEN } from "./support.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 
@@ -27,12 +30,42 @@ function worker(port: string) {
   };
 }
 
-/** Starts the Worker, gives the tests its port, and returns the teardown that stops it. */
+/**
+ * The `request.cf` of every request: `TIME_ZONE` and nothing else the Worker reads. Without it, Miniflare fetches the
+ * caller's own from Cloudflare (or falls back to a placeholder of its own), so the zone would follow where the tests
+ * run. Miniflare reads the file `CLOUDFLARE_CF_FETCH_PATH` names, and fetches again over a file older than 30 days, so
+ * each run writes a new one and removes it at the end.
+ */
+async function pinCf(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "artifacts-cf-"));
+  const path = join(directory, "cf.json");
+  await writeFile(path, JSON.stringify({ timezone: TIME_ZONE }));
+  process.env.CLOUDFLARE_CF_FETCH_PATH = path;
+  return directory;
+}
+
+/**
+ * Starts the Worker, gives the tests its port, and returns the teardown that stops it and removes the `cf` file; a
+ * start that fails does the same.
+ */
 export default async function start(): Promise<() => Promise<void>> {
+  const cf = await pinCf();
   const server = createTestHarness({ root: ROOT, workers: [worker("1")] });
-  const { url } = await server.listen();
-  await server.update({ root: ROOT, workers: [worker(url.port)] });
-  await server.getWorker().applyD1Migrations("DB");
-  process.env[PORT_VARIABLE] = url.port;
-  return () => server.close();
+  const stop = async () => {
+    try {
+      await server.close();
+    } finally {
+      await rm(cf, { recursive: true, force: true });
+    }
+  };
+  try {
+    const { url } = await server.listen();
+    await server.update({ root: ROOT, workers: [worker(url.port)] });
+    await server.getWorker().applyD1Migrations("DB");
+    process.env[PORT_VARIABLE] = url.port;
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+  return stop;
 }
