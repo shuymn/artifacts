@@ -477,3 +477,80 @@ describe("PL-54: the frame page", () => {
     expect(response.headers.has("Set-Cookie")).toBe(false);
   });
 });
+
+const TOKYO = { timezone: "Asia/Tokyo" };
+const LOS_ANGELES = { timezone: "America/Los_Angeles" };
+
+/** An artifact published at 05:30 UTC and updated at 15:30 UTC: the day before in Los Angeles, after in Tokyo. */
+async function zoned(world: World): Promise<string> {
+  world.clock.now = Date.parse("2026-11-16T05:30:00Z");
+  const id = await artifact(world);
+  world.clock.now = Date.parse("2026-11-16T15:30:00Z");
+  await world.updated(id, { base_version: 1, files: { "index.html": "<title>v2</title>" } });
+  return id;
+}
+
+/** The menu's head, and each version in the history: its text, and its time's instant, title and minute. */
+function frameTimesOf(root: HtmlNode) {
+  const shown = one(byClass(root, "viewer-menu__shown"));
+  const time = one(byTag(shown, "time"));
+  const history = byTag(one(byClass(root, "viewer-history")), "time");
+  return {
+    shown: { text: textOf(shown), datetime: attr(time, "datetime"), title: attr(time, "title") },
+    history: history.map((node) => ({
+      text: textOf(node),
+      datetime: attr(node, "datetime"),
+      title: attr(node, "title"),
+      minute: attr(node, "data-minute"),
+    })),
+  };
+}
+
+/** What the latest version's frame shows in `zone`, v2's minute and date, then v1's. */
+const frameTimes = (zone: string, v2: string, v1: string) => ({
+  shown: { text: `v2 · updated ${v2}`, datetime: "2026-11-16T15:30:00Z", title: zone },
+  history: [
+    { text: v2.slice(0, 10), datetime: "2026-11-16T15:30:00Z", title: zone, minute: v2 },
+    { text: v1.slice(0, 10), datetime: "2026-11-16T05:30:00Z", title: zone, minute: v1 },
+  ],
+});
+
+describe("PL-64: the frame's times in the request's zone", () => {
+  it.each([
+    ["Asia/Tokyo", TOKYO, "2026-11-17 00:30", "2026-11-16 14:30"],
+    ["America/Los_Angeles", LOS_ANGELES, "2026-11-16 07:30", "2026-11-15 21:30"],
+  ])("shows the menu's time and the history's dates in %s, titled with it", async (zone, cf, v2, v1) => {
+    const world = new World();
+    const id = await zoned(world);
+    const root = await page(await world.content(id, "/", { headers: DOCUMENT, cf }));
+    expect(frameTimesOf(root)).toEqual(frameTimes(zone, v2, v1));
+    const pinned = await page(await world.content(id, "/_v/1/", { headers: DOCUMENT, cf }));
+    expect(textOf(one(byClass(pinned, "viewer-menu__shown")))).toBe(`v1 · published ${v1}`);
+  });
+
+  it.each([
+    ["no cf", undefined],
+    ["cf without a zone", { country: "JP" }],
+    ["a zone Intl rejects", { timezone: "Mars/Olympus_Mons" }],
+  ])("shows UTC, titled UTC, for a request with %s", async (_case, cf) => {
+    const world = new World();
+    const id = await zoned(world);
+    const response = await world.content(id, "/", cf === undefined ? { headers: DOCUMENT } : { headers: DOCUMENT, cf });
+    expect(frameTimesOf(await page(response))).toEqual(frameTimes("UTC", "2026-11-16 15:30", "2026-11-16 05:30"));
+  });
+
+  it("tags the frame with its zone, so another zone's tag gets the page again", async () => {
+    const world = new World();
+    const id = await zoned(world);
+    const tokyo = await world.content(id, "/", { headers: DOCUMENT, cf: TOKYO });
+    const losAngeles = await world.content(id, "/", { headers: DOCUMENT, cf: LOS_ANGELES });
+    const tag = tokyo.headers.get("ETag") ?? "";
+    expect(losAngeles.headers.get("ETag")).not.toBe(tag);
+    const same = await world.content(id, "/", { headers: { ...DOCUMENT, "If-None-Match": tag }, cf: TOKYO });
+    expect(same.status).toBe(304);
+    const other = await world.content(id, "/", { headers: { ...DOCUMENT, "If-None-Match": tag }, cf: LOS_ANGELES });
+    expect(other.status).toBe(200);
+    expect(other.headers.get("ETag")).toBe(losAngeles.headers.get("ETag"));
+    expect(await other.text()).toBe(await losAngeles.text());
+  });
+});

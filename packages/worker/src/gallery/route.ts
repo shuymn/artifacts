@@ -13,6 +13,7 @@ import { exportVersion, getForGallery, listForGallery, type ArchiveCounts, type 
 import { parseVersionNumber } from "../paths.ts";
 import { browserHeaders, plainResponse, serveAsset } from "../serve.ts";
 import { FAVICON, findAsset, GALLERY_ASSETS, type FingerprintedAssets } from "./assets.ts";
+import { requestTimeZone, type TimeZone } from "./format.ts";
 import type { Markup } from "./html.ts";
 import { artifactPage, listPage, type Chrome, type Section } from "./pages.ts";
 
@@ -82,13 +83,13 @@ const STATUS: Readonly<Record<OperationErrorCode, number>> = {
 const refusal = (status: number) => plainResponse("private", status);
 
 /**
- * A rendered page, with an `ETag` over its bytes and a 304 for a matching `If-None-Match`, as an asset has (design.md
- * section 10). The tag covers everything the page shows (counts, links, relative times), so no stored timestamp could
- * stand in for it. Only a page answers this way: Access was checked and the query succeeded before it was rendered,
- * and refusals carry no tag.
+ * A rendered page, with an `ETag` over its bytes and the zone of its times, and a 304 for a matching `If-None-Match`,
+ * as an asset has (design.md section 10). The tag covers everything the page shows (counts, links, relative times), so no
+ * stored timestamp could stand in for it. Only a page answers this way: Access was checked and the query succeeded
+ * before it was rendered, and refusals carry no tag.
  */
-function page(request: Request, markup: Markup): Promise<Response> {
-  return serveAsset(request, { contentType: "text/html; charset=utf-8", body: markup.text }, HEADERS);
+function page(request: Request, markup: Markup, zone: TimeZone): Promise<Response> {
+  return serveAsset(request, { contentType: "text/html; charset=utf-8", body: markup.text, zone: zone.name }, HEADERS);
 }
 
 /**
@@ -133,10 +134,12 @@ export async function serveGallery(request: Request, url: URL, deps: OperationDe
   const asset = serveGalleryAsset(request, path);
   if (asset !== undefined) return asset;
 
+  const zone = requestTimeZone(request);
   const chrome = (counts: ArchiveCounts): Chrome => ({
     counts,
     now: deps.now(),
     archiveAfterDays: Math.round(deps.config.archiveAfterMs / DAY_MS),
+    zone,
   });
   const section = LISTS.get(path);
   if (section !== undefined) {
@@ -144,14 +147,14 @@ export async function serveGallery(request: Request, url: URL, deps: OperationDe
     const archived = section === "active" ? "exclude" : "only";
     const list = await listForGallery(deps, { archived, limit: PAGE_SIZE, cursor });
     if (!list.ok) return refusal(STATUS[list.error.code]);
-    return page(request, listPage(chrome(list.value.counts), section, list.value));
+    return page(request, listPage(chrome(list.value.counts), section, list.value), zone);
   }
   const id = ARTIFACT_PATH.exec(path)?.[1];
   if (id !== undefined) {
     const cursor = url.searchParams.get("versions_cursor") ?? undefined;
     const artifact = await getForGallery(deps, { id, limit: PAGE_SIZE, cursor });
     if (!artifact.ok) return refusal(STATUS[artifact.error.code]);
-    return page(request, artifactPage(chrome(artifact.value.counts), artifact.value));
+    return page(request, artifactPage(chrome(artifact.value.counts), artifact.value), zone);
   }
   const download = EXPORT_PATH.exec(path);
   if (download?.[1] !== undefined && download[2] !== undefined) {

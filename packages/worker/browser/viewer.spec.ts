@@ -179,7 +179,19 @@ test.describe("PL-55: the frame's script", () => {
     await frameOf(page).locator("#pinned").click();
     await expect(page).toHaveURL(`${contentOrigin(id)}/_v/1/`);
     await expect(page.locator(".viewer-header__version")).toHaveText("v1 of 2");
-    await expect(page.locator(".viewer-menu__shown")).toHaveText(/^v1 · published \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    // The menu's head takes v1's minute and zone from the history, as the server wrote them for this request's zone.
+    const v1Time = page.locator(".viewer-history li a[href='/_v/1/'] time");
+    const minute = (await v1Time.getAttribute("data-minute")) ?? "";
+    expect(minute).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    await expect(page.locator(".viewer-menu__shown")).toHaveText(`v1 · published ${minute}`);
+    await expect(page.locator(".viewer-menu__shown time")).toHaveAttribute(
+      "title",
+      (await v1Time.getAttribute("title")) ?? "",
+    );
+    await expect(page.locator(".viewer-menu__shown time")).toHaveAttribute(
+      "datetime",
+      (await v1Time.getAttribute("datetime")) ?? "",
+    );
     await expect(page.locator(".viewer-history li a[aria-current=page]")).toHaveAttribute("href", "/_v/1/");
     await expect(page.locator("#viewer-export")).toHaveAttribute("href", `${appOrigin()}/a/${id}/v/1/export`);
     await expect(page.locator("#viewer-export .menu-item__label")).toHaveText("Export v1 (.zip)");

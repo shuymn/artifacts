@@ -6,6 +6,7 @@
 import { succeed, type Result } from "./errors.ts";
 import { FRAMED_VARY, frameAsset, framePolicy, isHtml, wantsFrame } from "./frame.ts";
 import { assetTag, FAVICON, type Asset } from "./gallery/assets.ts";
+import { requestTimeZone } from "./gallery/format.ts";
 import type { ArtifactId } from "./id.ts";
 import {
   lookupFile,
@@ -165,7 +166,7 @@ export async function serveArtifact(
   const html = kind === "private" && isHtml(file.content_type);
   if (html && framing && viewer !== undefined) {
     const headers = { ...browserHeaders(kind), ...FRAMED_VARY, ...(await framePolicy()) };
-    return serveAsset(request, frameAsset(url, deps.config, viewer), headers);
+    return serveAsset(request, frameAsset(url, deps.config, viewer, requestTimeZone(request)), headers);
   }
   const vary = html ? FRAMED_VARY : VARY;
   const etag = await entityTag(file);

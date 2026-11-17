@@ -19,6 +19,7 @@ import {
   never,
   PUBLIC_SUFFIX,
   START,
+  type RequestCf,
   TOKENS,
   World,
 } from "../test-support.ts";
@@ -48,15 +49,17 @@ class ThrowingVerifier extends AccessVerifier {
 }
 const UNKNOWN_ID = "abcdefghijklmnopqrstuvwxyz";
 
-/** A request to the app host with a valid app JWT unless `jwt` is null. */
+/** A request to the app host with a valid app JWT unless `jwt` is null, and `cf` as Cloudflare would attach it. */
 async function app(
   world: World,
   path: string,
-  options: { jwt?: null; method?: string; headers?: Record<string, string> } = {},
+  options: { jwt?: null; method?: string; headers?: Record<string, string>; cf?: RequestCf } = {},
 ): Promise<Response> {
   const headers = new Headers(options.headers);
   if (options.jwt !== null) headers.set("Cf-Access-Jwt-Assertion", await world.jwt({ aud: APP_AUD }));
-  return world.fetch(`https://${APP_HOST}${path}`, { method: options.method ?? "GET", headers });
+  const init: RequestInit = { method: options.method ?? "GET", headers };
+  if (options.cf !== undefined) init.cf = options.cf;
+  return world.fetch(`https://${APP_HOST}${path}`, init);
 }
 
 /** A page's parsed document; fails the test unless the page answered 200. */
@@ -987,5 +990,109 @@ describe("section 10: page validators", () => {
     responses.push(await app(world, "/", { headers: { "If-None-Match": etag } }));
     expect(responses.map((response) => response.status)).toEqual([403, 404, 404, 404, 308, 503]);
     for (const response of responses) expect(response.headers.has("ETag")).toBe(false);
+  });
+});
+
+const TOKYO = { timezone: "Asia/Tokyo" };
+const LOS_ANGELES = { timezone: "America/Los_Angeles" };
+
+/** An artifact published at 05:30 UTC and updated at 15:30 UTC: the day before in Los Angeles, after in Tokyo. */
+async function zoned(world: World): Promise<string> {
+  world.clock.now = Date.parse("2026-11-16T05:30:00Z");
+  const id = await create(world, "Zoned");
+  world.clock.now = Date.parse("2026-11-16T15:30:00Z");
+  await world.updated(id, { base_version: 1, files: { "b.html": "b" } });
+  return id;
+}
+
+/** Each `<time>` on a page: its UTC instant, its title and its text. */
+const timesOf = (doc: HtmlNode) =>
+  elements(doc)
+    .filter((node) => node.tag === "time")
+    .map((time) => ({
+      datetime: time.attributes.get("datetime"),
+      title: time.attributes.get("title"),
+      text: textOf(time),
+    }));
+
+/** The artifact page's times in order: Latest (v2), Created (v1), then the history's v2 and v1. */
+const artifactTimes = (title: string, v2: string, v1: string) =>
+  [
+    ["2026-11-16T15:30:00Z", v2],
+    ["2026-11-16T05:30:00Z", v1],
+    ["2026-11-16T15:30:00Z", v2],
+    ["2026-11-16T05:30:00Z", v1],
+  ].map(([datetime, text]) => ({ datetime, title, text }));
+
+describe("PL-64: times in the request's zone", () => {
+  it.each([
+    ["Asia/Tokyo", TOKYO, "2026-11-17 00:30", "2026-11-16 14:30"],
+    ["America/Los_Angeles", LOS_ANGELES, "2026-11-16 07:30", "2026-11-15 21:30"],
+  ])("shows the artifact page's times in %s, titled with it, at their UTC instants", async (zone, cf, v2, v1) => {
+    const world = new World();
+    const id = await zoned(world);
+    const response = await app(world, `/a/${id}`, { cf });
+    expect(response.status).toBe(200);
+    const doc = await parseHtml(await response.text());
+    expect(timesOf(doc)).toEqual(artifactTimes(zone, v2, v1));
+    expect(infoOf(doc)).toMatchObject({ Latest: `v2 · ${v2} by codex`, Created: `${v1} by codex` });
+  });
+
+  it.each([
+    ["no cf", undefined],
+    ["cf without a zone", { country: "JP" }],
+    ["a zone Intl rejects", { timezone: "Mars/Olympus_Mons" }],
+  ])("shows times in UTC, titled UTC, for a request with %s", async (_case, cf) => {
+    const world = new World();
+    const id = await zoned(world);
+    const response = await app(world, `/a/${id}`, cf === undefined ? {} : { cf });
+    expect(response.status).toBe(200);
+    expect(timesOf(await parseHtml(await response.text()))).toEqual(
+      artifactTimes("UTC", "2026-11-16 15:30", "2026-11-16 05:30"),
+    );
+  });
+
+  it("keeps a list row's relative time, untitled, the same in every zone", async () => {
+    const world = new World();
+    await zoned(world);
+    world.clock.now += 2 * HOUR_MS;
+    const [tokyo, losAngeles] = await Promise.all([
+      app(world, "/", { cf: TOKYO }).then((response) => response.text()),
+      app(world, "/", { cf: LOS_ANGELES }).then((response) => response.text()),
+    ]);
+    expect(tokyo).toBe(losAngeles);
+    expect(timesOf(await parseHtml(tokyo))).toEqual([
+      { datetime: "2026-11-16T15:30:00Z", title: undefined, text: "2 hours ago" },
+    ]);
+  });
+
+  // A list's bytes are the same in every zone; its tag still names the zone, as every page's does.
+  it("tags each page with its zone, so another zone's tag gets the page again", async () => {
+    const world = new World();
+    const id = await zoned(world);
+    for (const path of ["/", `/a/${id}`]) {
+      const tokyo = (await app(world, path, { cf: TOKYO })).headers.get("ETag") ?? "";
+      const losAngeles = (await app(world, path, { cf: LOS_ANGELES })).headers.get("ETag") ?? "";
+      expect({ path, differs: tokyo !== losAngeles }).toEqual({ path, differs: true });
+      const same = await app(world, path, { cf: TOKYO, headers: { "If-None-Match": tokyo } });
+      expect({ path, status: same.status }).toEqual({ path, status: 304 });
+      const other = await app(world, path, { cf: LOS_ANGELES, headers: { "If-None-Match": tokyo } });
+      expect({ path, status: other.status, etag: other.headers.get("ETag") }).toEqual({
+        path,
+        status: 200,
+        etag: losAngeles,
+      });
+    }
+  });
+
+  it("covers a rendered page's zone in its tag with its bytes", async () => {
+    const rendered = { contentType: "text/html; charset=utf-8", body: "<p>page</p>" };
+    const tags = await Promise.all([
+      assetTag(rendered),
+      assetTag({ ...rendered, zone: "Asia/Tokyo" }),
+      assetTag({ ...rendered, zone: "America/Los_Angeles" }),
+    ]);
+    expect(new Set(tags).size).toBe(3);
+    expect(await assetTag({ ...rendered, zone: "Asia/Tokyo" })).toBe(tags[1]);
   });
 });

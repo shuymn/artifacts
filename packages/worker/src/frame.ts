@@ -7,6 +7,7 @@
 import type { Config } from "./config.ts";
 import { scriptSource } from "./encoding.ts";
 import type { Asset } from "./gallery/assets.ts";
+import type { TimeZone } from "./gallery/format.ts";
 import { viewerPage, VIEWER_SCRIPT_TEXT } from "./gallery/viewer.ts";
 import { appOrigin } from "./hosts.ts";
 import type { ViewerData } from "./operations.ts";
@@ -43,12 +44,13 @@ function directUrl(url: URL): string {
 }
 
 /**
- * The frame page's bytes. Served with the private host's headers, `FRAMED_VARY` and `framePolicy`, under an `ETag` over
- * these bytes, compared after Access and existence (SRV-3); a `HEAD` reads no object, since the page has none.
+ * The frame page's bytes, with its times in `zone`, the request's. Served with the private host's headers,
+ * `FRAMED_VARY` and `framePolicy`, under an `ETag` over these bytes and the zone, compared after Access and existence
+ * (SRV-3); a `HEAD` reads no object, since the page has none.
  */
-export function frameAsset(url: URL, config: Config, data: ViewerData): Asset {
-  const page = viewerPage({ data, app: appOrigin(config), direct: directUrl(url) });
-  return { contentType: "text/html; charset=utf-8", body: page.text };
+export function frameAsset(url: URL, config: Config, data: ViewerData, zone: TimeZone): Asset {
+  const page = viewerPage({ data, app: appOrigin(config), direct: directUrl(url), zone });
+  return { contentType: "text/html; charset=utf-8", body: page.text, zone: zone.name };
 }
 
 /**

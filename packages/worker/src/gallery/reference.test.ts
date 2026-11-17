@@ -24,6 +24,7 @@ import type {
   VersionJson,
 } from "../operations.ts";
 import { assetPath } from "./assets.ts";
+import { timeZone } from "./format.ts";
 import {
   artifactPage,
   consentErrorPage,
@@ -40,11 +41,15 @@ import { viewerPage, type ViewerView } from "./viewer.ts";
 
 import viewerCss from "./viewer.css?raw";
 
-/** The time the reference pages' relative times count from: "2 hours ago" for 09:12. */
+/**
+ * The time the reference pages' relative times count from: "2 hours ago" for 09:12. The reference pages show times in
+ * UTC, the zone of a request without one.
+ */
 const CHROME: Chrome = {
   counts: { active: 24, archived: 7 },
   now: Date.parse("2026-11-16T11:12:00Z"),
   archiveAfterDays: 30,
+  zone: timeZone(undefined),
 };
 
 function artifact(
@@ -403,6 +408,7 @@ describe("templates and reference pages", () => {
 const VIEWER: ViewerView = {
   app: "https://artifacts.example.com",
   direct: "/_v/2/?_viewer=off",
+  zone: CHROME.zone,
   data: {
     artifact: { ...ARTIFACT.artifact, public: false, public_url: null },
     shown: ARTIFACT.versions.versions[1] ?? V3,
