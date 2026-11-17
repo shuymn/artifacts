@@ -307,6 +307,8 @@ describe("PL-62: streaming", () => {
         return {
           body: new ReadableStream<Uint8Array>({
             async pull(controller) {
+              // A body that takes its time, as R2's does: an object opened ahead of its turn would overlap.
+              await new Promise((resolve) => setTimeout(resolve, 5));
               const { done, value } = await reader.read();
               if (done) {
                 close();
@@ -331,8 +333,9 @@ describe("PL-62: streaming", () => {
     expect(open).toBe(0);
   });
 
-  // The runtime tells the pipe of a cancelled response at its next write (checked in workerd), so the body goes on
-  // sending, as R2's does, until the cancellation reaches the library and the entries.
+  // The runtime tells the pipe of a cancelled response at its next write (checked in workerd), so the body sends one
+  // more chunk after the client goes away; that write cancels the library's stream and the entries, while the read of
+  // the chunk after it is still waiting. That read then ends short, which is not a failure.
   it("cancels the open body when the client goes away and gets no later object, without a log", async () => {
     const world = new World({ timeouts: { r2Ms: 200, d1ReadMs: 2_000, kvReadMs: 2_000 } });
     const middleText = `MIDFILE${"x".repeat(100_000)}`;
@@ -346,7 +349,8 @@ describe("PL-62: streaming", () => {
       {
         async pull(controller) {
           pulls++;
-          if (pulls > 1) await goOn.promise;
+          if (pulls === 2) await goOn.promise;
+          if (pulls > 2) await never();
           controller.enqueue(bytesOf(pulls === 1 ? "MIDFILE" : "x".repeat(10)));
         },
         cancel() {
@@ -372,8 +376,8 @@ describe("PL-62: streaming", () => {
     await reader.cancel();
     goOn.resolve();
     expect(await settles(cancelled.promise)).toBe("cancelled");
-    // The body was cancelled long before its 100,007 bytes: a few chunks of 10 after the first.
-    expect(pulls).toBeLessThan(10);
+    // Cancelled by the entries while its third read waited, long before its 100,007 bytes.
+    expect(pulls).toBe(3);
     // Past the R2 timeout: a read left waiting would fail and log by now.
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(bucket.calls.filter((call) => call.op === "get").map((call) => call.key)).toEqual([
