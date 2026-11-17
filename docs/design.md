@@ -296,8 +296,9 @@ no limit on versions.
   it.
 - No `Content-Security-Policy` on artifacts: a page is the agent's code and may load from CDNs. The viewer frame, the
   Worker's own page, carries one (below).
-- `GET` and `HEAD` only (ISO-3); an unknown file answers a plain 404, except the icon below. `Range` is not supported
-  in the first release, so audio and video cannot seek.
+- `GET` and `HEAD` only (ISO-3); an unknown file answers a plain 404, except the icon below, and a storage failure a
+  plain 503 or 500, or after the headers an aborted transfer (section 8, "Errors"). `Range` is not supported in the
+  first release, so audio and video cannot seek.
 - **Icon:** browsers request `/favicon.ico` on their own. When the latest version has no `favicon.ico` (and no
   `favicon.ico/index.html`, which answers its 308), the host answers that path with the gallery's icon (section 10)
   instead of 404. The fallback comes where the 404 would: after Access, the public flag and existence, read in the same
@@ -960,14 +961,29 @@ download `GET /a/<id>/v/<n>/export` behind Access (section 10; the viewer's Expo
 `{ "error": { "code", "message", … } }` with the status below; MCP answers a tool result with `isError: true` and the
 same object.
 
-| Code               | HTTP | When                                                                                                           |
-| ------------------ | ---- | -------------------------------------------------------------------------------------------------------------- |
-| `invalid_request`  | 400  | input fails validation; `issues` lists `{ field, reason }`, reasons from a closed set                          |
-| `not_found`        | 404  | no live artifact, version, file or grant                                                                       |
-| `version_conflict` | 409  | `base_version` is not the latest; carries `latest_version`                                                     |
-| `not_extractable`  | 409  | an exported version has paths that cannot be extracted as stored (Export, above); `paths` lists each           |
-| `unavailable`      | 503  | invalid configuration, an unreachable key set, or a failed or timed-out read or upload, OAuth storage included |
-| `internal`         | 500  | anything else, an exported version's object that R2 does not hold included; the message carries no detail      |
+| Code               | HTTP | When                                                                                                                  |
+| ------------------ | ---- | --------------------------------------------------------------------------------------------------------------------- |
+| `invalid_request`  | 400  | input fails validation; `issues` lists `{ field, reason }`, reasons from a closed set                                 |
+| `not_found`        | 404  | no live artifact, version, file or grant                                                                              |
+| `version_conflict` | 409  | `base_version` is not the latest; carries `latest_version`                                                            |
+| `not_extractable`  | 409  | an exported version has paths that cannot be extracted as stored (Export, above); `paths` lists each                  |
+| `unavailable`      | 503  | invalid configuration, an unreachable key set, or a storage failure that Storage failures (below) calls `unavailable` |
+| `internal`         | 500  | anything else, a storage failure called `internal` there included; the message carries no detail                      |
+
+**Storage failures:** an R2 read that fails or stalls (a served file, the REST file route, `read_file`, an export's
+first `get`) is `unavailable`, which a retry may mend, as is a D1 read or an upload (the `head` and `put` of each new
+object) that times out (RES-2). A D1 read or an upload that fails otherwise is `internal`, and so is an object a version
+lists that R2 does not hold or holds at another length: an inconsistency rather than an outage. OAuth storage answers as
+section 7 states. Each failure logs `operation.failed` with its class, and a browser host (section 6) answers its status
+in plain text. These are failures before the response begins. A served file (a content or public host, the REST file
+route) then streams its object as the export does: each chunk waits at most the R2 timeout, and a read that fails or
+stalls, or bytes short of or past the listed size, error the stream and log `operation.failed` with its class. The
+client sees an aborted transfer under the `Content-Length` it was given, never a whole-looking one: a client that holds
+every byte `Content-Length` names takes the body as whole, whatever follows, so the file's last byte is held until R2's
+body has ended at the listed size (the export's last bytes, its central directory, likewise follow the end of every
+body). An empty file has no byte to hold, so its end is read before the response, and a failure there is an operation
+error as the `get`'s is. The client going away cancels the body unlogged, except while R2 stalls, when the body ends at
+the R2 timeout and logs `timeout` (Export, above). `read_file` reads the whole body, at most 1 MiB, before it answers.
 
 **Transport and protocol errors** come before or around an operation: 401 `unauthorized` with
 `WWW-Authenticate: Bearer`, which names the route's protected resource metadata where OAuth is on (section 7), 403 for
@@ -1271,6 +1287,12 @@ The steps are in [operations.md](operations.md).
   million KV reads and 1 million writes a month ([KV pricing](https://developers.cloudflare.com/kv/platform/pricing/));
   a request with an OAuth token costs two reads, its token and its grant's revocation record, and a sign-in or a
   refresh a few writes.
+- **Misconfiguration:** an invalid variable, or OAuth without `OAUTH_KV`, answers 503 in plain text before routing,
+  logs `config.invalid` and touches no storage. The answer carries the private class's headers on every host and the
+  gallery's CSP (section 10, ISO-5) on the app host. With a variable invalid, the Worker cannot tell the app host from
+  the others, so every host's answer carries the policy, which only restricts an answer that is plain text and loads
+  nothing; with the configuration parsed and `OAUTH_KV` missing, only the app host's does. On a confirmation path the
+  answer also carries that route's headers and policy (section 10), whichever host the request reached.
 - **Releases:** `main` is never deployed. release-please keeps a release PR open; merging it tags a version as a
   draft release, a workflow builds the CLI binaries, attaches them and publishes it, then fast-forwards the `release`
   branch to it, and Workers Builds deploys `release` only.

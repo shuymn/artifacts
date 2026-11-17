@@ -782,6 +782,39 @@ describe("read_file", () => {
     expect(outcome).toBe("cancelled");
   });
 
+  // Design.md section 8, "Storage failures": an R2 read that fails is unavailable, as one that stalls (above); an object
+  // the version lists that R2 does not hold is internal. The missing object pins the answer `guarded` already gave; the
+  // failing get and body read are the ones `readObject` decides.
+  it.each<[string, string, () => Promise<unknown>, string]>([
+    ["the get fails", "unavailable", () => Promise.reject(new Error("get failed")), "error"],
+    [
+      "the body's read fails",
+      "unavailable",
+      () => Promise.resolve({ body: new ReadableStream({ pull: (controller) => controller.error(new Error("cut")) }) }),
+      "error",
+    ],
+    ["the get finds no object", "internal", () => Promise.resolve(null), "object_missing"],
+  ])("answers %s with %s, and the file once the read succeeds", async (_label, code, behavior, reason) => {
+    const world = new World();
+    const id = await published(world, { "a.txt": "abc" });
+    const bucket = new BucketProbe();
+    world.env = { ...world.env, FILES: bucket.binding };
+    const client = await mcpClient(world);
+    bucket.behave = (op) => (op === "get" ? behavior() : undefined);
+    const logs = captureLogs();
+    expect(await callTool(client, "read_file", { id, version: 1, path: "a.txt" })).toEqual({
+      ok: false,
+      value: { error: { code, message: expect.any(String) } },
+    });
+    expect(logEvents(logs.lines)).toEqual([{ event: "operation.failed", reason, error: "other", artifact: id }]);
+
+    bucket.behave = () => undefined;
+    expect(await callTool(client, "read_file", { id, version: 1, path: "a.txt" })).toMatchObject({
+      ok: true,
+      value: { path: "a.txt", size: 3, encoding: "utf8", content: "abc" },
+    });
+  });
+
   it("answers internal when the body holds other bytes than its stored size", async () => {
     const world = new World();
     const id = await published(world, { "a.txt": "abc" });

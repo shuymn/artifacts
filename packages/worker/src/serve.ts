@@ -183,5 +183,5 @@ export async function serveArtifact(
   if (request.method === "HEAD") return new Response(null, { headers });
   const object = await openFile(deps, id, file);
   if (!object.ok) return plainResponse(kind, object.error.code === "unavailable" ? 503 : 500);
-  return new Response(object.value.body, { headers });
+  return new Response(object.value, { headers });
 }

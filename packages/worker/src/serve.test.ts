@@ -1,8 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { assetPath } from "./gallery/assets.ts";
 import favicon from "./gallery/favicon.ico";
-import { APP_HOST, CONTENT_SUFFIX, objectKeys, PUBLIC_SUFFIX, World } from "./test-support.ts";
+import {
+  APP_HOST,
+  brokenBodies,
+  BucketProbe,
+  captureLogs,
+  CONTENT_SUFFIX,
+  logEvents,
+  never,
+  objectKeys,
+  PUBLIC_SUFFIX,
+  readToEnd,
+  World,
+} from "./test-support.ts";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 const PRIVATE_HEADERS = {
   "cache-control": "private, no-cache",
@@ -538,5 +555,166 @@ describe("section 6: Vary", () => {
     ];
     expect(responses.map((response) => response.status)).toEqual([403, 308, 404, 404]);
     for (const response of responses) expect(response.headers.has("Vary")).toBe(false);
+  });
+});
+
+/** An R2 `get` that fails, stalls past the timeout or finds no object, with the status and logged reason it answers. */
+const FAILED_GETS: readonly [string, () => Promise<unknown>, number, string][] = [
+  ["fails", () => Promise.reject(new Error("get failed")), 503, "error"],
+  ["stalls", never, 503, "timeout"],
+  ["finds no object", () => Promise.resolve(null), 500, "object_missing"],
+];
+
+// Design.md section 8, "Storage failures": an R2 read that fails or stalls is unavailable, which a retry may mend; an
+// object the version lists that R2 does not hold is internal. The stalled get and the missing object pin answers the
+// timeout and `guarded` already gave; the failing get is the one `readObject` decides.
+describe("section 8: a served file's R2 read", () => {
+  it.each(FAILED_GETS)(
+    "answers a content and a public host when the get %s, and serves the file once it succeeds",
+    async (_label, behavior, status, reason) => {
+      const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+      const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": "text" } })).artifact.id;
+      await world.patch(id, { public: true });
+      const bucket = new BucketProbe();
+      world.env = { ...world.env, FILES: bucket.binding };
+      bucket.behave = (op) => (op === "get" ? behavior() : undefined);
+      const logs = captureLogs();
+      const content = await world.content(id, "/a.txt");
+      const shared = await world.public(id, "/a.txt");
+      expect([content.status, shared.status]).toEqual([status, status]);
+      const plain = { "content-type": "text/plain; charset=utf-8" };
+      expect(Object.fromEntries(content.headers)).toMatchObject({ ...plain, ...PRIVATE_HEADERS });
+      expect(Object.fromEntries(shared.headers)).toMatchObject({ ...plain, ...PUBLIC_HEADERS });
+      const event = { event: "operation.failed", reason, error: "other", artifact: id };
+      expect(logEvents(logs.lines)).toEqual([event, event]);
+
+      bucket.behave = () => undefined;
+      const served = [await world.content(id, "/a.txt"), await world.public(id, "/a.txt")];
+      expect(await Promise.all(served.map(async (response) => [response.status, await response.text()]))).toEqual([
+        [200, "text"],
+        [200, "text"],
+      ]);
+    },
+  );
+});
+
+// Design.md section 8, "Storage failures": after the headers, a body that fails, stalls, or holds fewer or more bytes
+// than the stored size aborts the transfer and logs `operation.failed`; the client never gets a clean short or long 200.
+describe("section 8: a served file's body after the headers", () => {
+  // The last byte is held until the body ends, so a chunk may shrink to nothing; each must still come out whole.
+  it.each<[string, string, readonly string[]]>([
+    ["empty chunks before, between and after the bytes", "abcd", ["", "ab", "", "", "cd", "", ""]],
+    ["a file of one byte", "a", ["a"]],
+    ["a file of one byte among empty chunks", "a", ["", "a", ""]],
+    ["a last chunk of exactly one byte", "abcd", ["abc", "d"]],
+    ["one byte per chunk", "abcdefghijklmnopqrstuvwxyz0123456789", "abcdefghijklmnopqrstuvwxyz0123456789".split("")],
+    ["an empty file in empty chunks", "", ["", ""]],
+  ])("serves a sound file whole across %s", async (_label, stored, chunks) => {
+    const world = new World();
+    const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": stored } })).artifact.id;
+    const bucket = new BucketProbe();
+    world.env = { ...world.env, FILES: bucket.binding };
+    bucket.behave = (op) => {
+      if (op !== "get") return undefined;
+      const queue = [...chunks];
+      const body = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            const next = queue.shift();
+            if (next === undefined) controller.close();
+            else controller.enqueue(new TextEncoder().encode(next));
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      return Promise.resolve({ body });
+    };
+    const logs = captureLogs();
+    const response = await world.content(id, "/a.txt");
+    expect([response.status, response.headers.get("Content-Length")]).toEqual([200, String(stored.length)]);
+    expect(await readToEnd(response)).toEqual({ text: stored, aborted: false });
+    expect(logEvents(logs.lines)).toEqual([]);
+  });
+
+  it.each(brokenBodies("text"))(
+    "aborts a content and a public host's transfer when the body %s, and logs it",
+    async (_label, body, reason) => {
+      const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+      const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": "text" } })).artifact.id;
+      await world.patch(id, { public: true });
+      const bucket = new BucketProbe();
+      world.env = { ...world.env, FILES: bucket.binding };
+      bucket.behave = (op) => (op === "get" ? Promise.resolve({ body: body() }) : undefined);
+      const logs = captureLogs();
+      for (const request of [() => world.content(id, "/a.txt"), () => world.public(id, "/a.txt")]) {
+        const response = await request();
+        expect([response.status, response.headers.get("Content-Length")]).toEqual([200, "4"]);
+        expect(await readToEnd(response)).toMatchObject({ aborted: true });
+      }
+      const event = { event: "operation.failed", reason, error: "other", artifact: id };
+      expect(logEvents(logs.lines)).toEqual([event, event]);
+    },
+  );
+
+  it("cancels a body that stalls past the timeout", async () => {
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+    const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": "text" } })).artifact.id;
+    const bucket = new BucketProbe();
+    world.env = { ...world.env, FILES: bucket.binding };
+    const cancelled = Promise.withResolvers<"cancelled">();
+    const stalled = new ReadableStream<Uint8Array>({
+      start: (controller) => controller.enqueue(new TextEncoder().encode("te")),
+      cancel: () => cancelled.resolve("cancelled"),
+    });
+    bucket.behave = (op) => (op === "get" ? Promise.resolve({ body: stalled }) : undefined);
+    captureLogs();
+    expect(await readToEnd(await world.content(id, "/a.txt"))).toEqual({ text: "te", aborted: true });
+    expect(await Promise.race([cancelled.promise, new Promise((resolve) => setTimeout(resolve, 500, "open"))])).toBe(
+      "cancelled",
+    );
+  });
+
+  // The runtime tells the pipe of a cancelled response at its next write, so the body sends one more chunk after the
+  // client goes away; that write cancels the body, while the read after it waits. That read then ends short, which is
+  // not a failure. The clock is the test's from the request on, so the R2 timeout runs only when the test advances it.
+  it("cancels the body when the client goes away, without a log or a timer left", async () => {
+    const r2Ms = 50;
+    const world = new World({ timeouts: { r2Ms, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+    const stored = "x".repeat(100_000);
+    const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": stored } })).artifact.id;
+    const bucket = new BucketProbe();
+    world.env = { ...world.env, FILES: bucket.binding };
+    const goOn = Promise.withResolvers<void>();
+    const cancelled = Promise.withResolvers<void>();
+    let pulls = 0;
+    const flowing = new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          pulls++;
+          if (pulls === 2) await goOn.promise;
+          if (pulls > 2) await never();
+          controller.enqueue(new TextEncoder().encode("x".repeat(10)));
+        },
+        cancel: () => cancelled.resolve(),
+      },
+      { highWaterMark: 0 },
+    );
+    bucket.behave = (op) => (op === "get" ? Promise.resolve({ body: flowing }) : undefined);
+    const logs = captureLogs();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const response = await world.content(id, "/a.txt");
+    expect(response.status).toBe(200);
+    const reader = response.body?.getReader();
+    if (reader === undefined) throw new Error("no body");
+    expect((await reader.read()).done).toBe(false);
+    await reader.cancel();
+    goOn.resolve();
+    await cancelled.promise;
+    // Cancelled while its third read waited, long before its 100,000 bytes.
+    expect(pulls).toBe(3);
+    // Past the R2 timeout: a read left waiting would time out and log now.
+    await vi.advanceTimersByTimeAsync(r2Ms);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(logEvents(logs.lines)).toEqual([]);
   });
 });

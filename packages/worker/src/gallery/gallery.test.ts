@@ -519,8 +519,14 @@ describe("ISO-5: escaping artifact text", () => {
     const unreachable = new World({ keyTimeoutMs: 50 });
     unreachable.keys.mode = "hang";
     responses.push(await app(unreachable, "/"));
+    // A misconfiguration's 503 before routing: an invalid variable, and OAuth without its storage.
+    responses.push(await app(new World({ vars: { API_TOKENS: "not json" } }), "/"));
+    const withoutKv = new World();
+    const { OAUTH_KV: _kv, ...rest } = withoutKv.env;
+    withoutKv.env = rest;
+    responses.push(await app(withoutKv, `/a/${id}`));
     expect(responses.map((response) => response.status)).toEqual([
-      200, 200, 200, 200, 304, 200, 404, 405, 403, 500, 503,
+      200, 200, 200, 200, 304, 200, 404, 405, 403, 500, 503, 503, 503,
     ]);
     for (const response of responses) {
       const policy = response.headers.get("Content-Security-Policy") ?? "";

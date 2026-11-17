@@ -1,18 +1,27 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  brokenBodies,
   BucketProbe,
+  captureLogs,
   clearStorage,
   CONTENT_SUFFIX,
   DAY_MS,
   gate,
+  logEvents,
+  never,
   objectKeys,
+  readToEnd,
   snapshot,
   START,
   World,
   type PublishJson,
 } from "./test-support.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 beforeEach(async () => {
   await clearStorage();
@@ -170,6 +179,58 @@ describe("REST contract", () => {
     expect(dir.headers.get("Location")).toBe(`/v1/artifacts/${artifact.id}/versions/1/files/docs/`);
     expect(await (await world.api("GET", `/v1/artifacts/${artifact.id}/versions/1/files/docs/`)).text()).toBe("d");
   });
+
+  // Section 8, "Storage failures": an R2 read that fails or stalls is unavailable; an object the version lists that R2
+  // does not hold is internal. The stalled get and the missing object pin answers the timeout and `guarded` already
+  // gave; the failing get is the one `readObject` decides.
+  it.each<[string, () => Promise<unknown>, number, string, string]>([
+    ["fails", () => Promise.reject(new Error("get failed")), 503, "unavailable", "error"],
+    ["stalls", never, 503, "unavailable", "timeout"],
+    ["finds no object", () => Promise.resolve(null), 500, "internal", "object_missing"],
+  ])(
+    "answers the file route when its get %s, and the bytes once it succeeds",
+    async (_label, behavior, status, code, reason) => {
+      const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+      const { artifact } = await world.created({ title: "t", files: { "index.html": "i", "a.txt": "text" } });
+      const path = `/v1/artifacts/${artifact.id}/versions/1/files/a.txt`;
+      const bucket = withBucket(world);
+      bucket.behave = (op) => (op === "get" ? behavior() : undefined);
+      const logs = captureLogs();
+      const response = await world.api("GET", path);
+      expect(response.status).toBe(status);
+      expect(Object.fromEntries(response.headers)).toMatchObject({
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      expect(await response.json()).toEqual({ error: { code, message: expect.any(String) } });
+      expect(logEvents(logs.lines)).toEqual([
+        { event: "operation.failed", reason, error: "other", artifact: artifact.id },
+      ]);
+
+      bucket.behave = () => undefined;
+      const served = await world.api("GET", path);
+      expect([served.status, await served.text()]).toEqual([200, "text"]);
+    },
+  );
+
+  // Section 8, "Storage failures": after the headers, a body that fails, stalls, or holds fewer or more bytes than the
+  // stored size aborts the transfer and logs `operation.failed`.
+  it.each(brokenBodies("text"))(
+    "aborts the file route's transfer when the body %s, and logs it",
+    async (_label, body, reason) => {
+      const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+      const { artifact } = await world.created({ title: "t", files: { "index.html": "i", "a.txt": "text" } });
+      const bucket = withBucket(world);
+      bucket.behave = (op) => (op === "get" ? Promise.resolve({ body: body() }) : undefined);
+      const logs = captureLogs();
+      const response = await world.api("GET", `/v1/artifacts/${artifact.id}/versions/1/files/a.txt`);
+      expect([response.status, response.headers.get("Content-Length")]).toEqual([200, "4"]);
+      expect(await readToEnd(response)).toMatchObject({ aborted: true });
+      expect(logEvents(logs.lines)).toEqual([
+        { event: "operation.failed", reason, error: "other", artifact: artifact.id },
+      ]);
+    },
+  );
 
   it.each<[string, Record<string, string>, BodyInit | undefined, number, string]>([
     ["a JSON create", { "Content-Type": "application/json" }, "{}", 415, "unsupported_media_type"],
