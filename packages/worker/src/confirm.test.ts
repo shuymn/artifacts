@@ -314,6 +314,29 @@ describe("section 10: the pages", () => {
     ]);
   });
 
+  // P3: only the form's POST changes an artifact; showing a page reads it.
+  it("changes nothing on GET and HEAD", async () => {
+    const world = new World();
+    const hidden = await create(world, "Private");
+    const shown = await create(world, "Public");
+    expect((await world.patch(shown, { public: true })).status).toBe(200);
+    const before = await snapshot();
+    const logs = captureLogs();
+    for (const id of [hidden, shown]) {
+      for (const path of PATHS(id)) {
+        for (const method of ["GET", "HEAD"]) {
+          expect({ path, method, status: (await app(world, path, { method })).status }).toEqual({
+            path,
+            method,
+            status: 200,
+          });
+        }
+      }
+    }
+    expect(await snapshot()).toEqual(before);
+    expect(logs.lines).toEqual([]);
+  });
+
   it("answers HEAD with GET's headers and no body", async () => {
     const world = new World();
     const id = await create(world);
@@ -618,6 +641,19 @@ describe("section 10: the result page", () => {
     for (const script of scripts) expect(script.source).toBe(script.hash);
     expect(new Set(scripts.map((script) => script.text)).size).toBe(1);
     expect(scripts[0]?.text).toContain("window.opener");
+  });
+
+  // Design.md section 10: with an opener, the script sends it to the target, replacing its history entry so the
+  // viewer does not return to the state before the change, then closes the popup; it touches no other location.
+  it("replaces the opener's location with its target and closes the window", async () => {
+    const world = new World();
+    const id = await create(world);
+    const { text } = await scriptOf(await post(world, `/a/${id}/public`, "public=true"));
+    expect(text).toContain("if (target !== null && window.opener !== null && !window.opener.closed) {");
+    expect([...text.matchAll(/[\w.]*location[\w.]*(?:\([^)]*\)|\s*=)?/g)].map((match) => match[0])).toEqual([
+      "window.opener.location.replace(target.href)",
+    ]);
+    expect([...text.matchAll(/[\w.]*close\(\)/g)].map((match) => match[0])).toEqual(["window.close()"]);
   });
 
   it("marks the artifact's URL as the target after a visibility change and the gallery after a delete", async () => {
