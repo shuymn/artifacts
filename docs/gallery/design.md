@@ -127,7 +127,7 @@ description and on `page page--narrow`, `size.label` on the term of `info-row`.
 Values Pencil shows that are not tokens (a text's measured width or height, a frame's height, the width of a table
 column) are not part of the design.
 
-`color.danger.bg` (`#3A1D1B`) is the background that goes with `color.danger` on what deletes (`button/kind=danger`),
+`color.danger-bg` (`#3A1D1B`) is the background that goes with `color.danger` on what deletes (`button/kind=danger`),
 the one action that cannot be undone; `gallery.pen` shows where it applies.
 
 ## Components
@@ -168,8 +168,8 @@ In `viewer-header`, `a.viewer-header__home` (the icon) comes first, then `h1.vie
 `ul[role=list]` of `li` > `menu-item`, and `p.viewer-menu__footer`. `viewer-history` holds `ul[role=list]` of `li` >
 `a`, with `aria-current="page"` on the shown version, then the link to all versions.
 
-Screens also use `main.page` (`.page--detail` on an artifact page, `.page--narrow` on the consent and confirmation
-pages), `hgroup.page-heading`, `header.artifact-heading`, `section.section`,
+Screens also use `main.page` (`.page--detail` on an artifact page, `.page--narrow` on the consent pages, `.page--popup`,
+the popup window's full width with `space.6` padding, on the confirmation pages), `hgroup.page-heading`, `header.artifact-heading`, `section.section`,
 `div.data-table[role=region][tabindex=0][aria-labelledby]` around each `table`, and `form.form` > the field and
 `div.form__actions` > the buttons; `.cell--grow` marks the column that takes the remaining width (the version title,
 the file path). The input lists its help in `aria-describedby`; see `reference/consent.html` for its attributes. A

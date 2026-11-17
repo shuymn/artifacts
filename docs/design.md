@@ -1400,7 +1400,7 @@ since its menu links to the download and the confirmation pages.
    `not_extractable`, the REST route and the app host's download behind Access. PL-60 to PL-62.
 2. **`feat(cli): export a version`**: `artifacts export`. PL-63.
 3. **`feat(gallery): confirm visibility and deletion`**: the screens `confirm-public` and `confirm-delete` with
-   `color.danger.bg` and `button/kind=danger`; the routes, the result page, `via` and `confirm.refused` in the logs,
+   `color.danger-bg` and `button/kind=danger`; the routes, the result page, `via` and `confirm.refused` in the logs,
    and the artifact page's links. PL-11, PL-56 to PL-59.
 4. **`feat(worker): show private pages in the viewer frame`**: the screens `viewer`, `viewer — menu open` and
    `viewer — history, pinned v2` with their components in `viewer.css` and `reference/viewer.html`; the frame page,

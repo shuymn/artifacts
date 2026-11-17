@@ -3397,7 +3397,8 @@
               "fill": "#5A5F66",
               "content": "Click a bar to compare with last year.",
               "fontFamily": "Inter",
-              "fontSize": 16
+              "fontSize": 16,
+              "fontWeight": "normal"
             },
             {
               "type": "frame",
@@ -3658,7 +3659,8 @@
               "fill": "#5A5F66",
               "content": "Click a bar to compare with last year.",
               "fontFamily": "Inter",
-              "fontSize": 16
+              "fontSize": 16,
+              "fontWeight": "normal"
             },
             {
               "type": "frame",
@@ -3931,7 +3933,8 @@
               "fill": "#5A5F66",
               "content": "Click a bar to compare with last year.",
               "fontFamily": "Inter",
-              "fontSize": 16
+              "fontSize": 16,
+              "fontWeight": "normal"
             },
             {
               "type": "frame",
@@ -4216,7 +4219,7 @@
         {
           "type": "frame",
           "id": "qSsze",
-          "name": "page page--narrow",
+          "name": "page page--popup",
           "width": "fill_container",
           "layout": "vertical",
           "gap": "$space.5",
@@ -4434,7 +4437,7 @@
         {
           "type": "frame",
           "id": "AABu0",
-          "name": "page page--narrow",
+          "name": "page page--popup",
           "width": "fill_container",
           "layout": "vertical",
           "gap": "$space.5",
@@ -4567,7 +4570,7 @@
               "ref": "Lst9o",
               "name": "notice",
               "width": "fill_container",
-              "fill": "$color.danger.bg",
+              "fill": "$color.danger-bg",
               "descendants": {
                 "Aupm5": {
                   "content": "Every URL of every version answers 404 at once, and the files are removed. Export a version first if you want a copy.",
@@ -4805,7 +4808,7 @@
       "type": "color",
       "value": "#F2C46D"
     },
-    "color.danger.bg": {
+    "color.danger-bg": {
       "type": "color",
       "value": "#3A1D1B"
     }
