@@ -166,6 +166,17 @@ describe("PL-52: which request gets the frame page", () => {
     }
   });
 
+  // PUB-1: a document request to the public host reads only what any request there may.
+  it("answers a private artifact's page, and its icon fallback, on the public host with 404", async () => {
+    const world = new World();
+    const id = await artifact(world);
+    for (const path of ["/", "/favicon.ico"]) {
+      const response = await world.public(id, path, { headers: DOCUMENT });
+      expect(response.status).toBe(404);
+      expect(await response.text()).toBe("Not Found");
+    }
+  });
+
   it("leaves REST's file route unchanged", async () => {
     const world = new World();
     const id = await artifact(world);

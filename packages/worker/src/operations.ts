@@ -559,21 +559,21 @@ export type ViewerData = {
 export type ViewerLookup = { readonly lookup: ServedLookup; readonly viewer: ViewerData | undefined };
 
 /**
- * `lookupFile`, or with `fallback` `lookupServedFile`, on a private content host for a request that may get the
- * viewer frame: the same batch also reads the artifact, the version the path selects and the newest versions, so the
- * header shows one snapshot with the file (design.md section 6, "Order"). The artifact row stands for
- * `selectVisibleArtifact`, since a private host serves any live artifact.
+ * `lookupFile`, or with `fallback` `lookupServedFile`, for a request that may get the viewer frame: the same batch also
+ * reads the artifact, the version the path selects and the newest versions, so the header shows one snapshot with the
+ * file (design.md section 6, "Order"). The artifact row, with its public flag under `publicOnly`, stands for
+ * `selectVisibleArtifact`.
  */
 export async function lookupForViewer(
   deps: OperationDeps,
-  input: Omit<LookupInput, "publicOnly">,
+  input: LookupInput,
   fallback: boolean,
 ): Promise<Result<ViewerLookup>> {
   const { id, path } = input;
   return guarded(id, async (): Promise<Result<ViewerLookup>> => {
     const now = deps.now();
     const [files, artifactResult, shownResult, historyResult] = await read(database(deps), [
-      servedFiles(deps, { ...input, publicOnly: false }),
+      servedFiles(deps, input),
       selectArtifact(deps.db, id),
       selectVersion(deps.db, id, path.version),
       selectVersionPage(deps.db, id, null, VIEWER_HISTORY),
@@ -590,7 +590,8 @@ export async function lookupForViewer(
           };
     const found = matchFile(id, path, rows(files, FILE_ROW));
     if (found !== undefined) return succeed({ lookup: found, viewer });
-    return fallback && artifact !== undefined ? succeed({ lookup: { kind: "absent" }, viewer }) : NOT_FOUND;
+    const visible = artifact !== undefined && (!input.publicOnly || artifact.public === 1);
+    return fallback && visible ? succeed({ lookup: { kind: "absent" }, viewer }) : NOT_FOUND;
   });
 }
 
