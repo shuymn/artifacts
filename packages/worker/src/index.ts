@@ -182,12 +182,23 @@ async function confirm(
   return serveConfirmation(request, confirmation, operationDeps(env, config, deps));
 }
 
+/**
+ * A refusal before the host is classified, which an invalid configuration prevents: the private class's headers, and
+ * on a confirmation path also that route's headers and the gallery's policy without forms or scripts (design.md
+ * section 10), whichever host the request reached, since they only restrict.
+ */
+function unconfigured(url: URL): Response {
+  const response = plainResponse("private", 503);
+  return confirmationOf(url.pathname) === undefined ? response : withGalleryPolicy(withConfirmHeaders(response));
+}
+
 /** The Worker's fetch handler; the execution context goes to the OAuth library only, and `cf` is not used. */
 export type Worker = { fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> };
 
 export function createWorker(deps: WorkerDeps): Worker {
   return {
     async fetch(request, env, ctx): Promise<Response> {
+      const url = new URL(request.url);
       const parsed = parseConfig(env);
       if (!parsed.ok) {
         logEvent("config.invalid", {
@@ -195,16 +206,15 @@ export function createWorker(deps: WorkerDeps): Worker {
           ...(parsed.variable === undefined ? {} : { variable: parsed.variable }),
         });
         // The host class is unknown, so the answer carries the private class's headers.
-        return plainResponse("private", 503);
+        return unconfigured(url);
       }
       const { config } = parsed;
       // Section 11: with OAuth on, a Worker without its storage answers as for an invalid variable, so a deployment
       // never runs with OAuth silently off.
       if (config.oauth && env.OAUTH_KV === undefined) {
         logEvent("config.invalid", { reason: "missing", binding: "OAUTH_KV" });
-        return plainResponse("private", 503);
+        return unconfigured(url);
       }
-      const url = new URL(request.url);
       const route = classifyHost(url.host, config);
       try {
         switch (route.kind) {

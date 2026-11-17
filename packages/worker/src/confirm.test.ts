@@ -403,8 +403,15 @@ describe("section 10: headers", () => {
     captureLogs();
     const failed = await failing.fetch(new Request(`${APP}/a/${id}/public`), world.env, createExecutionContext());
     answers.push(["refusal", failed]);
+    // A misconfiguration answers before the host is classified: an invalid variable, and OAuth without its storage.
+    const invalid = new World({ vars: { APP_HOST: "gallery-art.example.com" } });
+    answers.push(["refusal", await app(invalid, `/a/${id}/public`)]);
+    const withoutKv = new World();
+    const { OAUTH_KV: _kv, ...rest } = withoutKv.env;
+    withoutKv.env = rest;
+    answers.push(["refusal", await post(withoutKv, `/a/${id}/delete`, "")]);
     expect(answers.map(([, response]) => response.status)).toEqual([
-      200, 200, 200, 200, 200, 200, 404, 405, 403, 403, 403, 400, 413, 503, 503, 500,
+      200, 200, 200, 200, 200, 200, 404, 405, 403, 403, 403, 400, 413, 503, 503, 500, 503, 503,
     ]);
     // The result page's script, by its hash (its value is checked against the script's in the result page's tests).
     const scriptHash = { "script-src": expect.stringMatching(/^'sha256-[A-Za-z0-9+/]{43}='$/) };
