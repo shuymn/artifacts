@@ -355,7 +355,8 @@ and the threats are the three adversaries below, not untrusted users.
   in `src/archive.ts`, `src/objects.ts`, `src/operations.ts`, pinned by behavior (`src/export.test.ts`: a bucket
   counting open bodies; a response cancelled mid-file, its body cancelled and no later `get`; a `get` that fails,
   stalls or finds no object, on the first file and on a later one; a body that stalls between chunks; an object
-  shorter and one longer than its listing) (PL-62). The runtime tells the export of a cancelled response at its next
+  shorter and one longer than its listing; `src/archive.test.ts`: a cancellation before the first entry and one while
+  a body's open is pending) (PL-62). The runtime tells the export of a cancelled response at its next
   write, so a body that R2 stalls as the client goes away ends at the R2 timeout, and is logged as one.
 
 ### Data (DATA)

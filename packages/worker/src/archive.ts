@@ -43,7 +43,8 @@ export type ArchiveSource<F extends ArchiveFile> = {
   readonly failed: (error: unknown) => void;
 };
 
-type Entry = {
+/** One file as the library takes it: its name, size and time, and its body's bytes. */
+export type ArchiveEntry = {
   readonly name: string;
   readonly size: number;
   readonly lastModified: Date;
@@ -52,6 +53,11 @@ type Entry = {
 
 const DONE: IteratorReturnResult<undefined> = { done: true, value: undefined };
 
+/** The library's input, with the `throw` the library calls when its stream is cancelled. */
+export type ArchiveEntries = AsyncIterableIterator<ArchiveEntry, undefined> & {
+  throw(reason?: unknown): Promise<IteratorResult<ArchiveEntry, undefined>>;
+};
+
 /**
  * The library's input: one entry per file, each with its body. The library asks for the next entry only after it has
  * read the previous body to its end, and this iterator closes the previous body before it opens the next, so one body
@@ -59,7 +65,7 @@ const DONE: IteratorReturnResult<undefined> = { done: true, value: undefined };
  * (client-zip 2.4.3): the open body is cancelled and no later one is opened, also when the call comes while an open is
  * pending or before the first entry was taken.
  */
-function entries<F extends ArchiveFile>(source: ArchiveSource<F>): AsyncIterableIterator<Entry, undefined> {
+export function archiveEntries<F extends ArchiveFile>(source: ArchiveSource<F>): ArchiveEntries {
   let index = 0;
   // The reader of the body opened last; cancelling it again once it is done or cancelled does nothing.
   let body = source.first.getReader();
@@ -82,7 +88,7 @@ function entries<F extends ArchiveFile>(source: ArchiveSource<F>): AsyncIterable
       throw error;
     }
   }
-  const iterator: AsyncIterableIterator<Entry, undefined> = {
+  const iterator: ArchiveEntries = {
     async next() {
       const file = source.files[index];
       if (ended || file === undefined) {
@@ -136,7 +142,7 @@ export function archiveStream<F extends ArchiveFile>(
   length: bigint,
 ): ReadableStream<Uint8Array> {
   const fixed = new FixedLengthStream(length);
-  makeZip(entries(source))
+  makeZip(archiveEntries(source))
     .pipeTo(fixed.writable)
     .catch(() => {});
   return fixed.readable;
