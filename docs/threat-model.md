@@ -221,9 +221,10 @@ and the threats are the three adversaries below, not untrusted users.
   CORP: their content needs no credential, so loading it reveals nothing a direct request does not.
   _Enforced (main)_ in `src/serve.ts`, `src/gallery/route.ts`. Pinned by behavior (`src/serve.test.ts`,
   `src/routing.test.ts`, `src/gallery/gallery.test.ts`: every route and status, both host classes;
-  `src/export.test.ts`: the version download's 200 and 409) and deployed check
-  (design AC-8: artifact A's `<script src>` to artifact B fails, B loads its own). **Gap:** the deployed check has not
-  run. The OAuth library adds CORS headers for browser clients; the router removes them, and `OPTIONS` answers 405 on
+  `src/export.test.ts`: the version download's 200 and 409; `src/frame.test.ts`: the viewer's frame page, 200 and 304)
+  and deployed check (design AC-8: artifact A's `<script src>` to artifact B fails, B loads its own). **Gap:** the
+  deployed check has not run. The OAuth library adds CORS headers for browser clients; the router removes them, and
+  `OPTIONS` answers 405 on
   every API route before authentication, and 404 on a path no route takes: _Enforced (main)_ in `src/oauth.ts`,
   `src/index.ts`, pinned by behavior (`src/oauth.test.ts`: OAuth answers to requests with an `Origin`; `OPTIONS` on
   each API route, with and without a token, and on a path no route takes) (PL-43).
@@ -244,12 +245,15 @@ and the threats are the three adversaries below, not untrusted users.
   storage; `Origin` missing, `null`, a content and a public host's, and the app host's with another scheme or port;
   `Sec-Fetch-Site` missing, `same-site`, `cross-site` and `none`; an artifact page's, another subdomain's and another
   site's form; each refused with D1 unchanged) (PL-11, PL-56, PL-57). The viewer frame, which shares an artifact's
-  origin, sends no write of its own: _Planned (viewer)_ (PL-54). **Changed for the viewer:** the owner changes artifacts
-  from the browser (design.md, purpose layer, Viewer), so "no request authenticated by a cookie changes an artifact"
-  became "only the app host's own confirmation form does". What ISO-3 kept from artifact pages holds: an artifact page,
-  even same-site in the shared-domain layout, sends its own origin and `same-site` or `cross-site`, so its `POST` is
-  refused; it cannot frame the pages to place the owner's click; and it can open them only at the top level, where the
-  owner reads the change before confirming it (accepted risks).
+  origin, sends no write of its own: it holds no form, its menu links to the app host, and its script opens the
+  confirmation pages in a popup: _Enforced (main)_ in `src/gallery/viewer.ts`, pinned by behavior (`src/frame.test.ts`:
+  no form on the frame page; `browser/viewer.spec.ts`: in Chromium, Firefox and WebKit, only `GET` requests reach the
+  content host through a visibility change and a delete made from the menu) (PL-54, PL-58). **Changed for the viewer:**
+  the owner changes artifacts from the browser (design.md, purpose layer, Viewer), so "no request authenticated by a
+  cookie changes an artifact" became "only the app host's own confirmation form does". What ISO-3 kept from artifact
+  pages holds: an artifact page, even same-site in the shared-domain layout, sends its own origin and `same-site` or
+  `cross-site`, so its `POST` is refused; it cannot frame the pages to place the owner's click; and it can open them
+  only at the top level, where the owner reads the change before confirming it (accepted risks).
 - **ISO-4: the Worker sets one cookie, the consent binding, and decides nothing else on a cookie.** The binding is
   the library's `__Host-` cookie, set by `GET /oauth/authorize` and cleared when its transaction is used; it ties a
   consent transaction to the browser that opened it and authenticates nothing (ACC-1 still reads the JWT header). No
@@ -261,7 +265,8 @@ and the threats are the three adversaries below, not untrusted users.
   protection of the consent form against cross-site requests. `__Host-` keeps what ISO-4 protected in the
   shared-domain layout: no other host, artifact pages included, can set or replace it. The confirmation pages set no
   cookie either: _Enforced (main)_, pinned by behavior (`src/confirm.test.ts`: no `Set-Cookie` on any of their answers)
-  (PL-11). The viewer frame neither: _Planned (viewer)_ (PL-11, PL-54).
+  (PL-11). The viewer frame neither: _Enforced (main)_, pinned by behavior (`src/frame.test.ts`: no `Set-Cookie` on
+  the frame page) (PL-54).
 - **ISO-5: the app host runs no supplied markup.** Artifact titles, descriptions, paths and every other value, and
   on the consent page every value a client supplied (its name, URI and redirect URI), are escaped by the one template
   that builds the pages; every app-host response's `Content-Security-Policy`, refusals and failures included, forbids
@@ -280,11 +285,12 @@ and the threats are the three adversaries below, not untrusted users.
   pinned by behavior (`src/confirm.test.ts`: markup in a title on both pages and the result page; the policy on every
   status, a misconfiguration's 503 included; the script's SHA-256 equal to the policy's after a visibility change and
   a delete, the same bytes for two artifacts, its target per result, and its one navigation, the opener's
-  `location.replace`; `src/gallery/reference.test.ts`: the confirmation pages' markup) (PL-56, PL-58). **Gap:** that
-  the script sends the opener to its target and closes the popup, and leaves a tab without an opener as it is, needs
-  a browser: the frame's script that opens the popup comes with the viewer (PL-58). A misconfiguration (an invalid
-  variable, or OAuth without `OAUTH_KV`) answers 503 before the host is classified; that answer carries the policy on
-  the confirmation paths only, so on any other app-host path it has no CSP, and it has no body but its status text.
+  `location.replace`; `src/gallery/reference.test.ts`: the confirmation pages' markup) (PL-56, PL-58). In a browser, the
+  script sends the window that opened it to its target and closes, and a tab without an opener keeps its links:
+  pinned by behavior (`browser/viewer.spec.ts`: the viewer's popup in Chromium, Firefox and WebKit, after a visibility
+  change and a delete, and the same page opened as a tab) (PL-58). A misconfiguration (an invalid variable, or OAuth
+  without `OAUTH_KV`) answers 503 before the host is classified; that answer carries the policy on the confirmation
+  paths only, so on any other app-host path it has no CSP, and it has no body but its status text.
 
 ### Serving (SRV)
 
@@ -292,7 +298,9 @@ and the threats are the three adversaries below, not untrusted users.
   nosniff` and `Referrer-Policy: no-referrer`, and a file's response its stored `Content-Type`. _Enforced (main)_ in
   `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`). The viewer's frame page is the Worker's own document, not a
   file, and carries `text/html; charset=utf-8` whatever the file's stored type, `application/xhtml+xml` included; the
-  file itself reaches the iframe with its stored type: _Planned (viewer)_ (PL-52, PL-54).
+  file itself reaches the iframe with its stored type: _Enforced (main)_ in `src/frame.ts`, `src/serve.ts`, pinned by
+  behavior (`src/frame.test.ts`: a stored XHTML file and HTML under parameters, as a document and as the iframe's
+  request; the frame page with the private host's headers) (PL-52, PL-54).
 - **SRV-2: a request path selects a file of the requested artifact and version only.** The Worker resolves the pathname
   it receives: one strict percent-decoding per segment, an encoded `/` refused, lookup inside the selected version's
   file list. _Enforced (main)_ in `src/paths.ts`. Pinned by behavior (`src/paths.test.ts`: decoder tests over strings;
@@ -302,7 +310,10 @@ and the threats are the three adversaries below, not untrusted users.
   (`no-cache`). _Enforced (main)_ in `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`: a matching
   `If-None-Match` after the artifact was made private or deleted answers 404; without a valid JWT, 403; the same for
   the icon an artifact without `favicon.ico` is answered with). The viewer frame's validator is evaluated after Access
-  and existence, like a file's, and only for a request that gets the frame: _Planned (viewer)_ (PL-53).
+  and existence, like a file's, and only for a request that gets the frame: _Enforced (main)_ in `src/serve.ts`, pinned
+  by behavior (`src/frame.test.ts`: the frame's tag after a delete answers 404 and without a JWT 403, never 304; each
+  representation's tag matches only a request for it; the tag changes after a publish, a visibility change and a new
+  title) (PL-53).
 
 ### Public links (PUB)
 
