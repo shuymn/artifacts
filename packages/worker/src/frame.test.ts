@@ -3,9 +3,13 @@
 // SRV-1). The script's behavior in browsers is PL-55, in browser/viewer.spec.ts.
 import { describe, expect, it } from "vitest";
 
+import { parseConfig } from "./config.ts";
 import { encodeBase64 } from "./encoding.ts";
 import favicon from "./gallery/favicon.ico";
 import { byClass, elements, parseHtml, textOf, type HtmlNode } from "./gallery/test-html.ts";
+import { isArtifactId, newArtifactId } from "./id.ts";
+import { lookupForViewer, type OperationDeps } from "./operations.ts";
+import { resolveRequestPath } from "./paths.ts";
 import { BucketProbe, World, type FileSpec } from "./test-support.ts";
 
 const DOCUMENT = { "Sec-Fetch-Dest": "document" };
@@ -166,15 +170,32 @@ describe("PL-52: which request gets the frame page", () => {
     }
   });
 
-  // PUB-1: a document request to the public host reads only what any request there may.
-  it("answers a private artifact's page, and its icon fallback, on the public host with 404", async () => {
+  // PUB-1: under publicOnly the frame's lookup, like lookupServedFile, finds nothing of a private artifact. Serving
+  // calls it on private hosts only, so the test calls it directly.
+  it("hides a private artifact's file and icon fallback from the frame's lookup under publicOnly", async () => {
     const world = new World();
     const id = await artifact(world);
-    for (const path of ["/", "/favicon.ico"]) {
-      const response = await world.public(id, path, { headers: DOCUMENT });
-      expect(response.status).toBe(404);
-      expect(await response.text()).toBe("Not Found");
-    }
+    if (!isArtifactId(id)) throw new Error("not an artifact ID");
+    const parsed = parseConfig(world.env);
+    if (!parsed.ok) throw new Error("test configuration");
+    const deps: OperationDeps = {
+      db: world.env.DB,
+      bucket: world.env.FILES,
+      config: parsed.config,
+      now: () => world.clock.now,
+      newId: newArtifactId,
+      sleep: async () => {},
+      timeouts: { r2Ms: 2_000, d1ReadMs: 2_000, kvReadMs: 2_000 },
+    };
+    const find = async (pathname: string, fallback: boolean) => {
+      const path = resolveRequestPath(pathname);
+      if (path === undefined) throw new Error(`unresolved: ${pathname}`);
+      const result = await lookupForViewer(deps, { id, path, publicOnly: true }, fallback);
+      return result.ok ? result.value.lookup.kind : result.error.code;
+    };
+    expect([await find("/index.html", false), await find("/favicon.ico", true)]).toEqual(["not_found", "not_found"]);
+    expect((await world.patch(id, { public: true })).status).toBe(200);
+    expect([await find("/index.html", false), await find("/favicon.ico", true)]).toEqual(["file", "absent"]);
   });
 
   it("leaves REST's file route unchanged", async () => {
