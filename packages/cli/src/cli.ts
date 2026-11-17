@@ -18,6 +18,7 @@ import {
 } from "./api.ts";
 import { readConfig, readOrigin, SET_TOKEN_OR_SIGN_IN, storesLogin, type Config, type Environment } from "./config.ts";
 import { CliError, EXIT, UsageError, type ExitStatus } from "./errors.ts";
+import { EXPORT_LINK, exportVersion, processInterrupts, type ExportOptions, type OnInterrupt } from "./export.ts";
 import { LOCK_OPTIONS, type LockBarriers } from "./lock.ts";
 import { login, logout, systemOpener, type LoginContext } from "./login.ts";
 import { OAUTH_REQUEST_MS } from "./oauth.ts";
@@ -67,6 +68,10 @@ export type Io = {
   readonly openBrowser?: (url: string) => void;
   readonly signIn?: Partial<SignInOptions>;
   readonly now?: () => number;
+  /** Where `export` learns of an interrupt; this process's SIGINT and SIGTERM by default. */
+  readonly onInterrupt?: OnInterrupt;
+  /** How `export` puts its archive at the target: a hard link, `node:fs` `link` by default. */
+  readonly link?: ExportOptions["link"];
 };
 
 /** The release version: the root package's, which `bun build --compile` inlines into the binary. */
@@ -121,6 +126,12 @@ Commands:
   list [--archived only|include]      Every artifact, all pages; archived ones are left out unless asked for.
   get <id> [--version <n>]            The artifact and its latest version (or version n) with its files.
   pull <id> <dir> [--version <n>]     Write the latest version's files (or version n's) into a new or empty <dir>.
+  export <id> [--version <n>] [-o <file>]
+      Download the latest version (or version n) as a ZIP archive to <file>, by default <id>-v<n>.zip in the current
+      directory. An existing <file> is never replaced: export refuses it, and one that appears during the download
+      stays as it is while export fails. The download fails after 60 s without a byte; on any failure, export removes
+      what it wrote. A version with paths that cannot be extracted as stored (holding "\\", or a file that another
+      path uses as a directory) is refused, naming them.
   public <id> on|off                  Serve every version at the artifact's public URL without sign-in, or stop.
   archive <id> on|off|auto            Archive the artifact, keep it out of the archive, or archive it by age.
   delete <id>                         Delete the artifact: every URL answers 404.
@@ -164,6 +175,7 @@ const OPTIONS = {
   title: { type: "string" },
   description: { type: "string" },
   version: { type: "string" },
+  output: { type: "string", short: "o" },
   archived: { type: "string" },
   json: { type: "boolean" },
   help: { type: "boolean", short: "h" },
@@ -278,6 +290,20 @@ function issueLines(error: ApiError): string {
   return error.issues.map((issue) => `\n  ${issue.field}: ${issue.reason}`).join("");
 }
 
+/**
+ * `JSON.stringify` leaves C1 controls and line separators raw; as escapes the JSON means the same and a terminal shows
+ * them as text.
+ */
+function escapeRaw(json: string): string {
+  return json.replaceAll(
+    /[\u007f-\u009f\u2028\u2029]/gu,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/** A path the API named, quoted on one line. */
+const quoted = (path: string): string => escapeRaw(JSON.stringify(path));
+
 const COMMANDS: Readonly<Record<string, Command>> = {
   publish: {
     usage: "publish <dir> (--title <t> | --id <id>) [--title <t>] [--description <d>]",
@@ -358,6 +384,27 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         `pulled ${result.version.files.length} files of ${result.artifact.id} version ${result.version.number} ` +
           `into ${directory}\n`,
       );
+    },
+  },
+  export: {
+    usage: "export <id> [--version <n>] [-o <file>]",
+    args: 1,
+    options: ["version", "output"],
+    async run({ io, args, values, api, print }) {
+      const id = artifactId(args[0]);
+      if (values.output === "") throw new UsageError("-o takes a file name");
+      const options: ExportOptions = {
+        idleMs: (io.timeouts ?? TIMEOUTS).idleMs,
+        onInterrupt: io.onInterrupt ?? processInterrupts,
+        link: io.link ?? EXPORT_LINK,
+      };
+      const exported = await exportVersion(api(), id, versionNumber(values.version), values.output, options).catch(
+        (error: unknown) => {
+          throw exportError(error, id);
+        },
+      );
+      if (exported.note !== undefined) io.stderr(`artifacts: ${exported.note}\n`);
+      print(`exported ${id} version ${exported.version} to ${exported.file} (${exported.bytes} bytes)\n`);
     },
   },
   public: {
@@ -471,6 +518,27 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
 };
 
+/** An export's error answers in the command's words; nothing was written when one arrives. */
+function exportError(error: unknown, id: string): unknown {
+  if (!(error instanceof ApiError)) return error;
+  if (error.code === "not_extractable") {
+    const paths = error.paths.map((path) => `\n  ${quoted(path)}`).join("");
+    return new CliError(
+      `${error.code}: the version has paths that cannot be extracted as stored, since they hold "\\" or another ` +
+        `path uses them as a directory; export refuses it:${paths}`,
+    );
+  }
+  if (error.status === 404) {
+    return new CliError(
+      `${error.code}: there is no such version of ${id} to export; artifacts get ${id} names the latest`,
+    );
+  }
+  if (error.status === 503) {
+    return new CliError(`${error.code}: the API could not read the version's files; nothing was written, so try again`);
+  }
+  return error;
+}
+
 /** The message for an error, without any token the command holds should any text ever carry one. */
 function errorText(error: unknown, platform: NodeJS.Platform, secrets: ReadonlySet<string>): string {
   let text: string;
@@ -582,12 +650,7 @@ export async function run(argv: readonly string[], io: Io): Promise<ExitStatus> 
       };
     },
     print: io.stdout,
-    // JSON.stringify leaves C1 controls and line separators raw; as escapes the JSON means the same and a terminal
-    // shows them as text.
-    json: (value) =>
-      io.stdout(
-        `${JSON.stringify(value, null, 2).replaceAll(/[\u007f-\u009f\u2028\u2029]/gu, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)}\n`,
-      ),
+    json: (value) => io.stdout(`${escapeRaw(JSON.stringify(value, null, 2))}\n`),
   };
   try {
     await command.run(context);

@@ -195,13 +195,22 @@ describe("the CLI's login against the Worker", () => {
     expect((await stat(credentials.file)).size).toBeGreaterThan(0);
   });
 
-  it("publishes and lists with the stored login, as the publisher named on the consent page", async () => {
+  it("publishes, lists and exports with the stored login, as the publisher named on the consent page", async () => {
     const site = await tempDir();
     await writeTree(site, { "index.html": "<p>signed in</p>" });
     const published = await artifacts(["publish", site, "--title", "Signed in", "--json"], env);
     expect(published).toMatchObject({ status: 0 });
-    expect(JSON.parse(published.stdout)).toMatchObject({ version: { published_by: "artifacts-cli" } });
+    const created: { artifact: { id: string } } = JSON.parse(published.stdout);
+    expect(created).toMatchObject({ version: { published_by: "artifacts-cli" } });
     expect((await artifacts(["list"], env)).stdout).toContain("Signed in");
+    const archive = join(await tempDir(), "signed-in.zip");
+    const seen: Seen = { requests: [] };
+    expect(await artifacts(["export", created.artifact.id, "-o", archive], env, seen)).toMatchObject({ status: 0 });
+    expect(seen.requests).toEqual([
+      `GET /v1/artifacts/${created.artifact.id} 200`,
+      `GET /v1/artifacts/${created.artifact.id}/versions/1/export 200`,
+    ]);
+    expect((await stat(archive)).size).toBeGreaterThan(0);
   });
 
   it("refreshes an access token about to expire before the request, rotating the stored tokens", async () => {

@@ -13,6 +13,7 @@ import { afterEach } from "vitest";
 
 import type { Fetch, Timeouts } from "./api.ts";
 import { run, type SignInOptions } from "./cli.ts";
+import type { ExportOptions, OnInterrupt } from "./export.ts";
 
 const created: string[] = [];
 const servers: Server[] = [];
@@ -57,7 +58,12 @@ export type RunOptions = {
   /** Plays the browser; by default nothing opens, so a test never starts the system's opener. */
   readonly openBrowser?: (url: string) => void;
   readonly signIn?: Partial<SignInOptions>;
+  /** Where `export` learns of an interrupt; by default none comes, and the test process's signals stay as they are. */
+  readonly onInterrupt?: OnInterrupt;
+  readonly link?: ExportOptions["link"];
 };
+
+const noInterrupt: OnInterrupt = () => () => undefined;
 
 const noNetwork: Fetch = () => Promise.reject(new Error("no fetch in this test"));
 
@@ -79,6 +85,8 @@ export async function cli(argv: readonly string[], options: RunOptions = {}): Pr
     ...(options.platform === undefined ? {} : { platform: options.platform }),
     openBrowser: options.openBrowser ?? (() => undefined),
     ...(options.signIn === undefined ? {} : { signIn: options.signIn }),
+    onInterrupt: options.onInterrupt ?? noInterrupt,
+    ...(options.link === undefined ? {} : { link: options.link }),
   });
   return { status, stdout, stderr };
 }
