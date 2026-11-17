@@ -356,4 +356,21 @@ describe("export with a stored login", () => {
     expect(standIn.count(`GET ${EXPORT}`)).toBe(1);
     expect((await credentials.read())[standIn.origin]?.tokens?.access_token).not.toBe(tokens.access_token);
   });
+
+  it("sends the request again without waiting for the refused answer's body to cancel", async () => {
+    const standIn = await StandIn.start();
+    const { credentials } = await storedLogin(standIn, false);
+    let exports = 0;
+    const fetch: Fetch = async (input, init) => {
+      if (!input.endsWith(EXPORT)) return network(input, init);
+      if (++exports > 1) {
+        return new Response(ARCHIVE, { headers: { ...ZIP, "Content-Length": String(ARCHIVE.byteLength) } });
+      }
+      // A 401 whose body never finishes cancelling.
+      const never = new ReadableStream<Uint8Array>({ cancel: () => new Promise<void>(() => undefined) });
+      return new Response(never, { status: 401, headers: { "Content-Type": "application/json" } });
+    };
+    expect(await exportedWith(fetch, credentials.env(standIn))).toMatchObject({ status: 0, left: ["out.zip"] });
+    expect(exports).toBe(2);
+  });
 });

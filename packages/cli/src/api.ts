@@ -335,7 +335,8 @@ export class Api {
         const renewed = await this.#credential.renew(token);
         idle?.start();
         if (renewed !== undefined) {
-          await response.body?.cancel().catch(() => undefined);
+          // Not awaited: the refused answer's body is of no use, and its cancel has no bound of its own.
+          void response.body?.cancel().catch(() => undefined);
           response = await bounded(send(renewed));
         }
       }
