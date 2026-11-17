@@ -416,6 +416,84 @@ test.describe("PL-58: the confirmation popup", () => {
     await expect(page.locator("#viewer-menu a[target=_blank]").first()).toHaveText("Make public…");
   });
 
+  // Design.md section 10, "Cancel's script": the clicks on Cancel that close the window instead of following the link.
+  // The window's opener and `close()` are stand-ins, so one page tries each case: `closes: false` is a browser that keeps
+  // the window open. `close` is whether the script called `close()`, `prevented` whether it stopped the link.
+  type CancelClick = {
+    name: string;
+    opener: boolean;
+    closes: boolean;
+    click: Pick<MouseEventInit, "button" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">;
+  };
+  const CANCEL_CLICKS: [CancelClick, { close: boolean; prevented: boolean }][] = [
+    [
+      { name: "a left click with an opener", opener: true, closes: true, click: {} },
+      { close: true, prevented: true },
+    ],
+    [
+      { name: "without an opener", opener: false, closes: true, click: {} },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "with Meta", opener: true, closes: true, click: { metaKey: true } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "with Control", opener: true, closes: true, click: { ctrlKey: true } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "with Shift", opener: true, closes: true, click: { shiftKey: true } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "with Alt", opener: true, closes: true, click: { altKey: true } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "of the middle button", opener: true, closes: true, click: { button: 1 } },
+      { close: false, prevented: false },
+    ],
+    [
+      { name: "where the browser keeps the window open", opener: true, closes: false, click: {} },
+      { close: true, prevented: false },
+    ],
+  ];
+
+  test("closes the window on Cancel only on a left click with an opener, and follows the link otherwise", async ({
+    page,
+  }) => {
+    const id = await create("Probe", probe());
+    for (const path of ["public", "delete"]) {
+      await page.goto(`${appOrigin()}/a/${id}/${path}`);
+      for (const [setup, expected] of CANCEL_CLICKS) {
+        const outcome = await page.evaluate(({ opener, closes, click }) => {
+          const seen = { close: false, prevented: false };
+          let closed = false;
+          Object.defineProperty(window, "opener", { configurable: true, get: () => (opener ? window : null) });
+          Object.defineProperty(window, "closed", { configurable: true, get: () => closed });
+          window.close = () => {
+            seen.close = true;
+            closed = closes;
+          };
+          // After the page's listener on Cancel: whether it stopped the link, then stop it so the page stays.
+          document.addEventListener(
+            "click",
+            (event) => {
+              seen.prevented = event.defaultPrevented;
+              event.preventDefault();
+            },
+            { once: true },
+          );
+          const cancel = document.querySelector(".form__actions a");
+          cancel?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...click }));
+          return seen;
+        }, setup);
+        expect({ path, case: setup.name, ...outcome }).toEqual({ path, case: setup.name, ...expected });
+      }
+    }
+  });
+
   test("follows Cancel as its link in a tab without an opener", async ({ page, context }) => {
     const id = await create("Probe", probe());
     // A blocked popup: the item is followed as its link, a new tab without an opener.
