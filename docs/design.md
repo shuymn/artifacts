@@ -19,7 +19,7 @@ One person deploys and uses a deployment. It is not a multi-tenant or open servi
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P1  | **One owner.** Every legitimate caller is the owner or an agent the owner gave a credential: an API token, or an OAuth grant the owner approved. Defenses target a page an agent wrote that is buggy or prompt-injected, a leaked credential, and outsiders reaching the hosts. Nothing is built against untrusted users (quotas, rate limits, tenants). A safe default is taken when it is cheap; it is never a requirement. |
 | P2  | **Each artifact is its own origin.** Artifact JavaScript reads its own files and storage and nothing else this host serves.                                                                                                                                                                                                                                                                                                   |
-| P3  | **Browsers only read artifacts.** Every change to an artifact goes through the API with a bearer credential; no request authenticated by a cookie changes one. The one write a browser makes is the owner approving an OAuth grant on the consent page that the same browser opened (section 7).                                                                                                                              |
+| P3  | **Browsers change artifacts only through the app host's confirmation pages**, which need the owner's Access session and a form posted from the app host's own page; no request from an artifact's origin changes one. Every other change goes through the API with a bearer credential. The other write a browser makes is the owner approving an OAuth grant on the consent page that the same browser opened (section 7).   |
 | P4  | **A stored version never changes, and a publish is all or nothing.**                                                                                                                                                                                                                                                                                                                                                          |
 | P5  | **One operation layer.** REST, MCP and the CLI are adapters over the same operations and operation error codes.                                                                                                                                                                                                                                                                                                               |
 | P6  | **The platform before own code, and the simpler option** when the risk the other guards against needs an untrusted user.                                                                                                                                                                                                                                                                                                      |
@@ -35,9 +35,9 @@ tokens.
 
 | Host                           | Example                     | Serves                                                           | Authenticated by                                                       |
 | ------------------------------ | --------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `APP_HOST`                     | `artifacts.example.com`     | the gallery, read-only; the OAuth consent page                   | Access; the Worker verifies the JWT                                    |
+| `APP_HOST`                     | `artifacts.example.com`     | the gallery, confirmations, downloads; the OAuth consent page    | Access; the Worker verifies the JWT                                    |
 | `API_HOST`                     | `artifacts-api.example.com` | REST under `/v1/`, MCP at `/mcp`, the OAuth authorization server | a bearer OAuth access token or API token; the OAuth endpoints are open |
-| `<id>` + `CONTENT_HOST_SUFFIX` | `<id>-art.example.com`      | one artifact's files                                             | Access; the Worker verifies the JWT                                    |
+| `<id>` + `CONTENT_HOST_SUFFIX` | `<id>-art.example.com`      | one artifact's files, its HTML pages in the viewer frame         | Access; the Worker verifies the JWT                                    |
 | `<id>` + `PUBLIC_HOST_SUFFIX`  | `<id>-pub.example.com`      | one artifact's files, if it is public                            | none                                                                   |
 
 ## 1. Hosts and origins
@@ -88,14 +88,17 @@ Artifact JavaScript can set a cookie for its host's parent domain, which every h
 requests to hosts of the same registrable domain are same-site. In the shared-domain layout that reaches the owner's
 other services; the threat model's accepted risk states the conditions under which this holds. This deployment's own
 protections hold in both layouts: the gallery and the API read no cookie (ACC-1, TOK-1); the one cookie the Worker
-reads, the consent page's `__Host-` binding, cannot be set by another host (ISO-4); no artifact changes on a cookie
-(ISO-3); and nothing private can be read or loaded as a subresource across origins (ISO-2).
+reads, the consent page's `__Host-` binding, cannot be set by another host (ISO-4); an artifact changes on the owner's
+Access session only through a confirmation form posted from a page of the app host itself, which no request from an
+artifact's origin is (ISO-3); and nothing private can be read or loaded as a subresource across origins (ISO-2).
 
 | Target                                   | Can                                                    | Cannot                                                                                                                                                                     |
 | ---------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Its own files, all versions              | read                                                   | change them                                                                                                                                                                |
 | Its own storage, cookies, service worker | everything; all versions share them                    | reach another artifact's                                                                                                                                                   |
+| The viewer frame on its own host         | read and change it: it is the same origin              | write through it: its menu only links to the app host (section 6)                                                                                                          |
 | Other artifact hosts, the gallery        | send requests (the owner's Access cookie may go along) | read a response or load it as a subresource (ISO-2); change state                                                                                                          |
+| The confirmation pages on the app host   | open them at the top level; navigate a window it holds | submit one: the `POST` needs the app host's `Origin` and `Sec-Fetch-Site: same-origin` (ISO-3); frame them                                                                 |
 | The API and the OAuth endpoints          | send requests without a credential                     | authenticate; read an answer (ISO-2)                                                                                                                                       |
 | The consent page on the app host         | open it at the top level, as any site can              | approve: consent is never remembered, and approving needs the handle the page holds and the page's cookie; frame it; receive a code at an artifact host (OAUTH-1, OAUTH-2) |
 | Its host's `CF_Authorization` cookie     | —                                                      | read it (ACC-3)                                                                                                                                                            |
@@ -284,12 +287,15 @@ no limit on versions.
   runtime and Cloudflare compress by the request's
   `Accept-Encoding`, and the runtime adds no `Vary` itself (checked with `wrangler dev`), so without it a cache between
   the browser and Cloudflare could hand one client an encoding it did not ask for. Refusals, redirects and errors carry
-  neither a body worth caching nor a validator, and go without it.
+  neither a body worth caching nor a validator, and go without it. HTML on a private content host has two
+  representations, the file and the viewer frame (below), so its 200 and 304 carry `Vary: Sec-Fetch-Dest,
+  Accept-Encoding`, whichever representation they are.
 - `Cross-Origin-Resource-Policy: same-origin` on every response of a private content host and of the app host,
   including 304, 308 and 404, so another origin cannot load private content as a script, image, stylesheet or media
   with the owner's cookie (ISO-2). Public hosts omit it: their content needs no credential, and other sites may embed
   it.
-- No `Content-Security-Policy` on artifacts: a page is the agent's code and may load from CDNs.
+- No `Content-Security-Policy` on artifacts: a page is the agent's code and may load from CDNs. The viewer frame, the
+  Worker's own page, carries one (below).
 - `GET` and `HEAD` only (ISO-3); an unknown file answers a plain 404, except the icon below. `Range` is not supported
   in the first release, so audio and video cannot seek.
 - **Icon:** browsers request `/favicon.ico` on their own. When the latest version has no `favicon.ico` (and no
@@ -300,6 +306,157 @@ no limit on versions.
   bytes), so it revalidates on every use like a stored file, and once a version publishes its own `favicon.ico`, the
   next revalidation gets that file with its own tag. Pinned paths have no fallback: a browser asks only at the root,
   also while it shows a pinned version, and `/_v/<n>/` serves exactly that version's files.
+
+### The viewer frame
+
+A private page opens under a thin header that carries the artifact's actions, and the page's viewport shrinks by the
+header's height, so a page that fills `100vh` (a game, a canvas) neither scrolls nor hides under it. Public hosts, REST
+and MCP never get the frame.
+
+**Which request gets it.** On a private content host, a `GET` or `HEAD` gets the **frame page** when all of these hold:
+
+- `Sec-Fetch-Dest: document`, a top-level navigation;
+- the query has no parameter `_viewer=off` (Open page directly, below);
+- the path selects a file the host would answer with 200, whose stored type is HTML (`text/html` or
+  `application/xhtml+xml`), in the latest or a pinned version.
+
+Every other request gets what this section serves: a missing or other destination (the frame's own iframe, `<embed>`,
+`<object>`, `fetch`, a prefetch), another type, a 308, a 404, the icon fallback. The query never selects a file, so the
+parameter changes only the representation; stored bytes never change (P4).
+
+**Order.** The method (ISO-3), Access (ACC-1) and the path (SRV-2) come first, then one D1 batch reads the file and,
+when the first two conditions hold, the artifact and the version rows the header shows, from one snapshot. Existence
+answers 404 as before. Then the Worker chooses the representation and evaluates that representation's validator: the
+frame page's `ETag` is 32 hex digits of the SHA-256 of its rendered bytes, as a gallery page's (section 10), and a
+file's is the one above. A matching `If-None-Match` answers 304 with the 200's headers, so no 304 skips a check (SRV-3).
+`HEAD` mirrors `GET`.
+
+**The page** is the header and one `<iframe>` that fills the rest of the viewport. The iframe loads the same path and
+query, and its request, with `Sec-Fetch-Dest: iframe`, gets the file as this section serves it; the page sees a
+viewport of the iframe's size. The frame page carries the private content host's headers (CORP, `nosniff`,
+`Referrer-Policy: no-referrer`, `private, no-cache`), `Content-Type: text/html; charset=utf-8`, its `ETag`, `Vary:
+Sec-Fetch-Dest, Accept-Encoding` and `Content-Security-Policy: script-src 'sha256-<its script>'`. The policy names the
+script so that Cloudflare's "Replace insecure JavaScript libraries" keeps the page's `ETag`
+([operations.md](operations.md), section 1, "Known limit"); it sets no `default-src` or `frame-src`, which would also
+govern the iframe's own navigations. It protects little else: the frame page shares the artifact's origin, whose script
+can change it (threat model, accepted risks).
+
+**Assets.** The frame page cannot use the app host's stylesheet, fonts or icon: they carry
+`Cross-Origin-Resource-Policy: same-origin`, and fonts would also need CORS headers, which the app host never sends
+(ISO-2). It inlines its own stylesheet, `viewer.css` ([gallery/design.md](gallery/design.md)), and the icon as SVG
+markup, and sets its text in the system's fonts (`system-ui`, `ui-monospace`). Fonts served from the content host would
+need a path there, which would hide an artifact's file of that name, and as `data:` URLs they would add tens of
+kilobytes to every page view.
+
+**Header.** The gallery's icon alone, linking to the gallery; the artifact's title on one line, cut with an ellipsis;
+then `v<n> · latest`, or `v<n> of <latest>` on a pinned version. The title shrinks, the version and the menu button do
+not. Every value is escaped by the gallery's template.
+
+**Menu.** A `popover`, opened by the header's button through `popovertarget` (the script stands in where the browser
+has no `popover`, below), listing:
+
+- the shown version and its time (UTC, as the gallery shows times); no publisher name, which the gallery shows, so the
+  menu keeps one fixed width;
+- **Back to gallery**, the app host's `/`, and **Artifact details**, `/a/<id>` there: app-host links are absolute URLs
+  built from the configuration;
+- **History**, a nested `popover`: the newest 10 versions, number and date only, the shown one marked, then the shown
+  version when it is older than those, then **All versions in gallery** (`/a/<id>#versions`). The latest links to `/`,
+  any other version to `/_v/<n>/`;
+- **Export v<n> (.zip)**, the app host's download of the shown version (section 8);
+- **Make public…** or **Make private…**, and **Delete…**, the confirmation pages (section 10);
+- **Open page directly** (below);
+- a footer with the release version, `artifacts v<release>`.
+
+Links navigate the top window, so a version in the history opens a new frame for it. The items that change state are
+the exception.
+
+**Writes** happen only on the app host's confirmation pages (section 10); the frame page sends no request that writes.
+Any form or request the frame page could send, the artifact's script could send too (P1). The frame's script opens each
+confirmation page in a small popup window, `window.open(url, "artifacts-confirm", "popup,width=480,height=560")`; the
+item is also a plain link with `target="_blank"` to the same URL, followed when the script does not run or the popup
+is blocked. The popup is a top-level window on the app host, so the Access cookie is first-party in both layouts and
+nothing frames the page. Two alternatives were rejected:
+
+- An in-page modal holding the confirmation page in an iframe: in the dedicated-domain layout the app host's Access
+  cookie is third-party in that frame; it relies on Access's undocumented behavior in frames; and the artifact page, the
+  modal's parent, could overlay it to make the owner click.
+- Navigating the viewer to the confirmation page: the page loses its state (a game in progress, a form being filled),
+  which the popup keeps.
+
+**Open page directly** opens the shown page at the top level without the frame, at a URL the owner can bookmark: the
+iframe's current URL with `_viewer=off` appended to its query, its fragment kept. A reserved query parameter is the one
+mechanism that keeps the constraints: the query never selects a file, so the same file is served; a path such as
+`/_raw/` would hide an artifact's file of that name; another host would be another origin, with other storage; a
+cookie would be a new one (ISO-4), and the artifact's storage is its own; and the server never sees a fragment. The
+frame never puts the parameter in the iframe's URL, so it stays out of the address bar the frame keeps in step with the
+iframe. The page opened this way sees `_viewer=off` in `location.search` and `location.href`, after its own parameters.
+A reference with a path or a query of its own (`two.html`, `./`, `/`, `?page=2`) resolves without it, so a link to
+another page of the artifact opens that page in the frame again; a reference of a fragment alone (`#x`) or an empty
+one keeps the document's query, and with it the parameter. An artifact that uses the parameter `_viewer` for itself gets
+its file without the frame for `_viewer=off`.
+
+**Version shown and content.** The frame resolves version n in its D1 batch, and the iframe's request resolves its file
+again: on the latest version, a publish between the two requests shows version n+1 under a header that says n. It is
+rare, and a reload fixes it. Pinning the iframe to `/_v/<n>/` would close the gap, but it changes the page's
+`location.pathname`, which routers and root-relative links read. When the iframe navigates to another `/_v/<m>/` path,
+or from one to the latest, the script updates the header's version, the menu's shown version, with its time where the
+history lists it, the history's mark and the export item.
+
+**The script** is one inline script, the same bytes on every frame page, so the hash in the policy is fixed; each
+page's values are in its markup.
+
+- It sets the iframe's first URL, the page's path, query and fragment (`location.hash`, which the server never sees),
+  before the iframe navigates: the markup has no `src`, and without script a `<noscript>` link opens the page directly.
+- On each `load` of the iframe, it copies the iframe's URL into the address bar (`history.replaceState`) and its
+  `document.title` into the tab's title. Same-document changes (`pushState`, a new fragment) fire no `load`; it copies
+  them best effort, on the Navigation API's `currententrychange` where the browser has it and on `popstate` and
+  `hashchange`. Reading the iframe throws once it shows another origin (an external link followed inside it): the
+  script catches that and keeps the last URL of the artifact.
+- It focuses the iframe once, at its first load and only while nothing else has the focus, so a keyboard page (a game)
+  gets keys without a click and a later navigation does not take the focus from the menu.
+- It closes the menu when the top window loses the focus to the iframe: a click in the iframe never reaches the
+  popover's light dismiss.
+- Where the browser has no `popover` (Safari 16.4 to 16.6, which send Fetch Metadata but take `popover` only from
+  Safari 17), it hides the menu and the history as it starts and opens and closes them itself by toggling `hidden`:
+  the button toggles its list, and Escape, a click outside the list and the focus moving into the iframe close it.
+  `popover` stays the path wherever the browser has it.
+- It updates the version items after a navigation (above).
+
+The iframe has no `sandbox`: one that keeps a page working (`allow-scripts allow-same-origin`) contains nothing, since
+the page can remove it from its parent. It has `allow="fullscreen; clipboard-read; clipboard-write; camera; microphone;
+geolocation; display-capture; autoplay; screen-wake-lock; web-share"`. `allow` delegates and grants nothing: the page
+can use a feature where the top-level page could, still behind the browser's permission prompts, and, with no origin
+named, only while the iframe shows the artifact's origin.
+
+**Same URL as its parent.** The iframe's URL equals the frame page's. The HTML standard does not load an iframe whose
+URL, ignoring the fragment, equals that of its document or any ancestor
+([HTML](https://html.spec.whatwg.org/multipage/iframe-embed-object.html#shared-attribute-processing-steps-for-iframe-and-frame-elements)),
+but every engine allows one level of such self-reference and refuses the second: Chromium
+([`NavigationRequest::IsSelfReferentialURL`](https://github.com/chromium/chromium/blob/5ee3ed7b0dd261bdd6134c91dfb35b050f72850f/content/browser/renderer_host/navigation_request.cc)),
+Gecko ([`CheckRecursiveLoad`](https://github.com/mozilla-firefox/firefox/blob/f612f4a72980aeb8d7a868d53534ad698b2ee602/netwerk/ipc/DocumentLoadListener.cpp),
+"like chromium does") and WebKit
+([`HTMLFrameOwnerElement`](https://github.com/WebKit/WebKit/blob/c3a7f3c0cfe0adf02a076e3ad6205830b4cf30d4/Source/WebCore/html/HTMLFrameOwnerElement.cpp)).
+The frame depends on that allowance: a browser that followed the standard's text would show an empty frame, and Open
+page directly would still work. A page that frames its own URL reaches the second level in the viewer, so that inner
+frame stays empty there.
+
+**Compatibility.** Some pages behave differently in a frame. For each case below, Open page directly shows the page as
+it was before the viewer.
+
+| Case                                      | In the viewer                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `window.opener`                           | a page that another window opened (a sign-in popup it runs, a window another site opened) runs in the iframe, whose `opener` is null; its `window.close()` does nothing                                                                                                                                                                |
+| `top.document`, `parent`, `top !== self`  | the page sees itself framed; code that checks it, or that reads or writes the top document as if it were its own, acts on the frame page                                                                                                                                                                                               |
+| Frame-busting (`top.location = location`) | the top navigates to the page's URL, which gets the frame again, so the page reloads in a loop; `_viewer=off` typed into the address works where the menu does not stay up long enough                                                                                                                                                 |
+| External links and sign-ins               | a link without a target loads the other site inside the iframe, where sign-in pages and many sites refuse to be framed; the address bar keeps the last URL of the artifact. An Access session that expired while the viewer was open cannot sign in inside the iframe (Access refuses framing); reloading the page signs in at the top |
+| Initial fragment                          | the script carries it into the iframe's first URL; later changes reach the address bar best effort (above)                                                                                                                                                                                                                             |
+| Single-page apps' history                 | `pushState` reaches the address bar only where the Navigation API reports it; elsewhere the address bar keeps the last loaded URL, which a reload opens. Back and forward move the iframe through the joint session history                                                                                                            |
+| Printing                                  | the browser prints the top document, in which the iframe is one viewport tall: a longer page is cut to its visible part                                                                                                                                                                                                                |
+| View source                               | `view-source:` asks for the URL as a document and shows the frame page's source                                                                                                                                                                                                                                                        |
+| Text fragments (`#:~:text=`)              | browsers remove the directive from `location.hash`, so the script cannot pass it on and nothing is highlighted                                                                                                                                                                                                                         |
+| Prefetch and prerender                    | a speculation rule or prerender naming a page of the artifact fetches it as a top-level document and gets the frame page, which the iframe's own navigation never uses: a wasted request                                                                                                                                               |
+| Safari 16.4 to 16.6                       | it has no `popover`, so the frame's script opens and closes the menu and the history itself (above)                                                                                                                                                                                                                                    |
+| Safari before 16.4                        | it sends no `Sec-Fetch-Dest`, so its pages open as with Open page directly; the confirmation forms refuse its `POST`, which carries no `Sec-Fetch-Site` (section 10), so it changes artifacts through the CLI or the API                                                                                                               |
 
 ## 7. Auth
 
@@ -641,7 +798,8 @@ under `/.well-known/oauth-protected-resource` answer 404. The router does not us
   `Cf-Access-Jwt-Assertion` as kopje does (ACC-1): an invalid JWT answers 403, a key set it cannot fetch answers 503
   `unavailable`. The Access policy is the one place that names the owner, so the Worker compares no email.
 - **Public links:** every artifact has a `public` flag, off when created and set through the API
-  (`PATCH { "public": bool }`, MCP `set_public`, `artifacts public <id> on|off`). Making an artifact public exposes
+  (`PATCH { "public": bool }`, MCP `set_public`, `artifacts public <id> on|off`) or the app host's confirmation page
+  (section 10). Making an artifact public exposes
   its latest version and every pinned version on its public host, which serves them with section 6's rules and no
   Access; a private, deleted or unknown artifact answers the same 404 there (PUB-1).
 
@@ -659,6 +817,7 @@ under `/.well-known/oauth-protected-resource` answer 404. The router does not us
 | Read a file     | `GET /v1/artifacts/{id}/versions/{n}/files/{path}` (raw bytes) | `read_file`                 | `{ path, content_type, size, encoding, content }` |
 | Public, archive | `PATCH /v1/artifacts/{id}` with `public` and/or `archive`      | `set_public`, `set_archive` | `{ artifact }`                                    |
 | Delete          | `DELETE /v1/artifacts/{id}`                                    | `delete_artifact`           | 204, or `{ deleted: id }`                         |
+| Export          | `GET /v1/artifacts/{id}/versions/{n}/export`                   | none                        | a ZIP archive, streamed (Export, below)           |
 | List grants     | `GET /v1/grants`                                               | none                        | `{ grants }`                                      |
 | Revoke a grant  | `DELETE /v1/grants/{id}`                                       | none                        | 204                                               |
 
@@ -668,6 +827,9 @@ under `/.well-known/oauth-protected-resource` answer 404. The router does not us
   exact path, so a directory path that REST answers with a 308 to its `index.html` is `not_found`; it returns `utf8`
   for textual, valid UTF-8 content and `base64` otherwise, and refuses a file over 1 MiB with `invalid_request`, naming
   the REST URL in `rest_url`. These two are where `read_file` and REST differ.
+- **Callers:** REST and MCP call an operation with their credential's publisher name. The app host's confirmation pages
+  (section 10) call Public and Delete for the owner's browser, which holds no credential, so the change logs
+  `via: "gallery"` in place of a publisher name and grant (section 11).
 - **Delete** is logical at once: one batch writes the tombstone and removes the rows, so every URL answers 404. The
   prefix's objects are then deleted, best effort. A repeated `DELETE` of a tombstoned ID retries that cleanup and
   answers 204, like the first; an ID that never existed answers 404 (VER-4).
@@ -718,6 +880,55 @@ under `/.well-known/oauth-protected-resource` answer 404. The router does not us
 }
 ```
 
+### Export
+
+The operation `exportVersion` streams one version's files as a ZIP archive, for the REST route above, the app host's
+download `GET /a/<id>/v/<n>/export` behind Access (section 10; the viewer's Export item) and the CLI's `export`
+(section 9). It is not an MCP tool: an archive is of no use in a model's context.
+
+- **Format:** `client-zip` 2.5.1 (decisions.md) writes it. Entries are stored without compression (STORE), named in
+  UTF-8 as stored (NFC, section 6) with the language encoding flag, and dated with the version's `created_at`, so a
+  version's archive has the same bytes on every export; they come in path order, without directory entries. ZIP64
+  records are written where a size or offset needs them, and the library marks every entry as needing ZIP 4.5, which
+  a reader without ZIP64 refuses. Stored paths are relative and have no `.` or `..` segment (section 6), so no entry
+  names a place outside the directory it is extracted into.
+- **Refusal before streaming:** a version with a path that cannot be extracted as it is stored answers 409
+  `not_extractable`, naming every such path: a path containing `\`, which the ZIP format reserves, since its names
+  separate with `/` and never `\` ([APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) 4.4.17.1),
+  and which extractors read differently, some as a separator; and a path that another path uses as a directory (`a`
+  beside `a/b`), which no file system holds. The export never renames or skips a file. A name that only some file
+  systems refuse (Windows' reserved characters, names that differ only in case) is carried as stored, and the extracting
+  tool decides, as the file system decides for `pull` (section 9).
+- **Streaming:** the operation reads the version's file list in one D1 read, checks the paths and gets the first
+  file's object before it answers, so a failure until then is an operation error (`not_found`, `not_extractable`,
+  `unavailable`, `internal`). It then answers 200 and feeds the library one file at a time from an async generator:
+  one R2 body is open at a time, and each `get` and each read of a body's next chunk waits at most the R2 timeout. The
+  export reads each body through its own reader and cancels it on every exit. A failure after the headers (an R2 call
+  that fails or stalls, an object whose length differs from its listed size, the CPU limit) errors the stream: the
+  client sees an aborted transfer, never a complete-looking archive, and `operation.failed` logs its class, except after
+  the CPU limit, which ends the invocation before it can log. When the client goes away, the library calls `throw()` on
+  the generator (since 2.4.3), whose `finally` cancels the body it holds, and no further object is read; a cancellation
+  is not logged.
+- **Headers:** `Content-Type: application/zip`, `Content-Disposition: attachment; filename="<id>-v<n>.zip"`,
+  `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, and `Content-Length`, so a client can tell a cut stream
+  from a whole one. Workers ignore a `Content-Length` that code sets on a response whose body is a plain stream and send
+  it only for a fixed-length body ([Response](https://developers.cloudflare.com/workers/runtime-apis/response/#set-the-content-length-header)),
+  and `client-zip` sets it on a plain one. The export therefore pipes the library's stream (`makeZip`) through a
+  `FixedLengthStream` of the length the library's `predictLength` computes from the listed names and sizes, and
+  answers with its readable side. The pipe carries an error forward, so a failure errors the response, and a
+  cancellation back, so the client going away cancels the library's stream and with it the generator; the stream
+  refuses more or fewer bytes than that length, which errors it as well. A `HEAD` answers the `GET`'s headers without
+  reading R2.
+- **Bounds:** a version has at most 2000 files (section 6), so an export makes at most 2000 R2 reads, one per file,
+  against 10,000 subrequests per request, and the library keeps at most 2000 central-directory records of about
+  1.1 KiB at most with their paths, some 2 MiB. Memory does not grow with the version's size, since one chunk at a
+  time passes through; CPU time does, since the library computes each file's CRC-32 in JavaScript and copies every
+  chunk. A request may use 30 s of CPU on Workers Paid, which `limits.cpu_ms` raises to 5 minutes; waiting on R2 does
+  not count ([limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)). There is no benchmark on
+  Workers yet; the library's own, in desktop Chrome, zips about 200 MB a second, which is not a Workers figure. An
+  export that needs more CPU than the limit is cut off as above, and `pull`, a request per file, has no such bound. The
+  deployment keeps the default limit until a measurement shows a need.
+
 ### Errors
 
 **Operation errors** come from the shared operation layer, from a closed set mapped once (P5). REST answers
@@ -729,6 +940,7 @@ same object.
 | `invalid_request`  | 400  | input fails validation; `issues` lists `{ field, reason }`, reasons from a closed set                          |
 | `not_found`        | 404  | no live artifact, version, file or grant                                                                       |
 | `version_conflict` | 409  | `base_version` is not the latest; carries `latest_version`                                                     |
+| `not_extractable`  | 409  | an exported version has paths that cannot be extracted as stored (Export, above); `paths` lists each           |
 | `unavailable`      | 503  | invalid configuration, an unreachable key set, or a failed or timed-out read or upload, OAuth storage included |
 | `internal`         | 500  | anything else; the message carries no detail                                                                   |
 
@@ -785,7 +997,8 @@ every version needs index.html at its root.
 ## 9. CLI
 
 - **Commands:** `publish <dir> [--id <id>] [--title <t>] [--description <d>]`, `list [--archived only|include]`,
-  `get <id> [--version <n>]`, `pull <id> <dir> [--version <n>]`, `public <id> on|off`, `archive <id> on|off|auto`,
+  `get <id> [--version <n>]`, `pull <id> <dir> [--version <n>]`, `export <id> [--version <n>] [-o <file>]`,
+  `public <id> on|off`, `archive <id> on|off|auto`,
   `delete <id>`, `token <name>`, `login`, `logout`, `grants`, `revoke <grant>`; `--json` prints the API's JSON, and
   `artifacts --version` alone prints the CLI's version. `list` follows every page. Configuration: `ARTIFACTS_API_URL`,
   the API origin (`http` only for `localhost` names, since the credential travels with it), and a credential:
@@ -800,6 +1013,21 @@ every version needs index.html at its root.
   one `.html` or `.htm` file as the version's only file, `index.html`; any other single file is refused.
 - **`pull`** writes every file of a version into a new or empty directory, so that `publish --id` from it reproduces
   the version. Each file is created exclusively and checked against its listed size and SHA-256.
+- **`export`** writes a version's archive (section 8, "Export") to `<file>`, by default `<id>-v<n>.zip` in the current
+  directory. Without `--version` it reads the artifact first and exports the latest version it names, so a publish
+  meanwhile does not change what it writes. It refuses a target that exists before it asks, writes
+  `<file>.<random>.part` beside it, created exclusively, and only once the stream has ended with the length
+  `Content-Length` announced, puts the part at the target without overwriting anything there: a target created during
+  the download stays as it is, and the command fails, naming it. A `rename` would replace such a file, so the CLI
+  links the part to the target and then removes the part; a link fails when the target exists, as `link(2)` on macOS
+  and Linux and `CreateHardLinkW` on Windows, which Bun's `link` reaches through libuv. Windows makes hard links on NTFS
+  only ([`CreateHardLinkW`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createhardlinkw)),
+  so when the link fails for any reason but an existing target (a FAT or exFAT volume, a network share), the CLI copies
+  the part with `copyFile` and `COPYFILE_EXCL`, which fails when the target exists, and removes the part. On any
+  failure (an error answer, an aborted or stalled stream, a wrong length, an interrupt, an existing target) it removes
+  only what it created: the `.part`, and a target its own exclusive copy created before failing. The download fails
+  when no bytes arrive for 60 s; its whole time is not bounded, since it grows with the version. A `not_extractable`
+  answer prints each path the server named.
 - **`token <name>`** generates an API token (section 7) and prints it once with its `API_TOKENS` entry.
 - **`login`** signs the CLI in with OAuth for the `/v1` resource (section 7). A device flow, for a machine without a
   browser, is not offered: the library does not implement one, and such a machine keeps an API token.
@@ -879,17 +1107,22 @@ every version needs index.html at its root.
 
 ## 10. Gallery
 
-Server-rendered on `APP_HOST`, without script or frames, and without forms except the consent page; the screens follow
+Server-rendered on `APP_HOST`, without frames, without forms except the consent page's and the confirmation pages',
+and without script except the confirmation result page's (below); the screens follow
 [gallery/design.md](gallery/design.md).
 
-| Page        | Shows                                                                                                                                                                                                |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`         | Artifacts that are not archived, in the API's order, 50 per page with a link to the next: title, start of the description, update time, latest version, public, links                                |
-| `/archived` | The same for archived artifacts, with why each is archived (setting or age)                                                                                                                          |
-| `/a/<id>`   | Title, description, URLs, public and archive state; the version history, newest first and 50 per page, with time, `published_by`, title, file count, size and pinned URL; the latest version's files |
+| Page                   | Shows                                                                                                                                                                                                                                                                             |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                    | Artifacts that are not archived, in the API's order, 50 per page with a link to the next: title, start of the description, update time, latest version, public, links                                                                                                             |
+| `/archived`            | The same for archived artifacts, with why each is archived (setting or age)                                                                                                                                                                                                       |
+| `/a/<id>`              | Title, description, URLs, public and archive state; the version history, newest first and 50 per page, with time, `published_by`, title, file count, size and pinned URL; the latest version's files; links to make it public or private, delete it and export the latest version |
+| `/a/<id>/public`       | The confirmation to make the artifact public or private (below)                                                                                                                                                                                                                   |
+| `/a/<id>/delete`       | The confirmation to delete it (below)                                                                                                                                                                                                                                             |
+| `/a/<id>/v/<n>/export` | Version n's archive as a download (section 8, "Export")                                                                                                                                                                                                                           |
 
-A deleted artifact and any other path answer 404. Artifact text is escaped and the CSP forbids scripts and framing
-(ISO-5). The gallery links to artifacts rather than framing them: Access's behavior in frames is not documented.
+A deleted artifact and any other path answer 404. Artifact text is escaped and the CSP forbids framing, and scripts
+except the result page's (ISO-5). The gallery links to artifacts rather than framing them: Access's behavior in frames
+is not documented.
 
 A page is `private, no-cache` with an `ETag`: 32 hex digits of the SHA-256 of its rendered bytes, so a matching
 `If-None-Match` answers 304 with the 200's headers (CSP, CORP, `nosniff`, referrer policy, `Cache-Control`). The tag
@@ -909,11 +1142,12 @@ content: Safari reads SVG icons only from version 26 ([caniuse](https://caniuse.
 documents taking SVG at that path. The SVG is cached as immutable like the other assets and `/favicon.ico` revalidates
 (section 6); the CSP's `img-src 'self'` lets both load, since Firefox applies `img-src` to a page's icon.
 
-**The consent page** (section 7) is the app host's one form and a new screen of the design system. Its text field,
+**The consent page** (section 7) holds one of the app host's forms, beside the confirmation forms (below), and is a new
+screen of the design system. Its text field,
 buttons and notice are new components, so it goes through [gallery/design.md](gallery/design.md)'s change rule: the
 design file (`gallery/gallery.pen`) first, then the tokens, the stylesheet and the reference pages,
-`reference/consent.html` and `reference/consent-error.html`, with the ground rule "no forms" naming this form as its
-one exception. The other ground rules hold: dark only, text that scales with the user's setting, no script. The header
+`reference/consent.html` and `reference/consent-error.html`, with the ground rule "no forms" naming this form among
+its exceptions. The other ground rules hold: dark only, text that scales with the user's setting, no script. The header
 carries the brand alone, since the gallery's tabs show counts from D1. The page shows the client and the request as an
 `info` list, the publisher name with its label, help and message, then **Allow** and **Deny**; the field and the
 buttons take the focus ring links take. Its error page has the same frame, and every value on both is escaped by the
@@ -924,6 +1158,47 @@ that end it are `Cache-Control: no-store` without `ETag` or `Vary`, as the libra
 `GET` begins a new transaction with its own handle and cookie, so the page's bytes never repeat and a tag would never
 match, and the handle, which opens the transaction with that cookie, stays out of every cache. With nothing stored,
 `Vary` has nothing to select, as on the API's `no-store` answers.
+
+**The confirmation pages** make an artifact public or private, or delete it, for the viewer's menu (section 6) and the
+artifact page's links. They are a browser's only way to change an artifact (P3, ISO-3), and new screens of the design
+system (`confirm-public`, `confirm-delete`), which go through [gallery/design.md](gallery/design.md)'s change rule like
+the consent page. Their header carries the brand alone, as the consent page's does.
+
+- **Routes:** `/a/<id>/public` and `/a/<id>/delete`, exact paths, take `GET` (and `HEAD`, as every app-host page) and
+  `POST`; any other method answers 405 before Access. Access with the app audience comes next (ACC-1), before the body
+  is read or storage is touched.
+- **`GET`** shows the artifact (title, ID and number of versions) and one form that posts to its own path. For a
+  private artifact `/public` offers **Make public** and says that every version, the latest and each pinned one,
+  becomes reachable without sign-in at the public URL it shows; for a public one it offers **Make private** and says
+  that the public URL answers 404 from the next request. `/delete` says that every version is deleted, every URL
+  answers 404, the ID is never reused and nothing can be restored, and offers **Delete** (`button/kind=danger`). Each
+  has **Cancel**, a link to the artifact's page `/a/<id>`: closing a window needs script, which these pages do not run.
+  They are laid out for a 480 px window, and every value is escaped by the gallery's template (ISO-5).
+- **The form** submits the desired state, `public=true` or `public=false`, never a toggle, so a form sent twice, or
+  after the state changed elsewhere, still yields what the owner saw and chose. The delete form has no field.
+- **`POST`** requires `Origin` equal to the configured app origin (scheme, host and port) and `Sec-Fetch-Site:
+  same-origin`; a missing header or `Origin: null` answers 403. An artifact page, even same-site in the shared-domain
+  layout, sends its own origin and `same-site` or `cross-site`, so it is refused. Then the body:
+  `application/x-www-form-urlencoded`, at most 1 KiB counted as it is read (RES-1), with exactly the fields above;
+  anything else answers 400, or 413 past the bound. It then calls the operation REST calls, `updateSettings` with
+  `public` or `deleteArtifact`: an unknown or deleted artifact answers 404, and a repeated delete succeeds as on REST.
+  The change logs `via: "gallery"`, and a refusal logs `confirm.refused` with its reason (section 11). No cookie is set
+  or read (ISO-4).
+- **Headers:** the app host's, with `Referrer-Policy: same-origin` in place of `no-referrer`: under `no-referrer` a
+  browser sends `Origin: null` on a form `POST` (Fetch,
+  [append a request `Origin` header](https://fetch.spec.whatwg.org/#append-a-request-origin-header)), which the check
+  refuses. The gallery's CSP, with `form-action 'self'` on the two pages that hold a form, so they still cannot be
+  framed (`frame-ancestors 'none'`) and no page can place them under the owner's click. `Cache-Control: no-store`
+  without `ETag` or `Vary`, as on the consent page: each shows the state at the moment of the decision. No
+  `Cross-Origin-Opener-Policy`, which would cut the result page off from its opener.
+- **The result page** answers a successful `POST` itself, without a redirect: what changed, with links to the artifact,
+  its page and the gallery. Its one script, the same bytes on every result page and allowed by its hash
+  (`script-src 'sha256-…'`), reads its target from a link in the markup. When the window has an opener, the script
+  navigates the opener to the artifact's URL after a visibility change, or to the gallery after a deletion, and closes
+  the window; without one (the link opened as a tab, or the artifact page's own links), the page's links remain.
+
+The artifact page `/a/<id>` links to both pages and to its latest version's download, without script: the confirmation
+opens in the same tab and ends on the result page's links.
 
 ## 11. Operations
 
@@ -958,7 +1233,10 @@ The steps are in [operations.md](operations.md).
   an RFC 7009 sign-out is logged too), `grant.revoke_failed` (grant, error class),
   `consent.refused` and `oauth.refused` (reason codes, `revoked` for the token endpoint's refusal of a revoked grant),
   and `token.refused` takes the reasons `oauth` for an OAuth credential that `validateToken` refuses and `revoked` for
-  one whose grant has a revocation record; the library's own two lines are in section 7.
+  one whose grant has a revocation record; the library's own two lines are in section 7. A change made on a
+  confirmation page (section 10) logs `via: "gallery"` in place of `token` and `grant`: the owner's browser holds no
+  credential, and an API token may itself be named `gallery`, so a publisher name there would read as a token's. A
+  refused confirmation `POST` logs `confirm.refused` with the reason `origin`, `site` or `body`.
 - **No backup of bytes or OAuth storage.** Artifacts are agent output that can be produced again; deletion with a
   leaked credential is answered by revoking it. Lost grants cost each client one sign-in. D1 Time Travel restores
   metadata for 30 days ([Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)), which covers
@@ -973,10 +1251,12 @@ search (section 10), backups of bytes (section 11).
 
 Sources are the agreed scope: **Interfaces** (MCP and REST from one implementation, a thin CLI), **Auth** (Access for
 browsers, bearer tokens for agents, public links), **Domain** (a host per artifact), **Features** (publish, read, list,
-delete; version history; multiple files; gallery; archive), and **OAuth** (issue #14: MCP clients and the CLI sign in
+delete; version history; multiple files; gallery; archive), **OAuth** (issue #14: MCP clients and the CLI sign in
 with OAuth, every version keeps its publisher, static tokens stay as a fallback a deployment can turn off, and only the
-owner grants access). Each is checked on the deployed Worker with real clients and a browser; copies a browser already
-downloaded are out of scope.
+owner grants access), and **Viewer** (a private page opens under a header with the artifact's actions, in a viewport
+the header does not cover; the owner makes artifacts public or private and deletes them from the browser; a version
+downloads as an archive). Each is checked on the deployed Worker with real clients and a browser; copies a browser
+already downloaded are out of scope.
 
 | ID    | Requirement (EARS)                                                                                                                                                                                                                                    | Source                            | Scenario; pass and failure                                                                                                                                                                                                                                                                                                                                                                                                        | Checked on                           |
 | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
@@ -984,7 +1264,7 @@ downloaded are out of scope.
 | AC-2  | When the CLI publishes a directory, the system shall serve every file it sends, and the CLI shall skip names starting with `.` and refuse links that leave the directory.                                                                             | Interfaces; Features (files)      | `index.html`, a stylesheet, a script, a PNG, a `.env`, a link inside and one outside. Pass: the page renders with its assets and types; `.env` absent; the outside link refused                                                                                                                                                                                                                                                   | the CLI; a browser                   |
 | AC-3  | When an agent updates an artifact whose pages follow the authoring rule, the system shall serve the new version at its URL and every earlier version at its pinned URL.                                                                               | Features (version history)        | Two updates through MCP. Pass: `/` shows version 3, `/_v/1/` and `/_v/2/` theirs, each with its own files. Fail: a version changed or missing                                                                                                                                                                                                                                                                                     | a real MCP client; a browser         |
 | AC-4  | When an agent lists, reads or deletes artifacts over MCP, the system shall answer with their stored state, and after a delete every URL shall answer 404.                                                                                             | Features (list, read, delete)     | List, `get_artifact`, `read_file`, `delete_artifact`, then reload the old URLs. Fail: stale content or a URL that still serves                                                                                                                                                                                                                                                                                                    | a real MCP client; a browser         |
-| AC-5  | When the owner browses the gallery, the system shall list every artifact and version across pages, and offer nothing that changes state.                                                                                                              | Features (gallery)                | More than 50 artifacts and an artifact with more than 50 versions. Pass: every one reachable through the page links; no forms or scripts                                                                                                                                                                                                                                                                                          | a browser                            |
+| AC-5  | When the owner browses the gallery, the system shall list every artifact and version across pages, and change an artifact only through its confirmation pages.                                                                                        | Features (gallery)                | More than 50 artifacts and an artifact with more than 50 versions. Pass: every one reachable through the page links; no forms or scripts outside the consent and confirmation pages                                                                                                                                                                                                                                               | a browser                            |
 | AC-6  | While a browser is not signed in to Access as the owner, the system shall serve neither the gallery nor a private artifact.                                                                                                                           | Auth (Access)                     | A private window; another identity. Pass: sign-in, then denial. Fail: any artifact byte or gallery entry                                                                                                                                                                                                                                                                                                                          | a browser                            |
 | AC-7  | If a request to the REST API or `/mcp` carries no valid credential, then the system shall answer 401, naming the route's resource metadata, and change nothing.                                                                                       | Auth (tokens); OAuth              | `curl` without a credential, with a wrong and a revoked API token, and with an OAuth access token for the other resource, on each route; the `WWW-Authenticate` header names `/.well-known/oauth-protected-resource/mcp` or `/v1`                                                                                                                                                                                                 | `curl`                               |
 | AC-8  | While an artifact page runs in the owner's browser, the system shall not let its script read, or load as a subresource, another artifact, the gallery, the API or its Access cookie.                                                                  | Domain                            | A probe artifact A fetches artifact B, the gallery and the API, loads B's script with `<script src>`, reads `document.cookie` and B's storage. Pass: all fail while B loads its own script                                                                                                                                                                                                                                        | a browser                            |
@@ -1000,6 +1280,9 @@ downloaded are out of scope.
 | AC-18 | While `API_TOKENS` holds entries, the system shall accept those tokens on `/mcp` and `/v1/` beside OAuth, and when the deployment puts `{}` or deletes the secret, it shall refuse every API token.                                                   | OAuth (static fallback)           | `curl` with an API token; put `{}`; the same call answers 401 while an OAuth client still works; put the entries back                                                                                                                                                                                                                                                                                                             | `curl`; Claude Code                  |
 | AC-19 | If anyone but the owner opens the authorization URL, then the system shall not show the consent page; and if a client's redirect URI or client ID names a host of this deployment, the system shall refuse it before any consent.                     | OAuth (owner grants)              | The URL of AC-14 in a private window, signed in as another identity: Access denies. A client registered through DCR with a redirect URI on a public host: the authorization URL answers an error page and never redirects                                                                                                                                                                                                         | a browser; `curl`                    |
 | AC-20 | When the owner revokes a grant, the system shall refuse its access and refresh tokens, and the client shall need to sign in again.                                                                                                                    | OAuth (revocation)                | `GET /v1/grants`, then `DELETE /v1/grants/{id}` for Claude Code's grant, with `curl` (or the CLI's `grants` and `revoke` once they ship), then a tool call every 10 s. Pass: refused within 5 minutes, this project's threshold, since Cloudflare documents no bound on KV's propagation; the delay recorded (section 7); then `/mcp` asks for sign-in and the grant stays out of the listing. Fail: still served after 5 minutes | `curl`; Claude Code                  |
+| AC-21 | When the owner opens a private artifact's HTML page in a browser, the system shall show it under the viewer's header in a viewport the header does not cover, and Open page directly shall show it without the header.                                | Viewer                            | In Chrome, Firefox, Safari 17 or later and Safari 16.4 to 16.6 (no `popover`): a `100vh` page reading `location.hash`, opened with a fragment; a pinned version; a link to another page; a `pushState`; the menu and history; Open page directly and a reload. Pass: no scrollbar, the fragment arrives, the header names the version, the address bar follows, no header when direct or public. Fail: an empty or nested frame   | each browser named                   |
+| AC-22 | When the owner makes an artifact public or private, or deletes it, from the viewer or the artifact page, the system shall change it only after a confirmation on the app host, and refuse that form when an artifact page posts it.                   | Viewer                            | From the viewer's popups: Make public… (the public URL serves), Make private…, and Delete… on a second probe after one Cancel; the same from the artifact page. A probe page posting each form with `fetch` and with its own form. Pass: each confirmed change applied and logged with `via: "gallery"`, the viewer reloaded or sent to the gallery; the probe's posts answer 403 and change nothing                              | a browser; Workers Logs              |
+| AC-23 | When the owner exports a version through the viewer, the REST API or the CLI, the system shall deliver a ZIP archive that holds exactly the version's files.                                                                                          | Viewer                            | A version with nested and non-ASCII paths: the viewer's Export item, `curl` on the REST route and `artifacts export`; each archive listed with `unzip -l` and compared with `artifacts pull` of the same version; a version holding `a\b` answers 409 naming it. Pass: the same paths and bytes, the file named `<id>-v<n>.zip`. Fail: a missing, renamed or extra file                                                           | the CLI; `curl`; a browser           |
 
 ## Plan layer
 
@@ -1019,7 +1302,7 @@ OAuth rows run the Worker with production-shaped hosts and the test Access key s
 | PL-8  | The Worker shall keep DATA-1 on every route and failure path.                                                                                                                                                                                                                                                                                               | DATA-1, TOK-2             | log redaction with markers; source check of the `console` sink; at the MCP handler boundary, the request and factory context carry no `Authorization` header or token                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | PL-9  | When a content host is requested, the Worker shall serve only its artifact's files.                                                                                                                                                                                                                                                                         | ISO-1                     | two artifacts with the same path and different bytes; a deleted ID offered again by a stubbed generator                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | PL-10 | The Worker shall send no `Access-Control-Allow-*` header, and `Cross-Origin-Resource-Policy: same-origin` on every private content and app response.                                                                                                                                                                                                        | ISO-2                     | every route and status (200, 304, 308, 404); public host responses without it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| PL-11 | If a request to the app host or a content host uses a method other than GET or HEAD, then the Worker shall answer 405, except that `/oauth/authorize` serves GET and POST only; it shall set no cookie but the consent binding there.                                                                                                                       | ISO-3, ISO-4              | each method on each host class; `HEAD` and `PUT` on `/oauth/authorize`; `Set-Cookie` on every route                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| PL-11 | If a request to the app host or a content host uses a method other than GET or HEAD, then the Worker shall answer 405, except that `/oauth/authorize` serves GET and POST only and the confirmation pages GET, HEAD and POST; it shall set no cookie but the consent binding.                                                                               | ISO-3, ISO-4              | each method on each host class; `HEAD` and `PUT` on `/oauth/authorize`; `PUT`, `DELETE` and `OPTIONS` on `/a/<id>/public` and `/a/<id>/delete`; `Set-Cookie` on every route, the frame page and the confirmation pages included                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | PL-12 | When the gallery renders artifact text, the Worker shall apply ISO-5.                                                                                                                                                                                                                                                                                       | ISO-5                     | markup and attribute breakouts in titles, descriptions and paths                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | PL-13 | When a file is served, the Worker shall send the headers of section 6.                                                                                                                                                                                                                                                                                      | SRV-1, section 6          | per host class, latest and pinned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | PL-14 | If an artifact became private, was deleted or the request lacks access, then a matching `If-None-Match` shall not yield 304.                                                                                                                                                                                                                                | SRV-3                     | the three cases, latest and pinned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -1060,6 +1343,18 @@ OAuth rows run the Worker with production-shaped hosts and the test Access key s
 | PL-49 | When the CLI logs in, it shall send credentials only to the configured origin, accept one callback on `127.0.0.1` for at most 5 minutes, check `state` and `iss`, and store the tokens in a `0600` file; if it runs on Windows, then it shall refuse `login` and `logout` and ignore any stored credentials file.                                           | AC-16                     | the CLI against the Worker built with the test's Access verifier, the browser step injected: `login` through DCR, consent and the code exchange, a command with the stored login, a refresh and `logout`, and the check of a kept client ID answered `invalid_grant` and `invalid_client`; against a local stand-in for the server, which the Worker cannot be made to answer wrongly: metadata naming another issuer or resource refused; metadata with the right issuer and a token or registration endpoint on another origin refused; a redirect from either metadata document, the registration or the token endpoint refused, not followed; a wrong `state` or `iss` refused; the check of a kept client ID and a refresh answered 403 `invalid_client` or 401 `invalid_grant`, and the code exchange answered 403 `invalid_client`, each failing and keeping the client ID and the login; the listener closed after the timeout and on failure; file and directory modes; a group-readable file refused; in the smoke tests, the release binary's `login`, a refresh and `logout` on macOS and Linux and on Windows its refusal of `login` and `logout`, and `list` with `ARTIFACTS_TOKEN` ignoring a credentials file placed beforehand |
 | PL-50 | When CLI processes change the stored login at once, the CLI shall make the changes one at a time under its lock, never take the lock from a holder that may be alive, and follow a 401 with exactly one refresh and one retry.                                                                                                                              | AC-16                     | CLI processes held at barriers: two with an expired access token refresh once and both succeed; a refresh delayed 20 s while another waits, which then uses its tokens, and one delayed past 30 s, aborted with the lock released and the file as it was; a holder stopped between its last read and its rename while a waiter tries to recover the lock and runs out its 75 s: the waiter fails naming the file and leaves the lock, and the resumed holder writes and releases; a gone process's lock removed by exactly one of two waiters at once, and kept with the link of a waiter that stopped midway, the next waiter failing with both named and removing neither; the lock of a running process, of another host, or of a reused process ID never removed; `login` and `logout` each racing a refresh: the login's tokens stored, the removed login not written back; a 401 answered by exactly one refresh request and one replay of the request                                                                                                                                                                                                                                                                                    |
 | PL-51 | When `ARTIFACTS_TOKEN` is set, the CLI shall use it and not read the stored login, and `logout` shall remove the stored login only after the revocation succeeds or the server refuses the login.                                                                                                                                                           | section 9                 | both credentials present; two live grants of the CLI's client, the current one deleted first: `logout` revokes the one its token names, sends nothing after it, completes, and leaves the other listed; a failed revocation, a revocation answered 200 or 202, and a grant not listed yet (404) each keeping the entry; a stored login the server refuses removed; no command output carries a stored token                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| PL-52 | When a private content host receives a `GET` or `HEAD` with `Sec-Fetch-Dest: document` for an HTML file it would answer with 200, and the query has no `_viewer=off`, the Worker shall answer the frame page; otherwise it shall answer as section 6 serves files.                                                                                          | section 6 (viewer frame)  | per case: destinations `document`, `iframe`, `embed`, `empty` and none; `_viewer=off` alone and after other parameters, and `_viewer` with another value; `text/html`, `application/xhtml+xml` with parameters and another type; latest and pinned; a directory (308), a missing file (404), the icon fallback; the same requests on the public host, never framed; REST's file route unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| PL-53 | When a private content host answers HTML, its 200 and 304 shall carry `Vary: Sec-Fetch-Dest, Accept-Encoding` and the validator of the representation chosen after Access and existence, and a `HEAD` its `GET`'s headers.                                                                                                                                  | SRV-3, section 6          | the frame's `ETag` matched by a document request (304) and not by another destination, a file's the reverse; the frame's tag after a publish, a visibility change and a new title; after a delete (404) and without a JWT (403), never 304; `HEAD` against `GET` for both representations, no R2 read for the frame                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| PL-54 | When the frame page renders, it shall show section 6's header and menu from one D1 snapshot, escape every value, and carry the private host's headers with a CSP whose hash is its script's.                                                                                                                                                                | section 6, ISO-2          | markup against `reference/viewer.html`; markup in a title; histories of fewer than 10, exactly 10 and more versions, with the shown version among the newest 10 (marked) and older (listed after them); latest and pinned headers; app-host links from the configuration; the iframe without `src` or `sandbox`, with `allow`; the script's SHA-256 equal to the policy's and the same on every page; CORP, `nosniff`, `no-referrer`, no `Set-Cookie`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| PL-55 | When the frame page runs in a browser, its script shall start the iframe at the page's URL with its fragment, copy the iframe's URL and title to the top, survive an iframe on another origin, focus the iframe once, follow `/_v/<m>/` navigations in the header, and open and close the menu itself where the browser has no `popover`.                   | section 6                 | a browser driven against the Worker in the local runtime: a fragment reaching the page; a link inside the page and a `pushState`; a link to another origin followed inside the iframe; the focus after the first and a second load; a navigation from the latest to `/_v/<m>/` and back; the menu closed by a click in the iframe; the `<noscript>` link without script; in a browser without `popover` (Safari 16.4 to 16.6 where a runner has it; otherwise `popover` removed from `HTMLElement.prototype` and the `popover` and `popovertarget` attributes removed before the script runs, so neither the native hiding nor the native toggling applies): the menu and the history hidden at load, opened by their buttons, and closed by Escape, a click outside and a click in the iframe                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| PL-56 | If a request to `/a/<id>/public` or `/a/<id>/delete` uses another method than GET, HEAD or POST, or lacks an app-audience Access JWT, then the Worker shall refuse it before reading the body or storage; a `GET` shall render section 10's page with its headers.                                                                                          | ACC-1, ISO-3, ISO-5       | each method (405 with `Allow`); no JWT and the content audience (403) with no D1 call; markup against `reference/confirm-public.html` and `confirm-delete.html` for a private and a public artifact; markup in a title; the CSP with `form-action 'self'` and `frame-ancestors 'none'`, `Referrer-Policy: same-origin`, `no-store` without `ETag`, no `Cross-Origin-Opener-Policy`; an unknown and a deleted artifact (404); `/a/<id>` linking both pages and the latest version's download                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| PL-57 | If a confirmation `POST` lacks `Origin` equal to the app origin or `Sec-Fetch-Site: same-origin`, or its body is not section 10's form, then the Worker shall change nothing; otherwise it shall apply the state the form names through the operation REST calls.                                                                                           | ISO-3, RES-1              | `Origin` missing, `null`, a content and a public host's origin, the app host with another scheme or port; `Sec-Fetch-Site` missing, `same-site`, `cross-site` and `none`; a body at and one past 1 KiB, chunked without `Content-Length`; another content type, a missing, repeated or unknown field, `public=toggle`; D1 unchanged on each refusal; then `public=true` twice (public once), `public=false`, and a delete twice, each answering the result page                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| PL-58 | When a confirmation `POST` succeeds, the result page shall carry a CSP whose hash is its one script's, and that script shall take its target only from the markup.                                                                                                                                                                                          | section 10, ISO-5         | the script's SHA-256 equal to the policy's after a visibility change and a delete; the script's bytes the same for two artifacts; the target link per result; no other script; in Chromium, Firefox and WebKit driven against the local Worker: the popup the frame's script opens navigates the viewer to the artifact or the gallery and closes, and the same page opened as a tab, without an opener, stays with its links                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| PL-59 | When a confirmation page changes an artifact, the Worker shall log the change with `via: "gallery"` and neither `token` nor `grant`, and log a refusal as `confirm.refused` with its reason only.                                                                                                                                                           | TOK-3, DATA-1             | `artifact.changed` and `artifact.deleted` lines; markers in titles, `Origin` values and form bodies absent from every line                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| PL-60 | When a version is exported, the archive shall hold exactly its files in path order, as STORE entries named in UTF-8 and dated with the version's time, with ZIP64 records where a size or offset needs them, in a response whose `Content-Length` equals the archive's length.                                                                              | section 8 (Export)        | a version with nested, non-ASCII, `%`, `#` and `?` names and an empty file, read back by a ZIP reader in the test; two exports byte for byte equal; REST and the app-host download equal; the `Content-Length` of a real HTTP response from the Worker in the local runtime (as the CLI's end-to-end test runs it) equal to the body's length; an error and a cancellation carried through the `FixedLengthStream` both ways; ZIP64 at its boundaries, from a stub that generates the bytes: entries of 0xFFFFFFFE and 0xFFFFFFFF bytes, and an entry whose local header starts just below and at offset 0xFFFFFFFF, each read back with its sizes and offset and the length `predictLength` gave; section 8's headers; `HEAD` without an R2 read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| PL-61 | If a version holds a path with `\` or a path that another path uses as a directory, then its export shall answer 409 `not_extractable` naming every such path, before any R2 read.                                                                                                                                                                          | section 8 (Export)        | `a\b`; `a` beside `a/b`; both in one version; a version without either exported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| PL-62 | While an export streams, the Worker shall hold at most one R2 body open, cancel it when the client goes away, and turn a failure after the headers into an aborted stream; a failure before them shall be an operation error.                                                                                                                               | RES-2, section 8 (Export) | a stubbed bucket counting open bodies; the response cancelled mid-file: that body cancelled and no later `get`; a `get` that fails or stalls on the first file (503 in JSON) and on a later one (an errored stream, `operation.failed`); a body that stalls past the timeout between chunks; an object shorter and one longer than its listing; the app-host download without a JWT and with the content audience (403); REST without a credential (401)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| PL-63 | When the CLI exports, it shall write the archive to a temporary file beside the target and put it at the target without overwriting, only after a whole stream of the announced length; if anything fails, then it shall leave an existing target as it was and remove only what it created.                                                                | section 9                 | against the Worker: the latest version without `--version`, a pinned one, `-o`; an existing target refused before the request; a target created during the download kept byte for byte, the command failing and naming it; the copy that stands in where `link` is refused, with and without a target; against a local stand-in: a stream cut midway, a stream shorter than its `Content-Length`, a stall past 60 s, a 409 printing its paths, an interrupt; no `.part` file left                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## OAuth delivery
 
@@ -1093,3 +1388,22 @@ flow works: before it, no `401` names the metadata.
 
 After the release that carries steps 1 to 6, the post-deployment checklist covers AC-14, AC-15 and AC-17 to AC-20; after
 the CLI steps, AC-16.
+
+## Viewer delivery
+
+Pull requests in this order; each keeps `main` releasable, names the rows it makes pass, and moves the threat model's
+status of the invariants it enforces. The screens are in `gallery/gallery.pen`; each step carries its screens' tokens,
+stylesheet and reference pages as [gallery/design.md](gallery/design.md)'s change rule orders. The viewer comes last,
+since its menu links to the download and the confirmation pages.
+
+1. **`feat(worker): export a version as a zip`**: `client-zip` 2.5.1, the `exportVersion` operation with
+   `not_extractable`, the REST route and the app host's download behind Access. PL-60 to PL-62.
+2. **`feat(cli): export a version`**: `artifacts export`. PL-63.
+3. **`feat(gallery): confirm visibility and deletion`**: the screens `confirm-public` and `confirm-delete` with
+   `color.danger-bg` and `button/kind=danger`; the routes, the result page, `via` and `confirm.refused` in the logs,
+   and the artifact page's links. PL-11, PL-56 to PL-59.
+4. **`feat(worker): show private pages in the viewer frame`**: the screens `viewer`, `viewer — menu open` and
+   `viewer — history, pinned v2` with their components in `viewer.css` and `reference/viewer.html`; the frame page,
+   its script, `Vary` and its policy. PL-52 to PL-55.
+
+After the release that carries steps 1 to 4, the post-deployment checklist covers AC-21 to AC-23.

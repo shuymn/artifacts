@@ -15,7 +15,10 @@ before the first release ships. **Planned (OAuth):** decided in [design.md](desi
 implemented; the plan-layer rows named are its tests. An invariant enforced for API tokens and planned for OAuth says
 which part is which. Each invariant below states its status; source and test paths are under `packages/worker/`. A
 **Gap** note names a part no test pins yet; that part does not count as enforced. A **Changed for OAuth** note says
-what an invariant gave up and why the purpose keeps what it protected.
+what an invariant gave up and why the purpose keeps what it protected. **Planned (viewer):** decided in
+[design.md](design.md#the-viewer-frame) for the viewer frame, the confirmation pages and export, and not implemented;
+the plan-layer rows named are its tests. An invariant enforced on `main` and planned for the viewer says which part is
+which, and a **Changed for the viewer** note says what it gave up, as for OAuth.
 
 Each invariant names how it is pinned:
 
@@ -87,6 +90,8 @@ and the threats are the three adversaries below, not untrusted users.
 | Client registration `/oauth/register` on the API host                                                                            | R1                                                          | none: a client record grants nothing without the owner's approval (OAUTH-1)                       |
 | Token endpoint `/oauth/token` on the API host                                                                                    | R1, R3                                                      | a code with its PKCE verifier (OAUTH-2), or a refresh token (OAUTH-5)                             |
 | Authorization and consent `/oauth/authorize` on the app host                                                                     | R1, R2                                                      | Access (ACC-1) and the consent transaction (OAUTH-1)                                              |
+| Confirmation pages `/a/<id>/public` and `/a/<id>/delete` on the app host                                                         | R1, R2                                                      | Access (ACC-1); the `POST` also the app host's `Origin` and `Sec-Fetch-Site` (ISO-3)              |
+| Version download `/a/<id>/v/<n>/export` on the app host                                                                          | R1, R2                                                      | Access (ACC-1)                                                                                    |
 | Any other host or route that reaches the Worker                                                                                  | R1                                                          | none; answered 404 without storage (HOST-1)                                                       |
 | CLI and the deployment script                                                                                                    | the owner                                                   | the token in the environment or the stored login; the owner's account                             |
 | The CLI's sign-in callback on `127.0.0.1`                                                                                        | the owner's browser; other processes on the owner's machine | `state` and `iss`; the code is useless without the CLI's PKCE verifier; one callback, then closed |
@@ -131,7 +136,8 @@ and the threats are the three adversaries below, not untrusted users.
   for 7 days, a 5 s key fetch) are checked by review, not by tests, which substitute short ones. `/oauth/authorize` is
   verified with the app audience like the gallery, its `POST` included: _Enforced (main)_ in `src/index.ts`, pinned by
   behavior (`src/consent.test.ts`: `GET` and `POST` without a JWT and with the content audience's answer 403 before
-  the library) (PL-37).
+  the library) (PL-37). The confirmation pages and the version download are verified with the app audience too, a `POST`
+  before its body is read: _Planned (viewer)_ (PL-56, PL-62).
 - **ACC-2: Access verification is skipped only for a `localhost` configuration.** Every configured host must be a
   `localhost` name; no variable turns verification off, and the deployment script refuses `localhost` hosts and ports.
   OAuth is off there too, so no consent page runs without Access: every OAuth path answers 404. _Enforced (main)_ in
@@ -187,7 +193,11 @@ and the threats are the three adversaries below, not untrusted users.
   behavior and log redaction (`src/publish.test.ts`; `src/credentials.test.ts`: two grants under one name publishing
   over REST and MCP, each change logged with its grant's ID (PL-7); `src/sign-in.test.ts`: the name given on the
   consent page as `published_by`; `src/consent.test.ts`: a name of the wrong form creates no grant and keeps the
-  transaction, a corrected one succeeds (PL-39)).
+  transaction, a corrected one succeeds (PL-39)). A change made on a confirmation page has no credential and logs `via:
+  "gallery"` in place of a publisher name and grant, which an API token named `gallery` could otherwise be taken for:
+  _Planned (viewer)_ (PL-59). **Changed for the viewer:** such a change records the browser path instead of a publisher.
+  What TOK-3 protected holds: a change made with a leaked credential still names that credential, and one made in the
+  browser needed the owner's Access session (ACC-1).
 
 ### Origin isolation (ISO)
 
@@ -211,15 +221,25 @@ and the threats are the three adversaries below, not untrusted users.
   every API route before authentication, and 404 on a path no route takes: _Enforced (main)_ in `src/oauth.ts`,
   `src/index.ts`, pinned by behavior (`src/oauth.test.ts`: OAuth answers to requests with an `Origin`; `OPTIONS` on
   each API route, with and without a token, and on a path no route takes) (PL-43).
-- **ISO-3: browsers can only read artifacts.** Content hosts answer `GET` and `HEAD` only, and so does the app host
-  except `/oauth/authorize`, which answers `GET` and `POST` only; that `POST` creates or refuses a grant under OAUTH-1
-  and changes no artifact. Every artifact change is on the API host with a bearer credential, so no request
-  authenticated by a cookie changes an artifact. _Enforced (main)_ in `src/serve.ts`, and for the authorize path in
+- **ISO-3: browsers change artifacts only through the app host's confirmation forms.** Content hosts answer `GET` and
+  `HEAD` only, and so does the app host except `/oauth/authorize`, which answers `GET` and `POST` only; that `POST`
+  creates or refuses a grant under OAUTH-1 and changes no artifact. Every other artifact change is on the API host with
+  a bearer credential. _Enforced (main)_ in `src/serve.ts`, and for the authorize path in
   `src/index.ts`, `src/consent.ts`. Pinned by behavior (`src/routing.test.ts`; `src/consent.test.ts`: `HEAD`, `PUT`,
   `DELETE`, `PATCH` and `OPTIONS` on `/oauth/authorize` answer 405 before Access and storage, and the form's `POST`
   under OAUTH-1) (PL-11, PL-37). **Changed for OAuth:** signing in needs
   the owner's approval in a browser (P3). What ISO-3 kept from artifact pages holds: the one browser write needs the
-  owner's Access session, a handle only the consent page shows, and the browser's `__Host-` binding cookie.
+  owner's Access session, a handle only the consent page shows, and the browser's `__Host-` binding cookie. The
+  confirmation routes `/a/<id>/public` and `/a/<id>/delete` answer `GET`, `HEAD` and `POST`; their `POST` changes an
+  artifact only with an app-audience Access JWT (ACC-1), `Origin` equal to the configured app origin and
+  `Sec-Fetch-Site: same-origin`, a missing or `null` value failing, and a counted form that names the desired state. The
+  pages cannot be framed (`frame-ancestors 'none'`), and the viewer frame, which shares an artifact's origin, sends no
+  write of its own: _Planned (viewer)_ (PL-11, PL-56, PL-57). **Changed for the viewer:** the owner changes artifacts
+  from the browser (design.md, purpose layer, Viewer), so "no request authenticated by a cookie changes an artifact"
+  became "only the app host's own confirmation form does". What ISO-3 kept from artifact pages holds: an artifact page,
+  even same-site in the shared-domain layout, sends its own origin and `same-site` or `cross-site`, so its `POST` is
+  refused; it cannot frame the pages to place the owner's click; and it can open them only at the top level, where the
+  owner reads the change before confirming it (accepted risks).
 - **ISO-4: the Worker sets one cookie, the consent binding, and decides nothing else on a cookie.** The binding is
   the library's `__Host-` cookie, set by `GET /oauth/authorize` and cleared when its transaction is used; it ties a
   consent transaction to the browser that opened it and authenticates nothing (ACC-1 still reads the JWT header). No
@@ -229,7 +249,8 @@ and the threats are the three adversaries below, not untrusted users.
   sets one `__Host-` binding, `Secure; HttpOnly; SameSite=Lax`, the answers that use it clear it, and no other answer
   of the endpoint sets one) (PL-11, PL-37). **Changed for OAuth:** the cookie is the library's
   protection of the consent form against cross-site requests. `__Host-` keeps what ISO-4 protected in the
-  shared-domain layout: no other host, artifact pages included, can set or replace it.
+  shared-domain layout: no other host, artifact pages included, can set or replace it. The viewer frame and the
+  confirmation pages set no cookie either: _Planned (viewer)_ (PL-11).
 - **ISO-5: the app host runs no supplied markup.** Artifact titles, descriptions, paths and every other value, and
   on the consent page every value a client supplied (its name, URI and redirect URI), are escaped by the one template
   that builds the pages; every app-host response's `Content-Security-Policy`, refusals and failures included, forbids
@@ -242,13 +263,17 @@ and the threats are the three adversaries below, not untrusted users.
   answers, and redirect origins of another form refused before the page (PL-38); `src/gallery/reference.test.ts`: the
   consent pages' markup). **Changed for OAuth:** the consent form must post and then send the browser to
   the client. The origin added to `form-action` is the one the page shows the owner, and only of the forms design.md
-  section 7 lists.
+  section 7 lists. The confirmation pages' policy admits a form to the page itself (`form-action 'self'`), and the
+  result page's admits its one script by hash: the Worker's own bytes, the same on every result page, which take their
+  target from an escaped link: _Planned (viewer)_ (PL-56, PL-58).
 
 ### Serving (SRV)
 
-- **SRV-1: content responses do not reinterpret bytes or leak the host.** Each carries the stored `Content-Type`,
-  `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. _Enforced (main)_ in `src/serve.ts`. Pinned by
-  behavior (`src/serve.test.ts`).
+- **SRV-1: content responses do not reinterpret bytes or leak the host.** Each carries `X-Content-Type-Options:
+  nosniff` and `Referrer-Policy: no-referrer`, and a file's response its stored `Content-Type`. _Enforced (main)_ in
+  `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`). The viewer's frame page is the Worker's own document, not a
+  file, and carries `text/html; charset=utf-8` whatever the file's stored type, `application/xhtml+xml` included; the
+  file itself reaches the iframe with its stored type: _Planned (viewer)_ (PL-52, PL-54).
 - **SRV-2: a request path selects a file of the requested artifact and version only.** The Worker resolves the pathname
   it receives: one strict percent-decoding per segment, an encoded `/` refused, lookup inside the selected version's
   file list. _Enforced (main)_ in `src/paths.ts`. Pinned by behavior (`src/paths.test.ts`: decoder tests over strings;
@@ -257,7 +282,8 @@ and the threats are the three adversaries below, not untrusted users.
   before `If-None-Match` is compared, for latest and pinned versions alike, and every content response revalidates
   (`no-cache`). _Enforced (main)_ in `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`: a matching
   `If-None-Match` after the artifact was made private or deleted answers 404; without a valid JWT, 403; the same for
-  the icon an artifact without `favicon.ico` is answered with).
+  the icon an artifact without `favicon.ico` is answered with). The viewer frame's validator is evaluated after Access
+  and existence, like a file's, and only for a request that gets the frame: _Planned (viewer)_ (PL-53).
 
 ### Public links (PUB)
 
@@ -266,8 +292,9 @@ and the threats are the three adversaries below, not untrusted users.
   latest and all pinned versions. A public host never serves the gallery or the API. _Enforced (main)_ in
   `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`: the three 404s are identical; pinned versions are served
   while public; the next request after making it private answers 404).
-- **PUB-2: only the API changes the flag**, with a token (TOK-1); the flag is off when an artifact is created.
-  _Enforced (main)._ Pinned by behavior (`src/serve.test.ts`, `src/routing.test.ts`).
+- **PUB-2: only the API, with a credential (TOK-1), and the app host's confirmation form (ISO-3) change the flag**;
+  the flag is off when an artifact is created. _Enforced (main)_ for the API. Pinned by behavior (`src/serve.test.ts`,
+  `src/routing.test.ts`). The confirmation form: _Planned (viewer)_ (PL-57).
 
 ### Versions (VER)
 
@@ -301,7 +328,8 @@ and the threats are the three adversaries below, not untrusted users.
   OAuth token and registration bodies are counted before the library reads them: _Enforced (main)_ in `src/oauth.ts`,
   pinned by behavior (`src/oauth.test.ts`: at and one past each bound, with and without `Content-Length`, the library
   not called) (PL-44). The consent form, at most 4 KiB, is counted before it is parsed: _Enforced (main)_ in
-  `src/consent.ts`, pinned by behavior (`src/consent.test.ts`: at and one past the bound).
+  `src/consent.ts`, pinned by behavior (`src/consent.test.ts`: at and one past the bound). The confirmation form, at
+  most 1 KiB, likewise: _Planned (viewer)_ (PL-57).
 - **RES-2: waits are bounded where the outcome stays known.** Fetching Access keys, each R2 call and each D1 read have a
   timeout and answer 503 `unavailable`; a publish that times out before its commit leaves no version. The D1 commit
   has none: a timed-out commit could still apply. _Enforced (main)_ in `src/timeout.ts`, `src/objects.ts`, `src/db.ts`,
@@ -319,7 +347,9 @@ and the threats are the three adversaries below, not untrusted users.
   complete; `src/consent.test.ts`: a listing that fails or never answers). The KV reads of a credential check, the
   token's record and its grant's revocation record, wait 10 s each and answer 503 before any D1 or R2 call: _Enforced
   (main)_ in `src/credentials.ts`, pinned by behavior (`src/credentials.test.ts`: each read failing and never
-  answering, on `/mcp` and `/v1/`) (PL-40).
+  answering, on `/mcp` and `/v1/`) (PL-40). An export holds at most one R2 body open, waits the R2 timeout at most for
+  each `get` and each chunk, and cancels the body on every exit, the client's cancellation included: _Planned (viewer)_
+  (PL-62).
 
 ### Data (DATA)
 
@@ -352,7 +382,9 @@ and the threats are the three adversaries below, not untrusted users.
   markers yet. **Changed for OAuth:** "only `logEvent`" covers the Worker's own sources, since the dependency's two
   lines are bounded here rather than suppressed by patching it, and the first can quote a public artifact's values
   when a client ID names it or redirects to it. What DATA-1 protected holds: no credential or private content reaches
-  the logs, and a public artifact's values are open to anyone with its link.
+  the logs, and a public artifact's values are open to anyone with its link. The confirmation pages add one closed
+  field, `via`, the browser path a change came by, and log reason codes only; an export logs its failure's class, never
+  a path, though a `not_extractable` answer names paths to its caller: _Planned (viewer)_ (PL-59, PL-62).
 - **DATA-2: deployment values stay out of the repository.** `wrangler.jsonc` sets no variable, route or identifier,
   and binds `OAUTH_KV` without an ID; the deployment values live in the gitignored `wrangler.deploy.jsonc` or a Workers
   Builds variable, the committed example holds placeholders only, and `API_TOKENS` is a secret. _Enforced (main)_ in
@@ -447,6 +479,8 @@ Decided in [design.md](design.md#7-auth) section 7. Each states where it is _Enf
 - **Serving:** ISO-1, ISO-2, SRV-1 to SRV-3, PUB-1, RES-2.
 - **Publish, update, archive or delete:** VER-1 to VER-4, RES-1, RES-2, TOK-3.
 - **Gallery or the consent page:** ISO-2 to ISO-5, OAUTH-1, OAUTH-2.
+- **The viewer frame, the confirmation pages or export:** ACC-1, ISO-2 to ISO-5, SRV-1, SRV-3, PUB-2, TOK-3, RES-1,
+  RES-2, DATA-1.
 - **Logging:** DATA-1; extend the redaction markers to the new path.
 
 ## Accepted risks
@@ -455,7 +489,9 @@ Decided in [design.md](design.md#7-auth) section 7. Each states where it is _Enf
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | A leaked credential (R3) reads, publishes, makes public and deletes every artifact until revoked or expired; deleted bytes cannot be recovered                                                                                                                                                                                           | One owner; one credential per agent, revoked by editing a secret or revoking a grant; versions and logs name the publisher, and the grant; artifacts are agent output that can be produced again                                                                                                                                                                    | Revisit when an artifact is the only copy of something, or a credential goes to an agent the owner does not run                                                                                              |
 | No scopes: an agent prompt-injected while holding its own credential can delete or make public, and a grant covers a whole resource                                                                                                                                                                                                      | Scopes would need a policy model for one person. Whether a client asks before a tool call is the owner's client configuration, not a control here                                                                                                                                                                                                                   | Revisit when an agent runs unattended with these tools                                                                                                                                                       |
-| An artifact page (R2) can send requests, not read answers or load them as subresources, to other artifact hosts, the gallery and the API, with the owner's cookies where the browser sends them                                                                                                                                          | Every such target only reads artifacts (ISO-3); the consent form also needs a handle no other origin can read and a `__Host-` cookie (OAUTH-1); nothing can be read or loaded as a subresource across origins (ISO-2)                                                                                                                                               | Holds while ISO-2, ISO-3 and OAUTH-1 hold                                                                                                                                                                    |
+| An artifact page (R2) can send requests, not read answers or load them as subresources, to other artifact hosts, the gallery and the API, with the owner's cookies where the browser sends them                                                                                                                                          | Every such target only reads artifacts, except the confirmation forms, which refuse a request that does not come from the app host's own page (ISO-3); the consent form also needs a handle no other origin can read and a `__Host-` cookie (OAUTH-1); nothing can be read or loaded as a subresource across origins (ISO-2)                                        | Holds while ISO-2, ISO-3 and OAUTH-1 hold                                                                                                                                                                    |
+| The viewer frame shares the artifact's origin: the artifact's script can read what the frame shows (its title, version numbers and times, whether it is public, the app host's URL, the release version) and change the header and menu, to show another version or point an item at another URL                                         | The frame holds no credential, handle or token and sends no write; every change is a confirmation page on the app host that names the artifact and states the change (ISO-3); what the frame shows is the artifact's own metadata, which the agent that published it already knows, and the release version                                                         | Holds while the frame holds no credential and sends no write; revisit when the menu gains an action without a confirmation page                                                                              |
+| An artifact page can open the confirmation page of any artifact at the top level at any moment, and navigate a confirmation window it opened or reaches by name to another one, even just before the owner clicks                                                                                                                        | The owner's click on a page that names the artifact and states the change is the control, for one owner (P1); the pages cannot be framed, so no page can cover them or click for the owner; any site can already make the owner's browser open a URL                                                                                                                | Holds while the owner reads a confirmation before confirming it; revisit when a mistaken deletion matters, then by asking for the artifact's title before deleting                                           |
 | An artifact page can read the owner's Access identity (email, name) if Access answers its identity endpoint on artifact hosts; the documentation describes it on the team domain only                                                                                                                                                    | It is identity, not a credential (the JWT stays HttpOnly, ACC-3)                                                                                                                                                                                                                                                                                                    | Revisit when the identity carries sensitive claims                                                                                                                                                           |
 | A page's own browser state (storage, service worker) spans all its versions and can change what an old version shows in the owner's browser                                                                                                                                                                                              | Versions share the origin by design; stored bytes are immutable (VER-1); clearing site data resets the state                                                                                                                                                                                                                                                        | Revisit when versions must be inspected independently of the page's own code                                                                                                                                 |
 | Shared-domain layout: an artifact page can set cookies for the owner's domain, which the owner's other services then receive, and its requests to them are same-site; it can break Access sign-in on the app host until cookies are cleared; a page published with a leaked token sits on the owner's domain (reputation, Safe Browsing) | A supported layout the owner chooses; this deployment's own protections rely on neither cookies set by siblings nor `SameSite` (ACC-1, TOK-1, ISO-2 to ISO-4)                                                                                                                                                                                                       | Holds while the owner's other services on that domain do not trust cookies a sibling host can set and do not rely on `SameSite` alone against cross-site requests; otherwise use the dedicated-domain layout |

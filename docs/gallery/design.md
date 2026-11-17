@@ -2,17 +2,23 @@
 
 The gallery's screens are designed in Pencil from tokens and components, and the code uses the same tokens and
 components by name. The design file is [`gallery.pen`](gallery.pen): the boards Typography and Components above one
-screen per page (`index`, `archived`, `artifact`, `consent`, `consent-error`), at the width `size.page` gives. Three
-files carry the design into the code, and the implementation follows them exactly:
+screen per page (`index`, `archived`, `artifact`, `consent`, `consent-error`, `confirm-public`, `confirm-delete`) and
+the viewer's screens (`viewer`, `viewer — menu open`, `viewer — history, pinned v2`), at the width `size.page` gives.
+The viewer is the frame a private page opens in on its content host ([design.md](../design.md), section 6, "The viewer
+frame"), not a page of the app host, and shares the design system. Files carry the design into the code, and the
+implementation follows them exactly:
 
 - [`tokens.json`](tokens.json): the token set, the one source of the tokens' names and values.
 - [`gallery.css`](../../packages/worker/src/gallery/gallery.css): the stylesheet the Worker serves. Every token is a
   custom property, every component a class.
+- `viewer.css` (beside `gallery.css`): the viewer's stylesheet, which the frame page inlines. It declares the custom
+  properties it uses, with the same names and values, and the viewer's components.
 - [`reference/`](reference/): one static page per screen (`index.html`, `archived.html`, `artifact.html`,
-  `consent.html`, `consent-error.html`) with the markup the Worker's templates must produce. They load `gallery.css`
-  and render like the Pencil screens.
+  `consent.html`, `consent-error.html`, `confirm-public.html`, `confirm-delete.html`, `viewer.html`) with the markup
+  the Worker's templates must produce. They load `gallery.css`, or `viewer.css` for the viewer, and render like the
+  Pencil screens; `viewer.html` shows the menu open and the history beside it, and an empty frame.
 
-A design change goes to all of them: the Pencil file first, then `tokens.json`, `gallery.css` and the reference pages,
+A design change goes to all of them: the Pencil file first, then `tokens.json`, the stylesheets and the reference pages,
 then the templates. Content and behavior of each page are in [design.md](../design.md), section 10.
 
 `gallery.pen` is JSON, and the committed file has no `fileToken`. Pencil adds that member each time it saves the file;
@@ -25,9 +31,13 @@ save git shows the file changed by that one line; Pencil opens the file with or 
 
 - **Dark only.** The owner uses a dark color scheme, so the gallery has one theme (`color-scheme: dark`). A light theme
   would be a second token set with the same names.
-- **No script, forms or frames** (design.md, section 10). Every state is a link or plain markup. The one exception is
-  the consent page's form ([design.md](../design.md), section 7), which still runs no script: the browser's own
-  validation and `:user-invalid` give its feedback.
+- **No script, forms or frames** (design.md, section 10). Every state is a link or plain markup. The exceptions are
+  named: the consent page's form ([design.md](../design.md), section 7), which still runs no script: the browser's own
+  validation and `:user-invalid` give its feedback; the confirmation forms (`confirm-public`, `confirm-delete`), which
+  post to themselves without script; and the result page's one script, allowed by its hash, which sends the window
+  that opened it back to the artifact or the gallery ([design.md](../design.md), section 10). The viewer is a frame
+  with a script by nature; its menu is a `popover` opened by `popovertarget`, which needs none. Where the browser has
+  no `popover` (Safari 16.4 to 16.6), the script opens and closes the menu and the history instead, toggling `hidden`.
 - **Text scales with the user's setting.** Each page has `<meta name="text-scale" content="scale">`, no rule sets a
   root `font-size`, and text and the spacing around it are in `rem`.
 - **Fonts are served by the Worker**: IBM Plex Sans and IBM Plex Mono (Latin subsets, `woff2`) in a separate
@@ -36,7 +46,9 @@ save git shows the file changed by that one line; Pencil opens the file with or 
   revalidated rather than immutable, so it renders with the current stylesheet and fonts instead of unstyled.
   `gallery.css` falls back to `system-ui` and `ui-monospace` with `font-size-adjust: from-font`, so Japanese text falls
   back to the system font at the same x-height. The reference pages load the same fonts from Google Fonts instead, for
-  previewing only.
+  previewing only. The viewer uses those fallbacks alone: its content host cannot load the app host's fonts, and a
+  path of its own for them would hide an artifact's file ([design.md](../design.md), section 6). The Pencil screens show
+  it in IBM Plex; the system fonts differ in width, which the title's ellipsis absorbs.
 - **Text never changes font after it shows.** Every face has `font-display: optional`, and every page preloads the faces
   the top of its pages uses: Sans 400 (body), Sans 600 (headings, titles) and Mono 400 (counts, meta) at a font's
   default priority, Sans 500 (links, badges) and Mono 600 (the wordmark) with `fetchpriority="low"`; Mono 500 is
@@ -71,17 +83,20 @@ The gallery has one icon: the `a` of the monospace wordmark in `color.accent`, o
   link's text names it. The tile is the header's own color, so only the glyph shows, `space.1` before the wordmark.
   Centered on the wordmark's line, the glyph's foot would sit 1 px above its baseline; `space.0-5` above the icon
   lowers it by half that, onto the baseline.
+- **In the viewer's header.** The icon alone, without the wordmark, as inline SVG markup at 16 px (the frame page cannot
+  load `icon.svg` from the app host), inside a link to the gallery whose accessible name is `artifacts`.
 
 ## Tokens
 
 `tokens.json` has the Design Tokens format's shape: `$type` and `$value` per token, dimensions as strings with `px`,
 typography without letter spacing. It is not checked against the DTCG schema.
 
-`tokens.json` stays a file of its own, the one source of the tokens, and `gallery.pen` and `gallery.css` mirror it:
-[`tokens.test.ts`](../../packages/worker/src/gallery/tokens.test.ts) checks both against it, so a change to one of
-the three fails the tests until the others follow. `gallery.pen` is not the source because Pencil's variables
-hold only colors, numbers, strings and booleans: the typography tokens exist in it only as texts, and the file is
-Pencil's document, whose node ids and layout change with every edit, rather than a token set.
+`tokens.json` stays a file of its own, the one source of the tokens, and `gallery.pen`, `gallery.css` and `viewer.css`
+mirror it: [`tokens.test.ts`](../../packages/worker/src/gallery/tokens.test.ts) checks them against it, so a change to
+one fails the tests until the others follow; `viewer.css` declares only the tokens it uses. `gallery.pen` is not the
+source because Pencil's variables hold only colors, numbers, strings and booleans: the typography tokens exist in it
+only as texts, and the file is Pencil's document, whose node ids and layout change with every edit, rather than a token
+set.
 
 | Token                                       | In `gallery.css`                                                                                                                                                                                              |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -112,6 +127,9 @@ description and on `page page--narrow`, `size.label` on the term of `info-row`.
 Values Pencil shows that are not tokens (a text's measured width or height, a frame's height, the width of a table
 column) are not part of the design.
 
+`color.danger-bg` (`#3A1D1B`) is the background that goes with `color.danger` on what deletes (`button/kind=danger`),
+the one action that cannot be undone; `gallery.pen` shows where it applies.
+
 ## Components
 
 Each component in `gallery.pen` is one class in `gallery.css`; a variant is a modifier class or an attribute. Pencil has
@@ -135,15 +153,28 @@ reference pages show each in place.
 | `field`           | `state=default`                          | `div.field` > `label.field__label` + `p.field__help` + `input.field__input` + `p.field__message` (hidden)       |
 |                   | `state=invalid`                          | the same once the input matches `:user-invalid`: its border in `color.danger`, the message shown                |
 | `button`          | `kind=primary` / `kind=secondary`        | `button.button.button--primary` / `.button--secondary`                                                          |
+|                   | `kind=danger`                            | `button.button.button--danger`, on the delete confirmation                                                      |
 | `notice`          |                                          | `p.notice`                                                                                                      |
+| `viewer-header`   |                                          | `header.viewer-header`; see below                                                                               |
+| `icon-button`     |                                          | `button.icon-button[popovertarget][aria-label]` > an inline SVG with `aria-hidden`                              |
+| `viewer-menu`     |                                          | `div.viewer-menu[popover][id]`; see below                                                                       |
+| `menu-item`       |                                          | `a.menu-item`, `button.menu-item[popovertarget]` for History; `.menu-item--danger`                              |
+| `viewer-history`  |                                          | `div.viewer-history[popover][id]`; see below                                                                    |
 
 In `site-header`, `div.brand` is `a.brand__link` (`img.brand__icon` and the wordmark) then `span.brand__version`.
 
-Screens also use `main.page` (`.page--detail` on an artifact page, `.page--narrow` on the consent pages),
-`hgroup.page-heading`, `header.artifact-heading`, `section.section`,
+In `viewer-header`, `a.viewer-header__home` (the icon) comes first, then `h1.viewer-header__title`,
+`span.viewer-header__version` and the `icon-button` that opens the menu. `viewer-menu` holds `p.viewer-menu__shown`,
+`ul[role=list]` of `li` > `menu-item`, and `p.viewer-menu__footer`. `viewer-history` holds `ul[role=list]` of `li` >
+`a`, with `aria-current="page"` on the shown version, then the link to all versions.
+
+Screens also use `main.page` (`.page--detail` on an artifact page, `.page--narrow` on the consent pages, `.page--popup`,
+the popup window's full width with `space.6` padding, on the confirmation pages), `hgroup.page-heading`, `header.artifact-heading`, `section.section`,
 `div.data-table[role=region][tabindex=0][aria-labelledby]` around each `table`, and `form.form` > the field and
 `div.form__actions` > the buttons; `.cell--grow` marks the column that takes the remaining width (the version title,
-the file path). The input lists its help in `aria-describedby`; see `reference/consent.html` for its attributes.
+the file path). The input lists its help in `aria-describedby`; see `reference/consent.html` for its attributes. A
+confirmation page's Cancel is an `a` styled as `button--secondary`. The viewer's page is `body.viewer` holding the
+`viewer-header` and `iframe.viewer__frame`.
 
 Lists and tables carry their roles explicitly (`role=list`; `table`, `rowgroup`, `row`, `columnheader`, `cell`):
 Safari drops list semantics without list markers, and browsers may drop table semantics when the narrow layout
@@ -161,7 +192,7 @@ do in CSS.
 
 - **Version.** The header shows the root `package.json`'s version (`v0.3.0` in the design), which the build inlines
   into the Worker as it does into the CLI. The Worker is deployed from the release branch, so the version is the
-  release's.
+  release's. The viewer shows it in its menu's footer (`artifacts v0.3.0`) instead of its header.
 - **Current section.** `/` and an artifact that is not archived mark Active; `/archived` and an archived artifact mark
   Archived.
 - **A row's description** stays on one line and ends with an ellipsis; the artifact page shows it whole, and the row's
@@ -177,9 +208,18 @@ do in CSS.
   visually but stays for screen readers, and the prefix is hidden from them. The consent pages' column is `size.prose`
   wide, narrowed to the same gutter; the input stretches to it, border included, and the buttons wrap.
 - **Times** are UTC, `YYYY-MM-DD HH:MM`, in `<time datetime="YYYY-MM-DDTHH:MM:00Z">`; list rows show a relative time
-  (`2 hours ago`) with the same `datetime`.
-- **Focus.** Links, the scrollable table regions, the input and the buttons show `focus.width` of `color.focus` on
-  `:focus-visible`.
+  (`2 hours ago`) with the same `datetime`. The viewer's history shows the date alone, `YYYY-MM-DD`, and no relative
+  time, so the frame page's bytes, and its `ETag`, change only with its data.
+- **The viewer's header** keeps one line at every width: the title gives up its width first, down to its ellipsis,
+  while the icon, the version and the menu button keep theirs. The frame below it takes the rest of the viewport.
+- **The viewer's menu** has one fixed width, whatever the title or the version, and opens under its button at the
+  header's right edge. It closes on Escape, on a click outside it in the header, and when the focus moves into the
+  page; History opens its list beside the menu, marking the shown version with `aria-current="page"`. Delete is in
+  `color.danger`. The items of the menu and the history show the focus ring of links.
+- **Confirmation pages** are laid out for a window 480 px wide, the size the viewer opens them at: the narrow column
+  takes the window's width less the gutter, and the buttons wrap.
+- **Focus.** Links, the scrollable table regions, the input, the buttons, the viewer's icon button and its menu items
+  show `focus.width` of `color.focus` on `:focus-visible`.
 - **The field's message** shows only while the input matches `:user-invalid`: after the owner changes the value and
   leaves the field, or tries to submit it, and not while typing or on load. No script keeps `aria-invalid` or
   `aria-describedby` in step with it, so the input is described by its help alone, and a submit with a bad value is
