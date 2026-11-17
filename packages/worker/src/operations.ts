@@ -212,7 +212,10 @@ function versionJson(deps: OperationDeps, id: ArtifactId, row: VersionRow, files
   return files === undefined ? json : { ...json, files: files.map(fileJson) };
 }
 
-/** Storage failures: a timeout is `unavailable` (RES-2), anything else `internal`; the log carries the class only. */
+/**
+ * Storage failures that `readObject` has not answered: a timeout is `unavailable` (RES-2), anything else `internal`;
+ * the log carries the class only.
+ */
 async function guarded<T>(artifact: ArtifactId | undefined, work: () => Promise<Result<T>>): Promise<Result<T>> {
   try {
     return await work();
@@ -220,6 +223,21 @@ async function guarded<T>(artifact: ArtifactId | undefined, work: () => Promise<
     const reason = error instanceof StorageError ? error.failure : "error";
     logEvent("operation.failed", { reason, error: errorName(error), ...(artifact === undefined ? {} : { artifact }) });
     return fail({ code: reason === "timeout" ? "unavailable" : "internal" });
+  }
+}
+
+/**
+ * An R2 object read, inside `guarded` (design.md section 8, "Errors"): a call that fails or stalls is `unavailable`,
+ * which a retry may mend, logged as `guarded` logs it; R2 not holding what the version lists (`inconsistent`) is thrown
+ * on, for `guarded` to answer `internal`.
+ */
+async function readObject<T>(artifact: ArtifactId, work: () => Promise<T>): Promise<Result<T>> {
+  try {
+    return succeed(await work());
+  } catch (error) {
+    if (!(error instanceof StorageError) || error.inconsistent) throw error;
+    logEvent("operation.failed", { reason: error.failure, error: errorName(error), artifact });
+    return fail({ code: "unavailable" });
   }
 }
 
@@ -608,15 +626,17 @@ function matchFile(id: ArtifactId, path: ResolvedPath, found: readonly FileRow[]
 
 /** A looked-up file's bytes, under the R2 timeout. */
 export async function openFile(deps: OperationDeps, id: ArtifactId, file: FileJson): Promise<Result<R2ObjectBody>> {
-  return guarded(id, async () => succeed(await getObject(objectStore(deps), id, file.sha256)));
+  return guarded(id, () => readObject(id, () => getObject(objectStore(deps), id, file.sha256)));
 }
 
 /** A looked-up file's bytes, fetched and read whole under the R2 timeout (MCP's `read_file`, after its size bound). */
 export async function readFile(deps: OperationDeps, id: ArtifactId, file: FileJson): Promise<Result<Uint8Array>> {
-  return guarded(id, async () => {
-    const store = objectStore(deps);
-    return succeed(await readBody(store, await getObject(store, id, file.sha256), file.size));
-  });
+  return guarded(id, () =>
+    readObject(id, async () => {
+      const store = objectStore(deps);
+      return readBody(store, await getObject(store, id, file.sha256), file.size);
+    }),
+  );
 }
 
 export type ExportInput = {
@@ -663,21 +683,13 @@ export async function exportVersion(deps: OperationDeps, input: ExportInput): Pr
 
     const store = objectStore(deps);
     const open = async (file: FileRow) => (await getObject(store, id, file.sha256)).body;
-    let firstBody: ReadableStream<Uint8Array>;
-    try {
-      firstBody = await open(first);
-    } catch (error) {
-      // A read that fails or stalls is `unavailable` (design.md section 8, "Errors"); an object the version lists that
-      // R2 does not hold is an inconsistency, `internal` as `guarded` answers it.
-      if (!(error instanceof StorageError) || error.failure === "object_missing") throw error;
-      logEvent("operation.failed", { reason: error.failure, error: errorName(error), artifact: id });
-      return fail({ code: "unavailable" });
-    }
+    const firstBody = await readObject(id, () => open(first));
+    if (!firstBody.ok) return firstBody;
     const body = archiveStream(
       {
         files,
         modified: new Date(version.created_at),
-        first: firstBody,
+        first: firstBody.value,
         open,
         read: (reader, size) => streamBody(store, reader, size),
         failed: (error) =>

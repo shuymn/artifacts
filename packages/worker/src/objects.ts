@@ -23,13 +23,25 @@ export type ObjectStore = {
   readonly sleep: (ms: number) => Promise<void>;
 };
 
-/** A storage call that failed; `failure` is the logged reason. */
+/**
+ * A storage call that failed; `failure` is the logged reason. `inconsistent`: R2 does not hold what D1 lists (no
+ * object, or one of another length), which a retry does not mend, unlike a call that fails or stalls (design.md
+ * section 8, "Errors").
+ */
 export class StorageError extends Error {
   override readonly name = "StorageError";
-  constructor(readonly failure: StorageFailure) {
+  readonly inconsistent: boolean;
+  constructor(
+    readonly failure: StorageFailure,
+    options: { readonly inconsistent?: boolean } = {},
+  ) {
     super(failure);
+    this.inconsistent = failure === "object_missing" || options.inconsistent === true;
   }
 }
+
+/** An object's bytes that differ in length from its stored size; logged as `error`, as a failed read is. */
+const lengthMismatch = () => new StorageError("error", { inconsistent: true });
 
 export function objectKey(id: ArtifactId, sha256: string): string {
   return `a/${id}/${sha256}`;
@@ -152,11 +164,11 @@ export async function readBody(store: ObjectStore, object: R2ObjectBody, size: n
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (length + value.byteLength > size) throw new StorageError("error");
+      if (length + value.byteLength > size) throw lengthMismatch();
       bytes.set(value, length);
       length += value.byteLength;
     }
-    if (length !== size) throw new StorageError("error");
+    if (length !== size) throw lengthMismatch();
     return bytes;
   };
   try {
@@ -182,10 +194,10 @@ export async function* streamBody(
       const { done, value } = await call(store, () => reader.read());
       if (done) break;
       length += value.byteLength;
-      if (length > size) throw new StorageError("error");
+      if (length > size) throw lengthMismatch();
       yield value;
     }
-    if (length !== size) throw new StorageError("error");
+    if (length !== size) throw lengthMismatch();
   } finally {
     reader.cancel().catch(() => {});
   }

@@ -296,8 +296,9 @@ no limit on versions.
   it.
 - No `Content-Security-Policy` on artifacts: a page is the agent's code and may load from CDNs. The viewer frame, the
   Worker's own page, carries one (below).
-- `GET` and `HEAD` only (ISO-3); an unknown file answers a plain 404, except the icon below. `Range` is not supported
-  in the first release, so audio and video cannot seek.
+- `GET` and `HEAD` only (ISO-3); an unknown file answers a plain 404, except the icon below, and a storage failure a
+  plain 503 or 500 (section 8, "Errors"). `Range` is not supported in the first release, so audio and video cannot
+  seek.
 - **Icon:** browsers request `/favicon.ico` on their own. When the latest version has no `favicon.ico` (and no
   `favicon.ico/index.html`, which answers its 308), the host answers that path with the gallery's icon (section 10)
   instead of 404. The fallback comes where the 404 would: after Access, the public flag and existence, read in the same
@@ -960,14 +961,21 @@ download `GET /a/<id>/v/<n>/export` behind Access (section 10; the viewer's Expo
 `{ "error": { "code", "message", … } }` with the status below; MCP answers a tool result with `isError: true` and the
 same object.
 
-| Code               | HTTP | When                                                                                                           |
-| ------------------ | ---- | -------------------------------------------------------------------------------------------------------------- |
-| `invalid_request`  | 400  | input fails validation; `issues` lists `{ field, reason }`, reasons from a closed set                          |
-| `not_found`        | 404  | no live artifact, version, file or grant                                                                       |
-| `version_conflict` | 409  | `base_version` is not the latest; carries `latest_version`                                                     |
-| `not_extractable`  | 409  | an exported version has paths that cannot be extracted as stored (Export, above); `paths` lists each           |
-| `unavailable`      | 503  | invalid configuration, an unreachable key set, or a failed or timed-out read or upload, OAuth storage included |
-| `internal`         | 500  | anything else, an exported version's object that R2 does not hold included; the message carries no detail      |
+| Code               | HTTP | When                                                                                                                  |
+| ------------------ | ---- | --------------------------------------------------------------------------------------------------------------------- |
+| `invalid_request`  | 400  | input fails validation; `issues` lists `{ field, reason }`, reasons from a closed set                                 |
+| `not_found`        | 404  | no live artifact, version, file or grant                                                                              |
+| `version_conflict` | 409  | `base_version` is not the latest; carries `latest_version`                                                            |
+| `not_extractable`  | 409  | an exported version has paths that cannot be extracted as stored (Export, above); `paths` lists each                  |
+| `unavailable`      | 503  | invalid configuration, an unreachable key set, or a storage failure that Storage failures (below) calls `unavailable` |
+| `internal`         | 500  | anything else, a storage failure called `internal` there included; the message carries no detail                      |
+
+**Storage failures:** an R2 read that fails or stalls (a served file, the REST file route, `read_file`, an export's
+first `get`) is `unavailable`, which a retry may mend, as is a D1 read or an upload (the `head` and `put` of each new
+object) that times out (RES-2). A D1 read or an upload that fails otherwise is `internal`, and so is an object a version
+lists that R2 does not hold or holds at another length: an inconsistency rather than an outage. OAuth storage answers
+as section 7 states. Each failure logs `operation.failed` with its class, and a browser host (section 6) answers its
+status in plain text.
 
 **Transport and protocol errors** come before or around an operation: 401 `unauthorized` with
 `WWW-Authenticate: Bearer`, which names the route's protected resource metadata where OAuth is on (section 7), 403 for

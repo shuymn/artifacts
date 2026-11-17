@@ -1,8 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { assetPath } from "./gallery/assets.ts";
 import favicon from "./gallery/favicon.ico";
-import { APP_HOST, CONTENT_SUFFIX, objectKeys, PUBLIC_SUFFIX, World } from "./test-support.ts";
+import {
+  APP_HOST,
+  BucketProbe,
+  captureLogs,
+  CONTENT_SUFFIX,
+  logEvents,
+  never,
+  objectKeys,
+  PUBLIC_SUFFIX,
+  World,
+} from "./test-support.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const PRIVATE_HEADERS = {
   "cache-control": "private, no-cache",
@@ -539,4 +553,43 @@ describe("section 6: Vary", () => {
     expect(responses.map((response) => response.status)).toEqual([403, 308, 404, 404]);
     for (const response of responses) expect(response.headers.has("Vary")).toBe(false);
   });
+});
+
+/** An R2 `get` that fails, stalls past the timeout or finds no object, with the status and logged reason it answers. */
+const FAILED_GETS: readonly [string, () => Promise<unknown>, number, string][] = [
+  ["fails", () => Promise.reject(new Error("get failed")), 503, "error"],
+  ["stalls", never, 503, "timeout"],
+  ["finds no object", () => Promise.resolve(null), 500, "object_missing"],
+];
+
+// Design.md section 8, "Errors": an R2 read that fails or stalls is unavailable, which a retry may mend; an object the
+// version lists that R2 does not hold is internal.
+describe("section 8: a served file's R2 read", () => {
+  it.each(FAILED_GETS)(
+    "answers a content and a public host when the get %s, and serves the file once it succeeds",
+    async (_label, behavior, status, reason) => {
+      const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+      const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": "text" } })).artifact.id;
+      await world.patch(id, { public: true });
+      const bucket = new BucketProbe();
+      world.env = { ...world.env, FILES: bucket.binding };
+      bucket.behave = (op) => (op === "get" ? behavior() : undefined);
+      const logs = captureLogs();
+      const content = await world.content(id, "/a.txt");
+      const shared = await world.public(id, "/a.txt");
+      expect([content.status, shared.status]).toEqual([status, status]);
+      const plain = { "content-type": "text/plain; charset=utf-8" };
+      expect(Object.fromEntries(content.headers)).toMatchObject({ ...plain, ...PRIVATE_HEADERS });
+      expect(Object.fromEntries(shared.headers)).toMatchObject({ ...plain, ...PUBLIC_HEADERS });
+      const event = { event: "operation.failed", reason, error: "other", artifact: id };
+      expect(logEvents(logs.lines)).toEqual([event, event]);
+
+      bucket.behave = () => undefined;
+      const served = [await world.content(id, "/a.txt"), await world.public(id, "/a.txt")];
+      expect(await Promise.all(served.map(async (response) => [response.status, await response.text()]))).toEqual([
+        [200, "text"],
+        [200, "text"],
+      ]);
+    },
+  );
 });
