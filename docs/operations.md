@@ -12,7 +12,9 @@ and `-s.example-content.net` for content on its own registrable domain. `<team>`
 is written in this repository (P7).
 
 **Planned (OAuth)** marks a step for OAuth sign-in (design.md section 7), which applies from the release that carries it
-(design.md, "OAuth delivery"); until then a deployment uses API tokens only.
+(design.md, "OAuth delivery"); until then a deployment uses API tokens only. **Planned (viewer)** marks a check for the
+viewer frame, the confirmation pages and export (design.md sections 6, 8 and 10), which applies from the release that
+carries them (design.md, "Viewer delivery").
 
 Commands run from `packages/worker`, with the tools mise installs from `mise.toml` and `.node-version`: there
 `pnpm exec wrangler` is the Wrangler of the lockfile and `wrangler.jsonc` names the Worker. A block that starts elsewhere
@@ -697,8 +699,64 @@ CLI signs in, and 16 when API tokens are turned off.
 16. **API tokens off** (AC-18). The `curl` of section 5 with the check token answers 401, and a signed-in client still
     works.
 
+The checks below are Planned (viewer): run them once the release that carries the viewer deploys. What they settle is
+**Unconfirmed** until then: that Access and the zone pass `Sec-Fetch-Dest`, `Sec-Fetch-Site` and `Origin` to the
+Worker, keep the frame page's `ETag` and `Vary`, and keep `Content-Length` on a streamed archive.
+
+17. **The viewer frame** (AC-21). Publish the probe again with a second page and a page that fills the viewport:
+
+    ```sh
+    printf '<title>probe</title><a href="two.html">two</a>' > probe/index.html
+    echo '<title>two</title><p>two</p>' > probe/two.html
+    echo '<style>html,body{margin:0;height:100vh;background:teal}</style>' > probe/full.html
+    ARTIFACTS_TOKEN=$TOKEN artifacts publish ./probe --id "$ID"
+    ```
+
+    In Chrome, Firefox and Safari, open `https://$ID-art.example.com/full.html#x` signed in, with the developer tools.
+    Pass: the document's response carries `content-security-policy: script-src 'sha256-…'`, `vary: Sec-Fetch-Dest,
+    Accept-Encoding` and an `etag`, and the iframe's request for the same URL gets the probe's bytes; the teal page
+    fills the space under the header without a scrollbar, and its `location.hash` is `#x`; the header names the latest
+    version. Then open `https://$ID-art.example.com/`: following `two` inside the frame puts `/two.html` in the address
+    bar and `two` in the tab's title; the history opens a pinned version with `v<n> of <latest>`; Open page directly
+    shows the page without the header at its URL with `?_viewer=off`. On the public host (`artifacts public "$ID" on`),
+    the same page has no header. An empty frame in any engine is a failure of the self-reference the viewer depends on
+    (design.md section 6).
+
+18. **The confirmation pages** (AC-22). From the viewer's menu, Make public…: the popup's `POST` carries `origin:
+    https://artifacts.example.com` and `sec-fetch-site: same-origin`; after the confirmation the viewer shows the
+    artifact again, the public host serves it, and the logs' `artifact.changed` line carries `"via":"gallery"` and no
+    `token`. Make private… the same way. In the probe page's console, a forged post is refused:
+
+    ```js
+    await fetch("https://artifacts.example.com/a/<ID>/public", {
+      method: "POST",
+      mode: "no-cors",
+      credentials: "include",
+      body: new URLSearchParams({ public: "true" }),
+    });
+    ```
+
+    Pass: the artifact stays private. In the shared-domain layout the request reaches the Worker, and the logs show
+    `confirm.refused` with `"reason":"origin"`; in the dedicated-domain layout the browser may send no Access cookie on
+    a cross-site request, and Access answers it first.
+
+19. **Export** (AC-23).
+
+    ```sh
+    curl -s -D headers.txt -o probe.zip "$API/v1/artifacts/$ID/versions/1/export" -H "Authorization: Bearer $TOKEN"
+    grep -i -E '^(content-type|content-length|content-disposition|cache-control)' headers.txt; wc -c < probe.zip
+    unzip -l probe.zip
+    ARTIFACTS_TOKEN=$TOKEN artifacts export "$ID" --version 1 -o cli.zip && cmp probe.zip cli.zip
+    ```
+
+    Pass: `application/zip`, a `content-length` equal to the file's size, `attachment; filename="<ID>-v1.zip"`,
+    `no-store`; `unzip -l` lists the version's files; `cmp` prints nothing. The viewer's Export item downloads the same
+    archive. A missing `content-length` means the edge drops it from a streamed response; the archive is still whole,
+    but a cut stream then shows only as an archive that does not open.
+
 Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"` (and `"$ID2"` after check 15), revoke the check token,
-and revoke the grants made only for the checks.
+and revoke the grants made only for the checks. After check 18, deleting the probe from the viewer's menu (Delete…)
+checks the delete confirmation as well.
 
 ## 8. Backups and restore
 
