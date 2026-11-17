@@ -269,9 +269,11 @@ and the threats are the three adversaries below, not untrusted users.
 
 ### Serving (SRV)
 
-- **SRV-1: content responses do not reinterpret bytes or leak the host.** Each carries the stored `Content-Type`,
-  `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. _Enforced (main)_ in `src/serve.ts`. Pinned by
-  behavior (`src/serve.test.ts`).
+- **SRV-1: content responses do not reinterpret bytes or leak the host.** Each carries `X-Content-Type-Options:
+  nosniff` and `Referrer-Policy: no-referrer`, and a file's response its stored `Content-Type`. _Enforced (main)_ in
+  `src/serve.ts`. Pinned by behavior (`src/serve.test.ts`). The viewer's frame page is the Worker's own document, not a
+  file, and carries `text/html; charset=utf-8` whatever the file's stored type, `application/xhtml+xml` included; the
+  file itself reaches the iframe with its stored type: _Planned (viewer)_ (PL-52, PL-54).
 - **SRV-2: a request path selects a file of the requested artifact and version only.** The Worker resolves the pathname
   it receives: one strict percent-decoding per segment, an encoded `/` refused, lookup inside the selected version's
   file list. _Enforced (main)_ in `src/paths.ts`. Pinned by behavior (`src/paths.test.ts`: decoder tests over strings;
