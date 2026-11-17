@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.10.2](https://github.com/shuymn/artifacts/compare/v0.10.1...v0.10.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* **worker:** abort a served file's broken body ([1cb6462](https://github.com/shuymn/artifacts/commit/1cb6462d620c94c61dcccae346c8e17580889e65)), closes [#64](https://github.com/shuymn/artifacts/issues/64)
+* **worker:** answer 503 for a failed R2 read ([479f607](https://github.com/shuymn/artifacts/commit/479f607e842feb8392169fb77d4bcf5e85d5b73c)), closes [#64](https://github.com/shuymn/artifacts/issues/64)
+* **worker:** answer storage failures consistently ([ea402c7](https://github.com/shuymn/artifacts/commit/ea402c737c2894dd773edba116e4441c842a16a8))
+* **worker:** hold a served file's last byte ([7a11dac](https://github.com/shuymn/artifacts/commit/7a11dacab02417c2436148323a7e190542046f49)), closes [#64](https://github.com/shuymn/artifacts/issues/64)
+* **worker:** send the gallery CSP on the early 503 ([e7a6fdb](https://github.com/shuymn/artifacts/commit/e7a6fdb64a4c8eea5288be734aeb20989e2dfbd7)), closes [#64](https://github.com/shuymn/artifacts/issues/64)
+
 ## [0.10.1](https://github.com/shuymn/artifacts/compare/v0.10.0...v0.10.1) (2026-11-17)
 
 
