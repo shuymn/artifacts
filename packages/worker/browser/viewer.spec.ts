@@ -457,7 +457,15 @@ test.describe("PL-58: the confirmation popup", () => {
       await page.locator(".icon-button").click();
       const [popup] = await Promise.all([page.waitForEvent("popup"), page.getByText(item).click()]);
       await expect(popup).toHaveURL(`${appOrigin()}/a/${id}/${path}`);
-      await Promise.all([popup.waitForEvent("close"), popup.getByRole("link", { name: "Cancel" }).click()]);
+      // The script closes the window inside the click, which can end the click action with the page closed.
+      const closed = popup.waitForEvent("close");
+      await popup
+        .getByRole("link", { name: "Cancel" })
+        .click()
+        .catch((error: unknown) => {
+          if (!popup.isClosed()) throw error;
+        });
+      await closed;
     }
     expect(followed).toEqual([]);
     expect(page.url()).toBe(`${contentOrigin(id)}/`);
