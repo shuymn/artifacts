@@ -3,7 +3,7 @@
 // the archive `export` wrote with Info-ZIP's `unzip`. The harness's dispatch keeps each request's absolute URL, so the
 // Worker sees the configured `*.localhost` hosts without DNS.
 import { execFile } from "node:child_process";
-import { chmod, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, open, readdir, readFile, rename, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestHarness, type TestHarness } from "wrangler";
 
 import type { Fetch } from "./api.ts";
-import type { ExportOptions } from "./export.ts";
+import type { CopyTarget, ExportOptions } from "./export.ts";
 import { cli, tempDir, writeTree, type Ran, type Tree } from "./test-support.ts";
 
 const WORKER = fileURLToPath(new URL("../../worker/", import.meta.url));
@@ -75,6 +75,7 @@ async function run(
     around?: (request: Sent, forward: () => Promise<Response>) => Promise<Response>;
     pageSize?: number;
     link?: ExportOptions["link"];
+    create?: ExportOptions["create"];
   } = {},
 ): Promise<Ran & { sent: Sent[] }> {
   const sent: Sent[] = [];
@@ -95,6 +96,7 @@ async function run(
     fetch,
     ...(options.pageSize === undefined ? {} : { pageSize: options.pageSize }),
     ...(options.link === undefined ? {} : { link: options.link }),
+    ...(options.create === undefined ? {} : { create: options.create }),
   });
   return { ...ran, sent };
 }
@@ -480,6 +482,21 @@ const theirsDuringDownload =
     return answer;
   };
 
+const eio = () => Object.assign(new Error("i/o error"), { code: "EIO" });
+
+/** Creates the target as the CLI does and answers its handle with the calls `replaced` gives in place of its own. */
+const creating =
+  (replaced: (handle: FileHandle) => Partial<CopyTarget>): ExportOptions["create"] =>
+  async (path) => {
+    const handle = await open(path, "wx");
+    const calls = replaced(handle);
+    return {
+      stat: calls.stat ?? ((options) => handle.stat(options)),
+      writeFile: calls.writeFile ?? ((data) => handle.writeFile(data)),
+      close: calls.close ?? (() => handle.close()),
+    };
+  };
+
 describe("export", () => {
   const SITE: Tree = {
     "index.html": "<p>v1</p>",
@@ -619,19 +636,59 @@ describe("export", () => {
       expect([await readdir(directory), await readFile(target, "utf8")]).toEqual([["out.zip"], "theirs"]);
     });
 
-    it.skipIf(root)("removes the target it created when the copy fails after creating it", async () => {
+    it.each([
+      [
+        "a write",
+        creating((handle) => ({
+          writeFile: async (data) => {
+            await handle.writeFile(data.subarray(0, 10));
+            throw eio();
+          },
+        })),
+      ],
+      [
+        "the close",
+        creating((handle) => ({
+          close: async () => {
+            await handle.close();
+            throw eio();
+          },
+        })),
+      ],
+    ])("removes the target it created when %s fails after its create", async (_failing, create) => {
       const id = await published("Export by copy, copy failed");
       const directory = await tempDir();
       const target = join(directory, "out.zip");
-      const ran = await run(["export", id, "--version", "1", "-o", target], {
-        link: async (part) => {
-          // The part turns unreadable: the target is created, then the copy cannot read the part.
-          await chmod(part, 0);
-          return refused(part, target);
-        },
-      });
-      expect(ran).toMatchObject({ status: 1, stderr: `artifacts: cannot write ${JSON.stringify(target)} (EACCES)\n` });
+      const ran = await run(["export", id, "--version", "1", "-o", target], { link: refused, create });
+      expect(ran).toMatchObject({ status: 1, stderr: `artifacts: cannot write ${JSON.stringify(target)} (EIO)\n` });
       expect(await readdir(directory)).toEqual([]);
+    });
+
+    it("leaves a file another program put at the target after the create, and names its copy as moved", async () => {
+      const id = await published("Export by copy, target swapped");
+      const directory = await tempDir();
+      const target = join(directory, "out.zip");
+      const create = creating((handle) => ({
+        writeFile: async (data) => {
+          await handle.writeFile(data);
+          // Another program moves the copy away and puts its own file at the path before the write fails.
+          await rename(target, join(directory, "moved.zip"));
+          await writeFile(target, "theirs");
+          throw eio();
+        },
+      }));
+      const ran = await run(["export", id, "--version", "1", "-o", target], { link: refused, create });
+      const shown = JSON.stringify(target);
+      expect(ran).toMatchObject({
+        status: 1,
+        stderr:
+          `artifacts: cannot write ${shown} (EIO)\n  the incomplete copy written to ${shown} was moved away during ` +
+          "the export; export removed nothing there\n",
+      });
+      expect([(await readdir(directory)).toSorted(), await readFile(target, "utf8")]).toEqual([
+        ["moved.zip", "out.zip"],
+        "theirs",
+      ]);
     });
   });
 });

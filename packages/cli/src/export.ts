@@ -6,6 +6,7 @@
  * bytes copied into it. On a failure the command removes what it created when it can, and names what it cannot.
  */
 import { randomBytes } from "node:crypto";
+import type { BigIntStats } from "node:fs";
 import { link, lstat, open, unlink, type FileHandle } from "node:fs/promises";
 
 import type { Api, IdleLimit } from "./api.ts";
@@ -29,9 +30,19 @@ export type ExportOptions = {
   readonly onInterrupt: OnInterrupt;
   /** Makes a hard link; `node:fs` `link` outside tests. */
   readonly link: (existingPath: string, newPath: string) => Promise<void>;
+  /** Creates the copy's target where no link can be made; `open(path, "wx")` outside tests. */
+  readonly create: (path: string) => Promise<CopyTarget>;
+};
+
+/** The calls the copy makes on its target's handle. */
+export type CopyTarget = {
+  readonly stat: (options: { bigint: true }) => Promise<BigIntStats>;
+  readonly writeFile: (data: Uint8Array) => Promise<void>;
+  readonly close: () => Promise<void>;
 };
 
 export const EXPORT_LINK: ExportOptions["link"] = link;
+export const EXPORT_CREATE: ExportOptions["create"] = (path) => open(path, "wx");
 
 export type Exported = {
   readonly version: number;
@@ -162,7 +173,7 @@ async function download(
 }
 
 /** Copies the part's bytes into `into`, the target's handle, at its current position. */
-async function copyInto(part: string, into: FileHandle): Promise<void> {
+async function copyInto(part: string, into: CopyTarget): Promise<void> {
   const from = await open(part, "r");
   try {
     const buffer = Buffer.allocUnsafe(1024 * 1024);
@@ -177,30 +188,55 @@ async function copyInto(part: string, into: FileHandle): Promise<void> {
 }
 
 /**
+ * Removes the copy's target when the file at its path is still the one the copy created, by device and inode: another
+ * program may have moved it away and put its own file there. One that does so between this check and the removal still
+ * loses its file; that narrower race is accepted (design.md section 9). Answers a note when nothing is removed.
+ */
+async function removeCreated(target: string, created: BigIntStats | undefined): Promise<string | undefined> {
+  const shown = JSON.stringify(target);
+  if (created === undefined)
+    return `the incomplete copy ${shown} was left behind: export could not tell it was its own`;
+  let now: BigIntStats | undefined;
+  try {
+    now = await lstat(target, { bigint: true });
+  } catch (error) {
+    if (codeOf(error) !== "ENOENT") {
+      return `the incomplete copy ${shown} was left behind: it could not be checked (${codeOf(error) ?? "error"})`;
+    }
+  }
+  if (now === undefined || now.dev !== created.dev || now.ino !== created.ino) {
+    return `the incomplete copy written to ${shown} was moved away during the export; export removed nothing there`;
+  }
+  return removeOwn(target, "the incomplete copy");
+}
+
+/**
  * Puts the part at the target without replacing anything there. A hard link fails when the target exists. Where the
  * file system makes none (FAT, exFAT, a network share), the target is created with `wx`, which fails the same way, and
  * only once that succeeds is it this command's: the part's bytes go into that handle, and a failure after it removes
- * the target. A failed create leaves the target alone, whatever the error.
+ * the target if the file there is still that one. A failed create leaves the target alone, whatever the error.
  */
-async function place(part: string, target: string, makeLink: ExportOptions["link"]): Promise<void> {
+async function place(part: string, target: string, options: ExportOptions): Promise<void> {
   const shown = JSON.stringify(target);
   const appeared = () =>
     new CliError(`${shown} appeared during the download; export left it as it is and wrote nothing there`);
   try {
-    await makeLink(part, target);
+    await options.link(part, target);
     return;
   } catch (error) {
     if (codeOf(error) === "EEXIST") throw appeared();
   }
-  let copy: FileHandle;
+  let copy: CopyTarget;
   try {
-    copy = await open(target, "wx");
+    copy = await options.create(target);
   } catch (error) {
     if (codeOf(error) === "EEXIST") throw appeared();
     throw cannotWrite(shown, error);
   }
+  let created: BigIntStats | undefined;
   let failure: unknown;
   try {
+    created = await copy.stat({ bigint: true });
     await copyInto(part, copy);
   } catch (error) {
     failure = error;
@@ -210,7 +246,7 @@ async function place(part: string, target: string, makeLink: ExportOptions["link
   });
   if (failure === undefined) return;
   const error = cannotWrite(shown, failure);
-  const note = await removeOwn(target, "the incomplete copy");
+  const note = await removeCreated(target, created);
   throw note === undefined ? error : new LeftBehind(error, [note]);
 }
 
@@ -251,7 +287,7 @@ export async function exportVersion(
     await handle.close().catch((error: unknown) => {
       throw cannotWrite(shownPart, error);
     });
-    await place(part, target, options.link);
+    await place(part, target, options);
     const note = await removeOwn(part, PART);
     return {
       version: number,

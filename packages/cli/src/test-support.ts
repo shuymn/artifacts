@@ -61,6 +61,7 @@ export type RunOptions = {
   /** Where `export` learns of an interrupt; by default none comes, and the test process's signals stay as they are. */
   readonly onInterrupt?: OnInterrupt;
   readonly link?: ExportOptions["link"];
+  readonly create?: ExportOptions["create"];
 };
 
 const noInterrupt: OnInterrupt = () => () => undefined;
@@ -87,6 +88,7 @@ export async function cli(argv: readonly string[], options: RunOptions = {}): Pr
     ...(options.signIn === undefined ? {} : { signIn: options.signIn }),
     onInterrupt: options.onInterrupt ?? noInterrupt,
     ...(options.link === undefined ? {} : { link: options.link }),
+    ...(options.create === undefined ? {} : { create: options.create }),
   });
   return { status, stdout, stderr };
 }

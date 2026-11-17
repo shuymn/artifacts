@@ -18,7 +18,14 @@ import {
 } from "./api.ts";
 import { readConfig, readOrigin, SET_TOKEN_OR_SIGN_IN, storesLogin, type Config, type Environment } from "./config.ts";
 import { CliError, EXIT, LeftBehind, UsageError, type ExitStatus } from "./errors.ts";
-import { EXPORT_LINK, exportVersion, processInterrupts, type ExportOptions, type OnInterrupt } from "./export.ts";
+import {
+  EXPORT_CREATE,
+  EXPORT_LINK,
+  exportVersion,
+  processInterrupts,
+  type ExportOptions,
+  type OnInterrupt,
+} from "./export.ts";
 import { LOCK_OPTIONS, type LockBarriers } from "./lock.ts";
 import { login, logout, systemOpener, type LoginContext } from "./login.ts";
 import { OAUTH_REQUEST_MS } from "./oauth.ts";
@@ -72,6 +79,8 @@ export type Io = {
   readonly onInterrupt?: OnInterrupt;
   /** How `export` puts its archive at the target: a hard link, `node:fs` `link` by default. */
   readonly link?: ExportOptions["link"];
+  /** Where no link can be made, how `export` creates the target it copies into; `open(path, "wx")` by default. */
+  readonly create?: ExportOptions["create"];
 };
 
 /** The release version: the root package's, which `bun build --compile` inlines into the binary. */
@@ -401,6 +410,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         idleMs: (io.timeouts ?? TIMEOUTS).idleMs,
         onInterrupt: io.onInterrupt ?? processInterrupts,
         link: io.link ?? EXPORT_LINK,
+        create: io.create ?? EXPORT_CREATE,
       };
       const exported = await exportVersion(api(), id, versionNumber(values.version), values.output, options).catch(
         (error: unknown) => {
