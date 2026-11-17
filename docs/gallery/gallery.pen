@@ -4622,7 +4622,24 @@
                       "content": "Versions"
                     },
                     "kqZe5": {
-                      "content": "3 versions, 4 files, 48.2 KB",
+                      "content": "3 versions",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  }
+                },
+                {
+                  "id": "roz8r",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "Latest version"
+                    },
+                    "kqZe5": {
+                      "content": "v3 · 4 files, 48.2 KB",
                       "textGrowth": "fixed-width",
                       "width": "fill_container"
                     }
