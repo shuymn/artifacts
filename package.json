@@ -10,6 +10,7 @@
     "fmt:fix": "oxfmt",
     "typecheck": "pnpm -r --no-bail run typecheck",
     "test": "pnpm -r --no-bail run test",
+    "test:browser": "pnpm --filter @artifacts/worker run test:browser",
     "github-app": "node scripts/github-app.mjs"
   },
   "devDependencies": {

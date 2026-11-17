@@ -33,6 +33,12 @@ export function encodeBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/** The policy source that admits an inline script by the SHA-256 of its text: `sha256-<base64>`. */
+export async function scriptSource(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return `sha256-${encodeBase64(new Uint8Array(digest))}`;
+}
+
 /** A publish file's content as bytes, or undefined when it does not have the form of its encoding. */
 export function decodeContent(content: string, encoding: Encoding): Uint8Array | undefined {
   if (encoding === "base64") return decodeBase64(content);

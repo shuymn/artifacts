@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="text-scale" content="scale" />
+    <title>Quarterly revenue chart</title>
+    <link rel="stylesheet" href="../../../packages/worker/src/gallery/viewer.css" />
+  </head>
+  <body class="viewer" data-latest="3">
+    <header class="viewer-header">
+      <div class="viewer-header__left">
+        <a class="viewer-header__home" href="https://artifacts.example.com/" aria-label="artifacts"
+          ><svg
+            class="viewer-header__icon"
+            width="16"
+            height="16"
+            aria-hidden="true"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 32 32"
+          >
+            <rect width="32" height="32" rx="6" fill="#111317" />
+            <path fill="#8fa8ff" d="M10 6h10v4H10zm10 4h4v16h-4zm-10 4h10v4H10zm-2 2h4v8H8zm2 6h10v4H10z" /></svg
+        ></a>
+        <div class="viewer-header__artifact">
+          <h1 class="viewer-header__title">Quarterly revenue chart</h1>
+          <span class="viewer-header__version">v2 of 3</span>
+        </div>
+      </div>
+      <noscript><a class="viewer-header__direct" href="/_v/2/?_viewer=off">Open page directly</a></noscript>
+      <button class="icon-button" type="button" popovertarget="viewer-menu" aria-label="Menu">
+        <svg
+          class="icon-button__icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="1"></circle>
+          <circle cx="19" cy="12" r="1"></circle>
+          <circle cx="5" cy="12" r="1"></circle>
+        </svg>
+      </button>
+      <div class="viewer-menu" popover id="viewer-menu">
+        <p class="viewer-menu__shown">v2 · published <time datetime="2026-11-15T21:03:00Z">2026-11-15 21:03</time></p>
+        <ul role="list">
+          <li>
+            <a class="menu-item" href="https://artifacts.example.com/"
+              ><svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m12 19-7-7 7-7"></path>
+                <path d="M19 12H5"></path></svg
+              ><span class="menu-item__label">Back to gallery</span></a
+            >
+          </li>
+          <li>
+            <a class="menu-item" href="https://artifacts.example.com/a/ak2x7m4q9wz3c5v8b2n6r4t7y1"
+              ><svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 16v-4"></path>
+                <path d="M12 8h.01"></path></svg
+              ><span class="menu-item__label">Artifact details</span
+              ><svg
+                class="menu-item__trailing"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M7 7h10v10"></path>
+                <path d="M7 17 17 7"></path></svg
+            ></a>
+          </li>
+          <li>
+            <button class="menu-item" type="button" popovertarget="viewer-history">
+              <svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                <path d="M3 3v5h5"></path>
+                <path d="M12 7v5l4 2"></path></svg
+              ><span class="menu-item__label">History</span
+              ><svg
+                class="menu-item__trailing"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m9 18 6-6-6-6"></path>
+              </svg>
+            </button>
+          </li>
+          <li>
+            <a
+              class="menu-item"
+              href="https://artifacts.example.com/a/ak2x7m4q9wz3c5v8b2n6r4t7y1/v/2/export"
+              id="viewer-export"
+              ><svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 15V3"></path>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <path d="m7 10 5 5 5-5"></path></svg
+              ><span class="menu-item__label">Export v2 (.zip)</span></a
+            >
+          </li>
+          <li>
+            <a
+              class="menu-item"
+              href="https://artifacts.example.com/a/ak2x7m4q9wz3c5v8b2n6r4t7y1/public"
+              target="_blank"
+              ><svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path>
+                <path d="M2 12h20"></path></svg
+              ><span class="menu-item__label">Make public…</span></a
+            >
+          </li>
+          <li>
+            <a class="menu-item" href="/_v/2/?_viewer=off" id="viewer-direct"
+              ><svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"></path>
+                <path d="m21 3-9 9"></path>
+                <path d="M15 3h6v6"></path></svg
+              ><span class="menu-item__label">Open page directly</span></a
+            >
+          </li>
+        </ul>
+        <hr class="viewer-menu__divider" />
+        <ul role="list">
+          <li>
+            <a
+              class="menu-item menu-item--danger"
+              href="https://artifacts.example.com/a/ak2x7m4q9wz3c5v8b2n6r4t7y1/delete"
+              target="_blank"
+              ><svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M10 11v6"></path>
+                <path d="M14 11v6"></path>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                <path d="M3 6h18"></path>
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg
+              ><span class="menu-item__label">Delete…</span></a
+            >
+          </li>
+        </ul>
+        <hr class="viewer-menu__divider" />
+        <p class="viewer-menu__footer">artifacts v0.3.0</p>
+      </div>
+      <div class="viewer-history" popover id="viewer-history">
+        <p class="viewer-history__head">History · 3 versions</p>
+        <ul role="list">
+          <li>
+            <a class="menu-item" href="/"
+              ><svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 6 9 17l-5-5"></path></svg
+              ><span class="menu-item__label"
+                >v3&#160; latest · <time datetime="2026-11-16T09:12:00Z">2026-11-16</time></span
+              ></a
+            >
+          </li>
+          <li>
+            <a class="menu-item" href="/_v/2/" aria-current="page"
+              ><svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 6 9 17l-5-5"></path></svg
+              ><span class="menu-item__label">v2&#160; <time datetime="2026-11-15T21:03:00Z">2026-11-15</time></span></a
+            >
+          </li>
+          <li>
+            <a class="menu-item" href="/_v/1/"
+              ><svg
+                class="menu-item__icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 6 9 17l-5-5"></path></svg
+              ><span class="menu-item__label">v1&#160; <time datetime="2026-11-14T18:40:00Z">2026-11-14</time></span></a
+            >
+          </li>
+        </ul>
+        <hr class="viewer-history__divider" />
+        <a class="menu-item" href="https://artifacts.example.com/a/ak2x7m4q9wz3c5v8b2n6r4t7y1#versions"
+          ><svg
+            class="menu-item__icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <rect width="7" height="7" x="3" y="3" rx="1"></rect>
+            <rect width="7" height="7" x="14" y="3" rx="1"></rect>
+            <rect width="7" height="7" x="14" y="14" rx="1"></rect>
+            <rect width="7" height="7" x="3" y="14" rx="1"></rect></svg
+          ><span class="menu-item__label">All versions in gallery</span
+          ><svg
+            class="menu-item__trailing"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M7 7h10v10"></path>
+            <path d="M7 17 17 7"></path></svg
+        ></a>
+      </div>
+    </header>
+    <iframe
+      class="viewer__frame"
+      id="viewer-frame"
+      title="Artifact page"
+      allow="
+        fullscreen;
+        clipboard-read;
+        clipboard-write;
+        camera;
+        microphone;
+        geolocation;
+        display-capture;
+        autoplay;
+        screen-wake-lock;
+        web-share;
+      "
+    ></iframe>
+    <!-- Reference only: opens the menu and the history, as the screens show them. The Worker's page carries the frame's
+    script instead (viewer.ts), which loads the page into the iframe. -->
+    <script>
+      document.querySelector(".icon-button").click();
+      document.querySelector(".viewer-menu button").click();
+    </script>
+  </body>
+</html>

@@ -395,12 +395,15 @@ another page of the artifact opens that page in the frame again; a reference of 
 one keeps the document's query, and with it the parameter. An artifact that uses the parameter `_viewer` for itself gets
 its file without the frame for `_viewer=off`.
 
-**Version shown and content.** The frame resolves version n in its D1 batch, and the iframe's request resolves its file
-again: on the latest version, a publish between the two requests shows version n+1 under a header that says n. It is
-rare, and a reload fixes it. Pinning the iframe to `/_v/<n>/` would close the gap, but it changes the page's
-`location.pathname`, which routers and root-relative links read. When the iframe navigates to another `/_v/<m>/` path,
-or from one to the latest, the script updates the header's version, the menu's shown version, with its time where the
-history lists it, the history's mark and the export item.
+**Version shown and content.** The frame resolves version n in its D1 batch, and each of the iframe's requests resolves
+its file again; the frame learns of versions only when it loads. On the latest version, a publish between the frame's
+request and the iframe's shows version n+1 under a header that says n. A publish while the frame is open does the same
+at the iframe's next navigation to a path without `/_v/<n>/`, such as a link to another page of the artifact: the page
+is version n+1's, while the header's `latest`, the menu's shown version, the history and the export item stay at version
+n until the owner reloads the page. A reload fixes both. Pinning the iframe to `/_v/<n>/` would close the gap, but it
+changes the page's `location.pathname`, which routers and root-relative links read. When the iframe navigates to another
+`/_v/<m>/` path, or from one to the latest, the script updates the header's version, the menu's shown version, with its
+time where the history lists it, the history's mark and the export item.
 
 **The script** is one inline script, the same bytes on every frame page, so the hash in the policy is fixed; each
 page's values are in its markup.

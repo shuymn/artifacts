@@ -13,6 +13,7 @@ import confirmResultHtml from "../../../../docs/gallery/reference/confirm-result
 import consentErrorHtml from "../../../../docs/gallery/reference/consent-error.html?raw";
 import consentHtml from "../../../../docs/gallery/reference/consent.html?raw";
 import indexHtml from "../../../../docs/gallery/reference/index.html?raw";
+import viewerHtml from "../../../../docs/gallery/reference/viewer.html?raw";
 import rootPackage from "../../../../package.json" with { type: "json" };
 import type {
   ArtifactJson,
@@ -35,6 +36,9 @@ import {
   type ConsentView,
 } from "./pages.ts";
 import { decodeEntities, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
+import { viewerPage, type ViewerView } from "./viewer.ts";
+
+import viewerCss from "./viewer.css?raw";
 
 /** The time the reference pages' relative times count from: "2 hours ago" for 09:12. */
 const CHROME: Chrome = {
@@ -275,10 +279,14 @@ function withoutPreloads(node: HtmlNode): HtmlNode {
  */
 const REFERENCE_VERSION = "v0.3.0";
 const VERSION = `v${rootPackage.version}`;
-const VERSIONS = new Map([[VERSION, REFERENCE_VERSION]]);
+const VERSIONS = new Map([
+  [VERSION, REFERENCE_VERSION],
+  [`artifacts ${VERSION}`, `artifacts ${REFERENCE_VERSION}`],
+]);
 
 /**
- * What the comparison sees of an element: its tag, its attributes (classes sorted), its own text runs (whitespace
+ * What the comparison sees of an element: its tag, its attributes (classes sorted, an `allow` policy's features
+ * spaced as one line), its own text runs (whitespace
  * collapsed, entities decoded) and its child elements. `urls` rewrites the `href`s and `src`s that differ on purpose,
  * `texts` the text runs.
  */
@@ -292,6 +300,13 @@ function shape(
   const attributes: Record<string, string> = {};
   for (const [name, value] of [...node.attributes].toSorted(([a], [b]) => a.localeCompare(b))) {
     if (name === "class") attributes[name] = value.split(/\s+/).toSorted().join(" ");
+    // The formatter writes a permissions policy one feature per line, ending each with `;`.
+    else if (name === "allow")
+      attributes[name] = value
+        .split(";")
+        .map((feature) => feature.trim())
+        .filter(Boolean)
+        .join("; ");
     else if (name === "href" || name === "src") attributes[name] = urls.get(value) ?? value;
     else attributes[name] = value;
   }
@@ -379,4 +394,71 @@ describe("templates and reference pages", () => {
       expect(textOf(got).replace(VERSION, REFERENCE_VERSION)).toEqual(textOf(want));
     },
   );
+});
+
+/**
+ * The viewer's reference page shows the artifact page's artifact, private, pinned to v2 of 3 with the menu and the
+ * history open.
+ */
+const VIEWER: ViewerView = {
+  app: "https://artifacts.example.com",
+  direct: "/_v/2/?_viewer=off",
+  data: {
+    artifact: { ...ARTIFACT.artifact, public: false, public_url: null },
+    shown: ARTIFACT.versions.versions[1] ?? V3,
+    history: ARTIFACT.versions.versions,
+  },
+};
+
+const VIEWER_CSS_LINK = "../../../packages/worker/src/gallery/viewer.css";
+
+/**
+ * The frame page inlines viewer.css, which the reference page links; and it carries the frame's script, which would
+ * load the reference page into its own iframe, where the reference page runs one that opens the menu and the history.
+ * Both are rewritten away before the comparison; the stylesheet is compared with viewer.css on its own.
+ */
+function linked(node: HtmlNode): HtmlNode {
+  const children = node.children
+    .filter((child) => child.tag !== "script")
+    .map((child) =>
+      child.tag === "style"
+        ? {
+            tag: "link",
+            attributes: new Map([
+              ["rel", "stylesheet"],
+              ["href", VIEWER_CSS_LINK],
+            ]),
+            children: [],
+            text: "",
+          }
+        : linked(child),
+    );
+  return { ...node, children };
+}
+
+const headOf = (root: HtmlNode) => root.children.flatMap((html) => html.children).find((node) => node.tag === "head");
+
+describe("the viewer's template and reference page", () => {
+  it("renders the elements, attributes and text of viewer.html", async () => {
+    const [want, got] = await Promise.all([parseHtml(viewerHtml), parseHtml(viewerPage(VIEWER).text)]);
+    expect(shape(linked(got), new Map(), VERSIONS)).toEqual(shape(linked(want), new Map()));
+  });
+
+  it("renders the text of viewer.html as a reader sees it, spaces between elements included", async () => {
+    const [want, got] = await Promise.all([parseHtml(viewerHtml), parseHtml(viewerPage(VIEWER).text)]);
+    expect(textOf(linked(got)).replace(VERSION, REFERENCE_VERSION)).toEqual(textOf(linked(want)));
+  });
+
+  it("inlines viewer.css as it is, and the reference page links it", async () => {
+    const [want, got] = await Promise.all([parseHtml(viewerHtml), parseHtml(viewerPage(VIEWER).text)]);
+    const inline = headOf(got)?.children.find((child) => child.tag === "style");
+    expect(
+      inline?.children
+        .map((child) => child.text)
+        .join("")
+        .trim(),
+    ).toBe(viewerCss.trim());
+    const link = headOf(want)?.children.find((child) => child.tag === "link");
+    expect(link?.attributes.get("href")).toBe(VIEWER_CSS_LINK);
+  });
 });

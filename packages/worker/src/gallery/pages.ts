@@ -65,7 +65,7 @@ const ICONS = html`<link rel="icon" href="/favicon.ico" sizes="32x32" />
  * The release version: the root package's, which the build inlines into the Worker as it does into the CLI. The Worker
  * is deployed from the release branch, whose package.json carries the release's version.
  */
-const VERSION: string = rootPackage.version;
+export const VERSION: string = rootPackage.version;
 
 /**
  * The header's brand (docs/gallery/design.md, "Components"): the icon and the wordmark in one link, then the version.

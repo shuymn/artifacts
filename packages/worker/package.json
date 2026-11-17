@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc && tsc -p scripts",
+    "typecheck": "tsc && tsc -p scripts && tsc -p browser",
     "test": "vitest run",
+    "test:browser": "playwright test",
     "deploy": "node scripts/deploy.ts"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "@cloudflare/vitest-plugin": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@modelcontextprotocol/client": "catalog:",
+    "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "jsonc-parser": "catalog:",
     "typescript": "catalog:",

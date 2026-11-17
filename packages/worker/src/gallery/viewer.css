@@ -1,0 +1,345 @@
+/*
+ * The viewer's stylesheet: the frame a private page opens in on its content host inlines it (design.md section 6, "The
+ * viewer frame"; docs/gallery/design.md). It declares the tokens it uses as gallery.css does, with the same names and
+ * values, and the viewer's components. The frame page loads no font, so its text is in the system's fonts.
+ */
+
+/* Tokens */
+:root {
+  color-scheme: dark;
+
+  --color-bg: #111317;
+  --color-surface: #181b21;
+  --color-border: #2a2f37;
+  --color-control-border: #6b7380;
+  --color-text: #e8eaed;
+  --color-text-muted: #9aa1ac;
+  --color-accent: #8fa8ff;
+  --color-focus: var(--color-accent);
+  --color-badge-neutral-bg: #22262d;
+  --color-danger: #f28b82;
+
+  --space-0-5: 0.125rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --border-width: 1px;
+  --focus-width: 2px;
+
+  --font-family-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-family-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-md: 0.875rem;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+}
+
+/* Typography tokens */
+
+/* type.body */
+body,
+.viewer-header__title,
+.menu-item {
+  font: var(--font-weight-regular) var(--font-size-md) / 1.5 var(--font-family-sans);
+}
+
+/* type.meta */
+.viewer-header__version,
+.viewer-menu__shown,
+.viewer-history__head,
+.viewer-menu__footer {
+  font: var(--font-weight-regular) var(--font-size-xs) / 1.4 var(--font-family-mono);
+}
+
+/* type.link */
+.viewer-header__direct {
+  font: var(--font-weight-medium) var(--font-size-sm) / 1.4 var(--font-family-sans);
+}
+
+/* Base: no browser margins or list styles, so only the rules below place anything. */
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size-adjust: from-font;
+}
+
+h1,
+p,
+ul {
+  margin: 0;
+}
+
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:focus-visible,
+.icon-button:focus-visible,
+.menu-item:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--space-0-5);
+}
+
+/* The page: the header, then the frame, which takes the rest of the viewport and is the page's own viewport. */
+.viewer {
+  display: flex;
+  flex-direction: column;
+  block-size: 100vh;
+  block-size: 100dvh;
+  overflow: hidden;
+}
+
+/*
+ * A page without a background of its own shows the browser's light canvas, as at the top level, rather than the
+ * header's dark background through the frame.
+ */
+.viewer__frame {
+  flex: 1;
+  min-block-size: 0;
+  inline-size: 100%;
+  border: 0;
+  background: Canvas;
+  color-scheme: light;
+}
+
+/*
+ * viewer-header: one line at every width. The title gives up its width first, down to its ellipsis; the icon, the
+ * version and the menu button keep theirs.
+ */
+.viewer-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-block-end: var(--border-width) solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.viewer-header__left {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+
+.viewer-header__home {
+  display: flex;
+  flex: none;
+}
+
+/* The gallery's icon at the text's size, lowered by space.0-5 as in the gallery's brand. */
+.viewer-header__icon {
+  inline-size: 1rem;
+  block-size: 1rem;
+  padding-block-start: var(--space-0-5);
+}
+
+.viewer-header__artifact {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.viewer-header__title {
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-header__version {
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+/* Shown only without script, where it stands in for the frame's script (design.md section 6, "The script"). */
+.viewer-header__direct {
+  flex: none;
+  color: var(--color-accent);
+}
+
+.viewer-header__direct:hover {
+  text-decoration: underline;
+}
+
+/* icon-button: the border sits inside the padding, as on the gallery's buttons. */
+.icon-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: calc(var(--space-1) - var(--border-width));
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+}
+
+/* Open: the script sets aria-expanded where the browser has no popover; with popover, the open menu marks it. */
+.icon-button[aria-expanded="true"] {
+  border-color: var(--color-control-border);
+  background: var(--color-badge-neutral-bg);
+}
+
+.viewer-header:has(.viewer-menu:popover-open) .icon-button {
+  border-color: var(--color-control-border);
+  background: var(--color-badge-neutral-bg);
+}
+
+.icon-button__icon {
+  inline-size: 1rem;
+  block-size: 1rem;
+}
+
+/*
+ * viewer-menu and viewer-history: panels over the page, space.1 under the header and at the header's right padding.
+ * With popover they sit in the top layer; without it the script toggles `hidden` (design.md section 6, "The script").
+ * Their display is set here, so each way of closing them hides them again: `hidden`, and with the attribute `popover`,
+ * a closed popover.
+ */
+.viewer-menu,
+.viewer-history {
+  position: fixed;
+  inset: auto;
+  inset-block-start: calc(2 * var(--space-2) + 3 * var(--space-1) + 1rem + var(--border-width));
+  inset-inline-end: var(--space-4);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  box-sizing: border-box;
+  inline-size: min(17.5rem, 100% - 2 * var(--space-4));
+  max-block-size: calc(100% - 2 * var(--space-2) - 3 * var(--space-1) - 1rem - var(--border-width) - var(--space-4));
+  margin: 0;
+  padding: var(--space-2);
+  overflow: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 8px 24px #00000080;
+}
+
+.viewer-menu[hidden],
+.viewer-history[hidden] {
+  display: none;
+}
+
+/* A browser without popover drops this rule, and the one above hides the panels. */
+.viewer-menu[popover]:not(:popover-open),
+.viewer-history[popover]:not(:popover-open) {
+  display: none;
+}
+
+/*
+ * The history opens to the menu's left, space.2 apart, its top level with the History item's: under the menu's border
+ * and padding, its head (space.1 and space.2 around a line of type.meta) and the two items before History (space.2
+ * around a line of type.body each), each part space.0-5 apart. Where the window is too narrow, it stays on screen over
+ * the menu.
+ */
+.viewer-history {
+  inset-block-start: calc(
+    8 * var(--space-2) + 4 * var(--space-1) + 3 * var(--space-0-5) + 1rem + 2 * var(--border-width) + 1.05rem + 2 *
+      1.3125rem
+  );
+  inset-inline-end: min(var(--space-4) + 17.5rem + var(--space-2), 100% - 17.5rem - var(--space-4));
+  max-block-size: calc(
+    100% - 8 * var(--space-2) - 4 * var(--space-1) - 3 * var(--space-0-5) - 1rem - 2 * var(--border-width) - 1.05rem -
+      2 * 1.3125rem - var(--space-4)
+  );
+}
+
+.viewer-menu ul,
+.viewer-history ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+}
+
+.viewer-menu__shown,
+.viewer-history__head {
+  padding: var(--space-1) var(--space-3) var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.viewer-menu__divider,
+.viewer-history__divider {
+  margin: var(--space-1) 0;
+  border: 0;
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.viewer-menu__footer {
+  padding: var(--space-1) var(--space-3);
+  color: var(--color-text-muted);
+}
+
+/* menu-item: a link, or History's button, across the panel. */
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  inline-size: 100%;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  text-align: start;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--color-badge-neutral-bg);
+}
+
+.menu-item__icon,
+.menu-item__trailing {
+  flex: none;
+  inline-size: 1rem;
+  block-size: 1rem;
+}
+
+.menu-item__label {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.menu-item__trailing {
+  color: var(--color-text-muted);
+}
+
+/* menu-item--danger is Delete, the one action that cannot be undone. */
+.menu-item--danger {
+  color: var(--color-danger);
+}
+
+/* The history marks the shown version with its check; the other versions keep the check's place. */
+.viewer-history li .menu-item__icon {
+  color: var(--color-accent);
+}
+
+.viewer-history li a:not([aria-current]) .menu-item__icon {
+  visibility: hidden;
+}

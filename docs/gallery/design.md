@@ -159,17 +159,24 @@ reference pages show each in place.
 | `notice`          |                                          | `p.notice`                                                                                                      |
 |                   | `kind=danger`                            | `p.notice.notice--danger`, in `color.danger` on `color.danger-bg`, on the delete confirmation                   |
 | `viewer-header`   |                                          | `header.viewer-header`; see below                                                                               |
-| `icon-button`     |                                          | `button.icon-button[popovertarget][aria-label]` > an inline SVG with `aria-hidden`                              |
+| `icon-button`     |                                          | `button.icon-button[popovertarget][aria-label]` > `svg.icon-button__icon[aria-hidden]`                          |
 | `viewer-menu`     |                                          | `div.viewer-menu[popover][id]`; see below                                                                       |
-| `menu-item`       |                                          | `a.menu-item`, `button.menu-item[popovertarget]` for History; `.menu-item--danger`                              |
+| `menu-item`       |                                          | `a.menu-item`, `button.menu-item[popovertarget]` for History; see below                                         |
+|                   | `kind=danger`                            | `a.menu-item.menu-item--danger`, Delete                                                                         |
 | `viewer-history`  |                                          | `div.viewer-history[popover][id]`; see below                                                                    |
 
 In `site-header`, `div.brand` is `a.brand__link` (`img.brand__icon` and the wordmark) then `span.brand__version`.
 
-In `viewer-header`, `a.viewer-header__home` (the icon) comes first, then `h1.viewer-header__title`,
-`span.viewer-header__version` and the `icon-button` that opens the menu. `viewer-menu` holds `p.viewer-menu__shown`,
-`ul[role=list]` of `li` > `menu-item`, and `p.viewer-menu__footer`. `viewer-history` holds `ul[role=list]` of `li` >
-`a`, with `aria-current="page"` on the shown version, then the link to all versions.
+In `viewer-header`, `div.viewer-header__left` comes first: `a.viewer-header__home` (the icon,
+`svg.viewer-header__icon`), then `div.viewer-header__artifact` with `h1.viewer-header__title` and
+`span.viewer-header__version`. Then a `noscript` with `a.viewer-header__direct` (Open page directly, for a browser that
+runs no script), the `icon-button` that opens the menu, and the two panels. `viewer-menu` holds `p.viewer-menu__shown`,
+`ul[role=list]` of `li` > `menu-item`, `hr.viewer-menu__divider`, a second list with Delete, another divider and
+`p.viewer-menu__footer`. `viewer-history` holds `p.viewer-history__head`, `ul[role=list]` of `li` > `a.menu-item` with
+`aria-current="page"` on the shown version, `hr.viewer-history__divider`, then the `menu-item` that links to all
+versions. A `menu-item` is `svg.menu-item__icon`, `span.menu-item__label` and, on some items, `svg.menu-item__trailing`;
+its icons are Lucide's, as `gallery.pen` draws them, in [`icons.ts`](../../packages/worker/src/gallery/icons.ts). In the
+history, the icon is a check, shown on the marked version and holding its place on the others.
 
 Screens also use `main.page` (`.page--detail` on an artifact page, `.page--narrow` on the consent pages, `.page--popup`,
 the popup window's full width with `space.6` padding at the top and sides and `space.7` below, on the confirmation
@@ -218,9 +225,10 @@ do in CSS.
 - **The viewer's header** keeps one line at every width: the title gives up its width first, down to its ellipsis,
   while the icon, the version and the menu button keep theirs. The frame below it takes the rest of the viewport.
 - **The viewer's menu** has one fixed width, whatever the title or the version, and opens under its button at the
-  header's right edge. It closes on Escape, on a click outside it in the header, and when the focus moves into the
-  page; History opens its list beside the menu, marking the shown version with `aria-current="page"`. Delete is in
-  `color.danger`. The items of the menu and the history show the focus ring of links.
+  header's right edge; the button shows it open. It closes on Escape, on a click outside it in the header, and when the
+  focus moves into the page; History opens its list beside the menu, marking the shown version with
+  `aria-current="page"`. Delete is in `color.danger`. The items of the menu and the history show the focus ring of
+  links.
 - **Confirmation pages** are laid out for a window 480 px wide, the size the viewer opens them at: the column takes the
   window's width less the padding, and the buttons wrap. In a wider window, as from the artifact page's own links, the
   column keeps `size.prose`.

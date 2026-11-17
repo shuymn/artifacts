@@ -12,11 +12,18 @@ export type HtmlNode = {
   readonly text: string;
 };
 
-const ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
+const ENTITIES: Readonly<Record<string, string>> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+  "#160": "\u00a0",
+};
 
-/** Decodes the entities the gallery writes; the reference pages write none. */
+/** Decodes the entities the gallery writes; the reference pages write only the viewer history's no-break space. */
 export function decodeEntities(text: string): string {
-  return text.replace(/&(amp|lt|gt|quot|#39);/g, (_, name: string) => ENTITIES[name] ?? "");
+  return text.replace(/&(amp|lt|gt|quot|#39|#160);/g, (_, name: string) => ENTITIES[name] ?? "");
 }
 
 /** HTML's void elements, which have no end tag (the runtime's `canHaveContent` is not available). */
@@ -51,10 +58,15 @@ export async function parseHtml(source: string): Promise<HtmlNode> {
         };
         top().children.push(node);
         if (VOID.has(element.tagName)) return;
+        // A self-closing element of inline SVG (`<rect />`) has no end tag either; the parser refuses a handler for one.
+        try {
+          element.onEndTag(() => {
+            stack.pop();
+          });
+        } catch {
+          return;
+        }
         stack.push(node);
-        element.onEndTag(() => {
-          stack.pop();
-        });
       },
     })
     .onDocument({

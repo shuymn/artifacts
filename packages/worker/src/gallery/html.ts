@@ -3,6 +3,9 @@
  * markup that `html` itself built passes through unescaped, so artifact text (titles, descriptions, paths, content
  * types) can only ever be text or a quoted attribute value. Templates quote every attribute with `"`.
  */
+import iconSvg from "./icon.svg";
+
+import viewerCss from "./viewer.css";
 
 const ESCAPES: Readonly<Record<string, string>> = {
   "&": "&amp;",
@@ -41,3 +44,17 @@ export function html(strings: TemplateStringsArray, ...values: readonly Value[])
   });
   return new Markup(text);
 }
+
+/**
+ * The viewer frame's inlined files (design.md section 6, "Assets"): files of the repository bundled with the Worker,
+ * never a request's or an artifact's text, so they pass unescaped. They are built here so that no other module can turn
+ * text into markup. The stylesheet is the content of a `<style>`, which entities would break; the icon is icon.svg as
+ * inline SVG at 16 px without its comment, hidden from assistive technology since the link around it is named.
+ */
+export const VIEWER_STYLE = new Markup(viewerCss);
+export const VIEWER_ICON = new Markup(
+  iconSvg
+    .replace(/<!--[\s\S]*?-->\s*/g, "")
+    .replace("<svg ", '<svg class="viewer-header__icon" width="16" height="16" aria-hidden="true" ')
+    .trim(),
+);

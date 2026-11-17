@@ -3107,7 +3107,7 @@
                   "type": "ref",
                   "ref": "XeCAN",
                   "name": "Text",
-                  "content": "v3 · updated 2 hours ago",
+                  "content": "v3 · updated 2026-11-16 09:12",
                   "fill": "$color.text-muted",
                   "textGrowth": "fixed-width",
                   "width": "fill_container"
@@ -3194,6 +3194,21 @@
                 },
                 "R9p6s": {
                   "content": "Make public…"
+                }
+              }
+            },
+            {
+              "id": "HeWCn",
+              "type": "ref",
+              "ref": "UKq8n",
+              "name": "Open page directly",
+              "width": "fill_container",
+              "descendants": {
+                "u6Omz": {
+                  "icon": "square-arrow-out-up-right"
+                },
+                "R9p6s": {
+                  "content": "Open page directly"
                 }
               }
             },
@@ -3335,7 +3350,7 @@
                   "fill": "$color.accent"
                 },
                 "R9p6s": {
-                  "content": "v3  latest · 2 hours ago"
+                  "content": "v3  latest · 2026-11-16"
                 }
               }
             },
@@ -3351,7 +3366,7 @@
                   "fill": "#00000000"
                 },
                 "cGwsh": {
-                  "content": "v2  Nov 14"
+                  "content": "v2  2026-11-14"
                 }
               }
             },
@@ -3367,7 +3382,7 @@
                   "fill": "#00000000"
                 },
                 "R9p6s": {
-                  "content": "v1  Nov 12"
+                  "content": "v1  2026-11-12"
                 }
               }
             },
@@ -4212,7 +4227,7 @@
           "y": 44,
           "descendants": {
             "QnMC8": {
-              "content": "v2 · published Nov 14"
+              "content": "v2 · published 2026-11-14 18:40"
             },
             "OwewJ": {
               "id": "UDqrq",
@@ -4250,7 +4265,7 @@
               "fill": "#00000000"
             },
             "Q21dqi/R9p6s": {
-              "content": "v3  latest · 2 hours ago"
+              "content": "v3  latest · 2026-11-16"
             },
             "o2TKf/f1oJyF": {
               "fill": "$color.accent"
