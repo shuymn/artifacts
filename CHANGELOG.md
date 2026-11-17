@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.10.0](https://github.com/shuymn/artifacts/compare/v0.9.0...v0.10.0) (2026-11-17)
+
+
+### Features
+
+* **cli:** export a version ([001e208](https://github.com/shuymn/artifacts/commit/001e2089d81744b5f12cbc1c2a496e3ec398e4b5))
+* **cli:** export a version ([6133c6c](https://github.com/shuymn/artifacts/commit/6133c6cd4afe883fde612f2097cf0e6dee507567))
+* **gallery:** confirm visibility and deletion ([631a0f7](https://github.com/shuymn/artifacts/commit/631a0f75722be89f888202d8d902170165b545e3))
+* **gallery:** confirm visibility and deletion ([76fde63](https://github.com/shuymn/artifacts/commit/76fde633962a8e66b0f738421997c4b4b9e6a424))
+* **worker:** export a version as a zip ([e8d5bf0](https://github.com/shuymn/artifacts/commit/e8d5bf0d76c815bc00c6686333c9ad51e1b75788))
+* **worker:** export a version as a zip ([650edad](https://github.com/shuymn/artifacts/commit/650edad7e0d9b53a269debf4c8c55631736ef4b5))
+* **worker:** frame private pages in the viewer ([f5f2bb8](https://github.com/shuymn/artifacts/commit/f5f2bb8be705139daceaeb4721a57f30bbbabc44))
+* **worker:** show private pages in the viewer frame ([cb04f16](https://github.com/shuymn/artifacts/commit/cb04f16ea2c9df5e6c5fb0c5d5333d9bef63a3c2))
+
+
+### Bug Fixes
+
+* **ci:** open the mise update PR a failed run left ([a2bab3d](https://github.com/shuymn/artifacts/commit/a2bab3db26498b8e221eec00c5107fd87a9f7ef2))
+* **ci:** open the mise update PR a failed run left ([6d7eaad](https://github.com/shuymn/artifacts/commit/6d7eaaded1c8f2910b2f859f30f68d6b77293676))
+* **cli:** keep a target the export did not create ([79b46c2](https://github.com/shuymn/artifacts/commit/79b46c2e49c45f6f9820574079b31eb0f366a1f4))
+* **cli:** name a part file export cannot remove ([e3193e1](https://github.com/shuymn/artifacts/commit/e3193e14f733e4938eefc5279ce9135fdc810fa4))
+* **cli:** remove only the copy export created ([279290c](https://github.com/shuymn/artifacts/commit/279290c147fea2dcad57cb92ddb4521471fc57bf))
+* **cli:** send again without awaiting the cancel ([6c698bd](https://github.com/shuymn/artifacts/commit/6c698bd249ba1eb6dfb208de89d4ffbcb18f5b17))
+* **cli:** start the idle limit at the request ([7a1ed01](https://github.com/shuymn/artifacts/commit/7a1ed01173db69b158c3d042c78f6c02880666ea))
+* **gallery:** name the latest version on delete ([79a3232](https://github.com/shuymn/artifacts/commit/79a323250dca81689a1c0da21a749e2153656d77))
+* **worker:** answer 503 for a failed first get ([433150c](https://github.com/shuymn/artifacts/commit/433150cd8e3c8d63bf9d79cc20e3f4a4288d0da3))
+* **worker:** honor publicOnly in the frame lookup ([d3eb096](https://github.com/shuymn/artifacts/commit/d3eb096727e11460e6374f7b714586ed2d156e8a))
+* **worker:** send confirm headers on a config 503 ([5c60a17](https://github.com/shuymn/artifacts/commit/5c60a1713e151d28817468a7f99fae67ca3056bf))
+
 ## [0.9.0](https://github.com/shuymn/artifacts/compare/v0.8.0...v0.9.0) (2026-11-16)
 
 
