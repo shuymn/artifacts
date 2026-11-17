@@ -108,6 +108,18 @@ test.describe("PL-55: the frame's script", () => {
     });
     await expect(page).toHaveTitle("two");
     expect(await page.evaluate(() => document.activeElement?.className)).toBe("icon-button");
+    // Nor does a later load take the focus when nothing has it: the frame focuses the iframe once.
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await (
+      await framedAt(page, "/two.html")
+    ).evaluate(() => {
+      location.href = "index.html";
+    });
+    await expect(page).toHaveTitle("probe");
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
   });
 
   test("follows a navigation to a pinned version and back in the header and the menu", async ({ page }) => {
