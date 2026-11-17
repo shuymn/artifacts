@@ -36,10 +36,12 @@ save git shows the file changed by that one line; Pencil opens the file with or 
 - **No script, forms or frames** (design.md, section 10). Every state is a link or plain markup. The exceptions are
   named: the consent page's form ([design.md](../design.md), section 7), which still runs no script: the browser's own
   validation and `:user-invalid` give its feedback; the confirmation forms (`confirm-public`, `confirm-delete`), which
-  post to themselves without script; and the result page's one script, allowed by its hash, which sends the window
-  that opened it back to the artifact or the gallery ([design.md](../design.md), section 10). The viewer is a frame
-  with a script by nature; its menu is a `popover` opened by `popovertarget`, which needs none. Where the browser has
-  no `popover` (Safari 16.4 to 16.6), the script opens and closes the menu and the history instead, toggling `hidden`.
+  post to themselves without script, and those pages' one script, allowed by its hash, which closes the viewer's popup
+  on Cancel instead of following its link; and the result page's one script, allowed by its hash, which sends the
+  window that opened it back to the artifact or the gallery ([design.md](../design.md), section 10). The viewer is a
+  frame with a script by nature; its menu is a `popover` opened by `popovertarget`, which needs none. Where the browser
+  has no `popover` (Safari 16.4 to 16.6), the script opens and closes the menu and the history instead, toggling
+  `hidden`.
 - **Text scales with the user's setting.** Each page has `<meta name="text-scale" content="scale">`, no rule sets a
   root `font-size`, and text and the spacing around it are in `rem`.
 - **Fonts are served by the Worker**: IBM Plex Sans and IBM Plex Mono (Latin subsets, `woff2`) in a separate
@@ -233,7 +235,7 @@ do in CSS.
   links.
 - **Confirmation pages** are laid out for a window 480 px wide, the size the viewer opens them at: the column takes the
   window's width less the padding, and the buttons wrap. In a wider window, as from the artifact page's own links, the
-  column keeps `size.prose`.
+  column keeps `size.prose`. Cancel closes the viewer's popup; in a tab it opens the artifact's page.
 - **The result page** shows its links; its script, where a window opened it, sends that window to the link marked
   `data-opener` and closes itself, so the static design shows the page as a tab without an opener keeps it.
 - **Focus.** Links, the scrollable table regions, the input, the buttons, the viewer's icon button and its menu items

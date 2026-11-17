@@ -2,7 +2,8 @@
  * The gallery's pages, the consent pages and the confirmation pages (design.md sections 7 and 10). Each template
  * produces the markup of its reference page (docs/gallery/reference/), element for element and class for class;
  * reference.test.ts holds them to it. Every value goes through `html`, which escapes it (ISO-5). No page has a frame;
- * only the consent page and the confirmation pages have a form, and only the confirmation result page a script.
+ * only the consent page and the confirmation pages have a form, and only the confirmation pages and their result page
+ * a script: one constant script each, which the CSP admits by its hash.
  */
 
 import rootPackage from "../../../../package.json" with { type: "json" };
@@ -517,8 +518,8 @@ const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 
 
 /**
  * A confirmation page's form: it posts to its own path, with the desired state (never a toggle) when it has a field,
- * and pairs its button with Cancel, a link to the artifact's page. Closing the window would need script, which these
- * pages do not run.
+ * and pairs its button with Cancel, a link to the artifact's page, which the page's script turns into closing the
+ * window when a window opened it.
  */
 function confirmForm(id: string, action: "public" | "delete", field: Value, button: Markup): Markup {
   return html`<form class="form" method="post" action="/a/${id}/${action}">
@@ -529,6 +530,24 @@ function confirmForm(id: string, action: "public" | "delete", field: Value, butt
     </div>
   </form>`;
 }
+
+/**
+ * The confirmation pages' one script (design.md section 10), the same bytes on both pages, which the CSP admits by
+ * their hash. When a window opened this one (the viewer's popup), a click on Cancel closes it instead of following the
+ * link; it follows the link in a tab without an opener, on a click with a modifier key, and where the browser keeps
+ * the window open.
+ */
+const CONFIRM_SCRIPT = html`<script>
+  document.querySelector(".form__actions a").addEventListener("click", (event) => {
+    if (window.opener === null || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    window.close();
+    if (window.closed) event.preventDefault();
+  });
+</script>`;
+
+/** The script's text, whose SHA-256 the confirmation pages' CSP names. */
+export const CONFIRM_SCRIPT_TEXT = CONFIRM_SCRIPT.text.slice("<script>".length, -"</script>".length);
 
 /** The texts of `/a/<id>/public`, by the state the form asks for. */
 const VISIBILITY = {
@@ -580,7 +599,7 @@ export function visibilityPage(view: ConfirmationArtifact): Markup {
       html`<button class="button button--primary" type="submit">${text.button}</button>`,
     )}
   </main>`;
-  return frame(text.title, null, main);
+  return frame(text.title, null, main, CONFIRM_SCRIPT);
 }
 
 /**
@@ -615,7 +634,7 @@ export function deletePage(view: ConfirmationArtifact): Markup {
       html`<button class="button button--danger" type="submit">Delete</button>`,
     )}
   </main>`;
-  return frame("Delete artifact", null, main);
+  return frame("Delete artifact", null, main, CONFIRM_SCRIPT);
 }
 
 /**

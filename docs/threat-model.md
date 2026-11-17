@@ -279,18 +279,23 @@ and the threats are the three adversaries below, not untrusted users.
   answers, and redirect origins of another form refused before the page (PL-38); `src/gallery/reference.test.ts`: the
   consent pages' markup). **Changed for OAuth:** the consent form must post and then send the browser to
   the client. The origin added to `form-action` is the one the page shows the owner, and only of the forms design.md
-  section 7 lists. The confirmation pages' policy admits a form to the page itself (`form-action 'self'`), and the
-  result page's admits its one script by hash: the Worker's own bytes, the same on every result page, which take their
-  target from an escaped link: _Enforced (main)_ in `src/confirm.ts`, `src/gallery/pages.ts`, `src/gallery/route.ts`,
-  pinned by behavior (`src/confirm.test.ts`: markup in a title on both pages and the result page; the policy on every
-  status, a misconfiguration's 503 included; the script's SHA-256 equal to the policy's after a visibility change and
-  a delete, the same bytes for two artifacts, its target per result, and its one navigation, the opener's
-  `location.replace`; `src/gallery/reference.test.ts`: the confirmation pages' markup) (PL-56, PL-58). In a browser, the
-  script sends the window that opened it to its target and closes, and a tab without an opener keeps its links:
-  pinned by behavior (`browser/viewer.spec.ts`: the viewer's popup in Chromium, Firefox and WebKit, after a visibility
-  change and a delete, and the same page opened as a tab) (PL-58). A misconfiguration (an invalid variable, or OAuth
-  without `OAUTH_KV`) answers 503 before the host is classified; that answer carries the policy on the confirmation
-  paths only, so on any other app-host path it has no CSP, and it has no body but its status text.
+  section 7 lists. The confirmation pages' policy admits a form to the page itself (`form-action 'self'`) and their
+  one script by hash, and the result page's admits its one script by hash. Each script is the Worker's own bytes, the
+  same on every page that carries it and reading no value an artifact supplied: the confirmation pages' acts only on a
+  click on Cancel, closing a window that has an opener, and the result page's takes its target from an escaped link:
+  _Enforced (main)_ in `src/confirm.ts`, `src/gallery/pages.ts`, `src/gallery/route.ts`, pinned by behavior
+  (`src/confirm.test.ts`: markup in a title on both pages and the result page, each with its one script; the policy on
+  every status, a misconfiguration's 503 included, naming on the confirmation pages exactly the hash of the script
+  they carry; each script's SHA-256 equal to its policy's, the same bytes for two artifacts; Cancel's script selecting
+  Cancel alone and closing only its own window; the result page's target per result and its one navigation, the
+  opener's `location.replace`; `src/gallery/reference.test.ts`: the confirmation pages' markup) (PL-56, PL-58). In a
+  browser, Cancel closes the popup the viewer opened without following its link, and follows it in a tab without an
+  opener; the result page sends the window that opened it to its target and closes, and a tab without an opener keeps
+  its links: pinned by behavior (`browser/viewer.spec.ts`: the viewer's popup in Chromium, Firefox and WebKit, after a
+  visibility change and a delete and on Cancel, and the same pages opened as a tab) (PL-56, PL-58). A
+  misconfiguration (an invalid variable, or OAuth without `OAUTH_KV`) answers 503 before the host is classified; that
+  answer carries the policy on the confirmation paths only, so on any other app-host path it has no CSP, and it has no
+  body but its status text.
 
 ### Serving (SRV)
 

@@ -344,4 +344,45 @@ test.describe("PL-58: the confirmation popup", () => {
     expect(tab.isClosed()).toBe(false);
     expect(page.url()).toBe(`${contentOrigin(id)}/`);
   });
+
+  test("closes the popup on Cancel without following the link or changing the artifact", async ({ page, context }) => {
+    const id = await create("Probe", probe());
+    const followed: string[] = [];
+    context.on("request", (request) => {
+      if (request.url() === `${appOrigin()}/a/${id}`) followed.push(request.url());
+    });
+    await page.goto(`${contentOrigin(id)}/`);
+    await expect(page).toHaveTitle("probe");
+    for (const [item, path] of [
+      ["Make public…", "public"],
+      ["Delete…", "delete"],
+    ] as const) {
+      await page.locator(".icon-button").click();
+      const [popup] = await Promise.all([page.waitForEvent("popup"), page.getByText(item).click()]);
+      await expect(popup).toHaveURL(`${appOrigin()}/a/${id}/${path}`);
+      await Promise.all([popup.waitForEvent("close"), popup.getByRole("link", { name: "Cancel" }).click()]);
+    }
+    expect(followed).toEqual([]);
+    expect(page.url()).toBe(`${contentOrigin(id)}/`);
+    // Still private, and still there.
+    await page.reload();
+    await expect(page.locator("#viewer-menu a[target=_blank]").first()).toHaveText("Make public…");
+  });
+
+  test("follows Cancel as its link in a tab without an opener", async ({ page, context }) => {
+    const id = await create("Probe", probe());
+    // A blocked popup: the item is followed as its link, a new tab without an opener.
+    await page.addInitScript(() => {
+      window.open = () => null;
+    });
+    await page.goto(`${contentOrigin(id)}/`);
+    await expect(page).toHaveTitle("probe");
+    await page.locator(".icon-button").click();
+    const [tab] = await Promise.all([context.waitForEvent("page"), page.getByText("Delete…").click()]);
+    await expect(tab).toHaveURL(`${appOrigin()}/a/${id}/delete`);
+    expect(await tab.evaluate(() => window.opener)).toBeNull();
+    await tab.getByRole("link", { name: "Cancel" }).click();
+    await expect(tab).toHaveURL(`${appOrigin()}/a/${id}`);
+    expect(tab.isClosed()).toBe(false);
+  });
 });
