@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.1](https://github.com/shuymn/artifacts/compare/v0.10.0...v0.10.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **gallery:** close the confirmation popup on cancel ([d456c48](https://github.com/shuymn/artifacts/commit/d456c487b38e9b93aa8c4aaa60d40f787ebc750c))
+* **gallery:** drop arrows from in-place menu items ([37c77a1](https://github.com/shuymn/artifacts/commit/37c77a103bc6494e0deed49dc8b7720f00530a3f))
+* **gallery:** viewer follow-ups ([b342452](https://github.com/shuymn/artifacts/commit/b34245234ee8b4808118d31f6d9160f874f53cf2))
+* **worker:** center the confirmation popup ([a688fa4](https://github.com/shuymn/artifacts/commit/a688fa4d3b2c1b41768298f4459c09850cc010ca))
+* **worker:** keep the popup offset without an origin ([231e18e](https://github.com/shuymn/artifacts/commit/231e18e30234fac2061ec22f83f658192e5564f8))
+* **worker:** let the framed page follow its scheme ([672b0a6](https://github.com/shuymn/artifacts/commit/672b0a6ac29901acab73c536885330d243ce8bd2))
+
 ## [0.10.0](https://github.com/shuymn/artifacts/compare/v0.9.0...v0.10.0) (2026-11-17)
 
 
