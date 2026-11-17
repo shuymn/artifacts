@@ -387,23 +387,28 @@ describe("PL-62: streaming", () => {
     expect(logEvents(logs.lines).filter((event) => event.event === "operation.failed")).toEqual([]);
   });
 
+  // A read that fails or stalls is unavailable; an object the version lists that R2 does not hold is internal.
   it("answers an operation error when the first get fails, stalls or finds no object", async () => {
     const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
     const id = await publish(world, THREE);
     const bucket = new BucketProbe();
     world.env = { ...world.env, FILES: bucket.binding };
-    const outcomes: [() => Promise<unknown>, number, string][] = [
-      [never, 503, "unavailable"],
-      [() => Promise.reject(new Error("get failed")), 500, "internal"],
-      [() => Promise.resolve(null), 500, "internal"],
+    const outcomes: [() => Promise<unknown>, number, string, string][] = [
+      [never, 503, "unavailable", "timeout"],
+      [() => Promise.reject(new Error("get failed")), 503, "unavailable", "error"],
+      [() => Promise.resolve(null), 500, "internal", "object_missing"],
     ];
-    for (const [behavior, status, code] of outcomes) {
+    for (const [behavior, status, code, reason] of outcomes) {
+      const logs = captureLogs();
       bucket.behave = (op) => (op === "get" ? behavior() : undefined);
       const response = await rest(world, id, 1);
       expect(response.status).toBe(status);
       expect(response.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
       expect(await response.json()).toMatchObject({ error: { code } });
       expect((await download(world, `/a/${id}/v/1/export`)).status).toBe(status);
+      const failed = { event: "operation.failed", reason, error: "other", artifact: id };
+      expect(logEvents(logs.lines).filter((event) => event.event === "operation.failed")).toEqual([failed, failed]);
+      vi.restoreAllMocks();
     }
   });
 

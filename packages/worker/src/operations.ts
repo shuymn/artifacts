@@ -597,11 +597,21 @@ export async function exportVersion(deps: OperationDeps, input: ExportInput): Pr
 
     const store = objectStore(deps);
     const open = async (file: FileRow) => (await getObject(store, id, file.sha256)).body;
+    let firstBody: ReadableStream<Uint8Array>;
+    try {
+      firstBody = await open(first);
+    } catch (error) {
+      // A read that fails or stalls is `unavailable` (design.md section 8, "Errors"); an object the version lists that
+      // R2 does not hold is an inconsistency, `internal` as `guarded` answers it.
+      if (!(error instanceof StorageError) || error.failure === "object_missing") throw error;
+      logEvent("operation.failed", { reason: error.failure, error: errorName(error), artifact: id });
+      return fail({ code: "unavailable" });
+    }
     const body = archiveStream(
       {
         files,
         modified: new Date(version.created_at),
-        first: await open(first),
+        first: firstBody,
         open,
         read: (reader, size) => streamBody(store, reader, size),
         failed: (error) =>
