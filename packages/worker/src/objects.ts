@@ -166,6 +166,31 @@ export async function readBody(store: ObjectStore, object: R2ObjectBody, size: n
   }
 }
 
+/**
+ * A fetched object's body as it arrives, each chunk read under the R2 timeout: exactly `size` bytes, its stored size,
+ * or a StorageError as soon as the bytes differ. The reader is cancelled on every exit (the end, a failure, a stall,
+ * and a consumer's `return` or `throw`), so no body stays open; a reader its holder cancelled ends with its bytes short.
+ */
+export async function* streamBody(
+  store: ObjectStore,
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  size: number,
+): AsyncGenerator<Uint8Array, void, undefined> {
+  let length = 0;
+  try {
+    for (;;) {
+      const { done, value } = await call(store, () => reader.read());
+      if (done) break;
+      length += value.byteLength;
+      if (length > size) throw new StorageError("error");
+      yield value;
+    }
+    if (length !== size) throw new StorageError("error");
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+
 /** VER-4: deletes every object under the artifact's prefix, a page at a time. */
 export async function deletePrefix(store: ObjectStore, id: ArtifactId): Promise<void> {
   const prefix = objectPrefix(id);

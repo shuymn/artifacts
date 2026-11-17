@@ -1,13 +1,16 @@
 /**
- * The gallery on the app host (design.md section 10): `/`, `/archived` and `/a/<id>`, and the stylesheets, fonts and
- * icon they load. index.ts has checked the method (ISO-3) and Access (ACC-1) before this runs, and adds the gallery's
- * CSP to every app-host response, these included (`withGalleryPolicy`; ISO-5). Every response here carries the app
- * host's headers (`private, no-cache`, CORP, nosniff, no referrer; ISO-2), except that a fingerprinted asset is cached
- * as immutable (design.md section 6). A deleted or unknown artifact, a malformed cursor, an asset path that names no
- * current asset, and any other path answer 404.
+ * The gallery on the app host (design.md section 10): `/`, `/archived` and `/a/<id>`, the stylesheets, fonts and icon
+ * they load, and a version's download `/a/<id>/v/<n>/export`. index.ts has checked the method (ISO-3) and Access with
+ * the app audience (ACC-1) before this runs, and adds the gallery's CSP to every app-host response, these included
+ * (`withGalleryPolicy`; ISO-5). Every response here carries the app host's headers (`private, no-cache`, CORP, nosniff,
+ * no referrer; ISO-2), except that a fingerprinted asset is cached as immutable (design.md section 6) and a download is
+ * `no-store` (section 8). A deleted or unknown artifact, a malformed cursor, an asset path that names no current asset,
+ * and any other path answer 404.
  */
-import type { OperationErrorCode } from "../errors.ts";
-import { getForGallery, listForGallery, type ArchiveCounts, type OperationDeps } from "../operations.ts";
+import { archiveResponse } from "../archive.ts";
+import { errorBody, type OperationError, type OperationErrorCode } from "../errors.ts";
+import { exportVersion, getForGallery, listForGallery, type ArchiveCounts, type OperationDeps } from "../operations.ts";
+import { parseVersionNumber } from "../paths.ts";
 import { browserHeaders, plainResponse, serveAsset } from "../serve.ts";
 import { FAVICON, findAsset, GALLERY_ASSETS, type FingerprintedAssets } from "./assets.ts";
 import type { Markup } from "./html.ts";
@@ -53,11 +56,14 @@ const LISTS: ReadonlyMap<string, Section> = new Map([
 ]);
 /** `/a/<id>`; the operation answers `not_found` for anything that is not an artifact ID. */
 const ARTIFACT_PATH = /^\/a\/([^/]+)$/;
+/** `/a/<id>/v/<n>/export`, `<n>` a canonical decimal as in `/_v/<n>/`. */
+const EXPORT_PATH = /^\/a\/([^/]+)\/v\/([^/]+)\/export$/;
 
 const STATUS: Readonly<Record<OperationErrorCode, number>> = {
   invalid_request: 404,
   not_found: 404,
   version_conflict: 500,
+  not_extractable: 409,
   unavailable: 503,
   internal: 500,
 };
@@ -91,6 +97,26 @@ export function serveGalleryAsset(
   return serveAsset(request, found.asset, found.current ? IMMUTABLE_HEADERS : HEADERS);
 }
 
+/**
+ * A refused download. `not_extractable` names the paths, which can hold any character but NUL, so it answers with the
+ * operation's JSON object; any other error as the gallery's pages do.
+ */
+function exportRefusal(error: OperationError): Response {
+  if (error.code !== "not_extractable") return refusal(STATUS[error.code]);
+  return new Response(JSON.stringify(errorBody(error)), {
+    status: STATUS[error.code],
+    headers: { "Content-Type": "application/json; charset=utf-8", ...HEADERS },
+  });
+}
+
+/** Version n's archive as a download (design.md section 8, "Export"); a `HEAD` reads no object. */
+async function serveExport(request: Request, deps: OperationDeps, id: string, rawVersion: string): Promise<Response> {
+  const version = parseVersionNumber(rawVersion);
+  if (version === undefined) return refusal(404);
+  const archive = await exportVersion(deps, { id, version, body: request.method !== "HEAD" });
+  return archive.ok ? archiveResponse(archive.value, HEADERS) : exportRefusal(archive.error);
+}
+
 export async function serveGallery(request: Request, url: URL, deps: OperationDeps): Promise<Response> {
   const path = url.pathname;
   const asset = serveGalleryAsset(request, path);
@@ -115,6 +141,10 @@ export async function serveGallery(request: Request, url: URL, deps: OperationDe
     const artifact = await getForGallery(deps, { id, limit: PAGE_SIZE, cursor });
     if (!artifact.ok) return refusal(STATUS[artifact.error.code]);
     return page(request, artifactPage(chrome(artifact.value.counts), artifact.value));
+  }
+  const download = EXPORT_PATH.exec(path);
+  if (download?.[1] !== undefined && download[2] !== undefined) {
+    return serveExport(request, deps, download[1], download[2]);
   }
   return refusal(404);
 }

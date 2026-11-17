@@ -6,6 +6,7 @@ export const OPERATION_ERRORS = [
   "invalid_request",
   "not_found",
   "version_conflict",
+  "not_extractable",
   "unavailable",
   "internal",
 ] as const;
@@ -74,6 +75,8 @@ export type OperationError =
   | { readonly code: "invalid_request"; readonly issues: readonly Issue[] }
   | { readonly code: "not_found"; readonly subject?: "grant" }
   | { readonly code: "version_conflict"; readonly latestVersion: number }
+  /** An exported version's paths that cannot be extracted as stored, in path order (design.md section 8, "Export"). */
+  | { readonly code: "not_extractable"; readonly paths: readonly string[] }
   | { readonly code: "unavailable" }
   | { readonly code: "internal" };
 
@@ -88,6 +91,7 @@ export const ERROR_STATUS: Record<OperationErrorCode, number> = {
   invalid_request: 400,
   not_found: 404,
   version_conflict: 409,
+  not_extractable: 409,
   unavailable: 503,
   internal: 500,
 };
@@ -95,6 +99,7 @@ export const ERROR_STATUS: Record<OperationErrorCode, number> = {
 const ERROR_MESSAGES: Record<Exclude<OperationErrorCode, "invalid_request">, string> = {
   not_found: "no live artifact, version or file matches",
   version_conflict: "base_version is not the latest version",
+  not_extractable: "the version has paths that cannot be extracted as stored; paths lists each",
   unavailable: "the service is unavailable; try again",
   internal: "internal error",
 };
@@ -105,6 +110,7 @@ export type ErrorBody = {
     readonly message: string;
     readonly issues?: readonly Issue[];
     readonly latest_version?: number;
+    readonly paths?: readonly string[];
   };
 };
 
@@ -119,6 +125,8 @@ export function errorBody(error: OperationError): ErrorBody {
     }
     case "version_conflict":
       return { error: { code: error.code, message: ERROR_MESSAGES[error.code], latest_version: error.latestVersion } };
+    case "not_extractable":
+      return { error: { code: error.code, message: ERROR_MESSAGES[error.code], paths: error.paths } };
     case "not_found":
       return {
         error: { code: error.code, message: error.subject === "grant" ? "no grant matches" : ERROR_MESSAGES.not_found },

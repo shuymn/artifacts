@@ -3,6 +3,7 @@
  * decodes a request into an operation's input, calls the operation and encodes its result; operation errors and
  * transport errors share the JSON shape `{ "error": { "code", "message", … } }`.
  */
+import { archiveResponse } from "./archive.ts";
 import { JSON_BODY_BYTES, PUBLISH_BODY_BYTES, readFormData, readJson } from "./body.ts";
 import type { Config } from "./config.ts";
 import type { Publisher } from "./credentials.ts";
@@ -12,6 +13,7 @@ import { isArtifactId } from "./id.ts";
 import {
   createArtifact,
   deleteArtifact,
+  exportVersion,
   getArtifact,
   listArtifacts,
   listVersions,
@@ -264,6 +266,12 @@ async function file(
   return new Response(object.value.body, { headers });
 }
 
+/** `GET …/versions/{n}/export`: the version's ZIP archive, streamed; a `HEAD` reads no object (section 8, "Export"). */
+async function exportArchive(request: Request, deps: OperationDeps, id: string, version: number): Promise<Response> {
+  const archive = await exportVersion(deps, { id, version, body: request.method !== "HEAD" });
+  return archive.ok ? archiveResponse(archive.value, API_HEADERS) : operationError(archive.error);
+}
+
 const noContent = () => new Response(null, { status: 204, headers: API_HEADERS });
 
 /** The grants routes (section 8), where OAuth is on; none elsewhere. */
@@ -313,6 +321,9 @@ function route(url: URL, config: Config): Handlers | undefined {
   const version = parseVersionNumber(segments[5] ?? "");
   if (version === undefined) return undefined;
   if (segments.length === 6) return { GET: async (_r, deps) => encode(await getArtifact(deps, { id, version })) };
+  if (segments.length === 7 && segments[6] === "export") {
+    return { GET: (r, deps) => exportArchive(r, deps, id, version) };
+  }
   if (segments[6] !== "files" || segments.length < 8) return undefined;
   const rawPath = segments.slice(7).join("/");
   return { GET: (r, deps) => file(r, url, deps, id, version, rawPath) };

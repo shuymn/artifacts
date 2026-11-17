@@ -29,10 +29,15 @@ export default defineConfig({
         test: {
           name: "worker",
           include: ["src/**/*.test.ts"],
+          exclude: ["src/e2e.test.ts"],
           setupFiles: ["./src/test-setup.ts"],
           // Vitest empties CSS it does not process; the token test reads gallery.css as text.
           css: { include: [/gallery\.css/] },
         },
+      },
+      {
+        // The Worker in wrangler's test harness, reached over HTTP from Node, as the CLI's end-to-end test reaches it.
+        test: { name: "e2e", include: ["src/e2e.test.ts"], environment: "node" },
       },
       {
         // The build and deployment scripts, in Node as they run.
