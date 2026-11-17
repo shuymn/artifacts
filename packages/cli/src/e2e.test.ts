@@ -3,7 +3,7 @@
 // the archive `export` wrote with Info-ZIP's `unzip`. The harness's dispatch keeps each request's absolute URL, so the
 // Worker sees the configured `*.localhost` hosts without DNS.
 import { execFile } from "node:child_process";
-import { readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -580,7 +580,7 @@ describe("export", () => {
       expect(await unzipped(target)).toEqual(bytes(SITE));
     });
 
-    it("keeps a target created during the download, which the exclusive copy does not replace", async () => {
+    it("keeps a target created during the download, which the copy's exclusive create does not replace", async () => {
       const id = await published("Export by copy, racing another file");
       const directory = await tempDir();
       const target = join(directory, "out.zip");
@@ -595,6 +595,43 @@ describe("export", () => {
       });
       expect(links).toBe(1);
       expect([await readdir(directory), await readFile(target, "utf8")]).toEqual([["out.zip"], "theirs"]);
+    });
+
+    // Permission checks do not hold for root, which these tests need to make the part unreadable.
+    const root = process.getuid?.() === 0;
+
+    it.skipIf(root)("never touches a target its create failed on, even when the part cannot be read", async () => {
+      const id = await published("Export by copy, create refused");
+      const directory = await tempDir();
+      const target = join(directory, "out.zip");
+      const ran = await run(["export", id, "--version", "1", "-o", target], {
+        link: async (part) => {
+          // Another program takes the name and the part turns unreadable before the copy starts.
+          await writeFile(target, "theirs");
+          await chmod(part, 0);
+          return refused(part, target);
+        },
+      });
+      expect(ran).toMatchObject({
+        status: 1,
+        stderr: `artifacts: ${JSON.stringify(target)} appeared during the download; export left it as it is and wrote nothing there\n`,
+      });
+      expect([await readdir(directory), await readFile(target, "utf8")]).toEqual([["out.zip"], "theirs"]);
+    });
+
+    it.skipIf(root)("removes the target it created when the copy fails after creating it", async () => {
+      const id = await published("Export by copy, copy failed");
+      const directory = await tempDir();
+      const target = join(directory, "out.zip");
+      const ran = await run(["export", id, "--version", "1", "-o", target], {
+        link: async (part) => {
+          // The part turns unreadable: the target is created, then the copy cannot read the part.
+          await chmod(part, 0);
+          return refused(part, target);
+        },
+      });
+      expect(ran).toMatchObject({ status: 1, stderr: `artifacts: cannot write ${JSON.stringify(target)} (EACCES)\n` });
+      expect(await readdir(directory)).toEqual([]);
     });
   });
 });

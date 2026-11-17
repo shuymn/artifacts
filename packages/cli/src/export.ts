@@ -2,11 +2,11 @@
  * `export` (design.md section 9): writes a version's archive (section 8, "Export") to a file without overwriting
  * anything. The archive goes to `<file>.<random>.part` beside the target, created exclusively; only once the stream
  * has ended with the length `Content-Length` announced is the part linked to the target, which fails when the target
- * exists, and removed. Where the file system makes no hard links, an exclusive copy stands in for the link. On any
- * failure the command removes only what it created.
+ * exists, and removed. Where the file system makes no hard links, the target is created exclusively and the part's
+ * bytes copied into it. On any failure the command removes only what it created.
  */
 import { randomBytes } from "node:crypto";
-import { constants, copyFile, link, lstat, open, unlink, type FileHandle } from "node:fs/promises";
+import { link, lstat, open, unlink, type FileHandle } from "node:fs/promises";
 
 import type { Api } from "./api.ts";
 import { CliError, codeOf } from "./errors.ts";
@@ -127,10 +127,26 @@ async function download(
   }
 }
 
+/** Copies the part's bytes into `into`, the target's handle, at its current position. */
+async function copyInto(part: string, into: FileHandle): Promise<void> {
+  const from = await open(part, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    for (;;) {
+      const { bytesRead } = await from.read(buffer, 0, buffer.byteLength, null);
+      if (bytesRead === 0) return;
+      await into.writeFile(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    await from.close();
+  }
+}
+
 /**
- * Puts the part at the target without replacing anything there. A hard link fails when the target exists; where the
- * file system makes none (FAT, exFAT, a network share), `copyFile` with `COPYFILE_EXCL` stands in, which fails the same
- * way.
+ * Puts the part at the target without replacing anything there. A hard link fails when the target exists. Where the
+ * file system makes none (FAT, exFAT, a network share), the target is created with `wx`, which fails the same way, and
+ * only once that succeeds is it this command's: the part's bytes go into that handle, and a failure after it removes
+ * the target. A failed create leaves the target alone, whatever the error.
  */
 async function place(part: string, target: string, makeLink: ExportOptions["link"]): Promise<void> {
   const shown = JSON.stringify(target);
@@ -142,14 +158,25 @@ async function place(part: string, target: string, makeLink: ExportOptions["link
   } catch (error) {
     if (codeOf(error) === "EEXIST") throw appeared();
   }
+  let copy: FileHandle;
   try {
-    await copyFile(part, target, constants.COPYFILE_EXCL);
+    copy = await open(target, "wx");
   } catch (error) {
     if (codeOf(error) === "EEXIST") throw appeared();
-    // The copy creates the target exclusively, so a file there after any other failure is its own.
-    await unlink(target).catch(() => undefined);
     throw new CliError(`cannot write ${shown} (${codeOf(error) ?? "error"})`);
   }
+  let failure: unknown;
+  try {
+    await copyInto(part, copy);
+  } catch (error) {
+    failure = error;
+  }
+  await copy.close().catch((error: unknown) => {
+    failure ??= error;
+  });
+  if (failure === undefined) return;
+  await unlink(target).catch(() => undefined);
+  throw new CliError(`cannot write ${shown} (${codeOf(failure) ?? "error"})`);
 }
 
 /**
