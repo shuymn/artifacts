@@ -21,13 +21,24 @@ const PAGE_SIZE = 50;
 const DAY_MS = 86_400_000;
 
 /**
- * ISO-5: nothing but the gallery's own stylesheets, fonts and icon loads (Firefox checks a page's icon against
- * `img-src`); no script runs, no frame shows, and no form submits, except the consent page's to itself and to the
- * client's redirect origin (`formAction`, design.md section 7).
+ * What a page adds to the gallery's CSP (ISO-5). `forms`: its form posts to the page itself, and to `origin` when given
+ * (the consent page's client, design.md section 7; the confirmation forms post to themselves, section 10). `script`:
+ * the `sha256-…` source of its one inline script (the confirmation result page's).
  */
-function contentSecurityPolicy(formAction: string | undefined): string {
-  const forms = formAction === undefined ? "'none'" : `'self' ${formAction}`;
-  return `default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action ${forms}; frame-ancestors 'none'`;
+export type PagePolicy = {
+  readonly forms?: { readonly origin?: string };
+  readonly script?: string;
+};
+
+/**
+ * ISO-5: nothing but the gallery's own stylesheets, fonts and icon loads (Firefox checks a page's icon against
+ * `img-src`); no frame shows; no script runs and no form submits, except what `policy` admits.
+ */
+function contentSecurityPolicy(policy: PagePolicy): string {
+  const origin = policy.forms?.origin;
+  const forms = policy.forms === undefined ? "'none'" : origin === undefined ? "'self'" : `'self' ${origin}`;
+  const scripts = policy.script === undefined ? "" : `script-src '${policy.script}'; `;
+  return `default-src 'none'; ${scripts}style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action ${forms}; frame-ancestors 'none'`;
 }
 
 const HEADERS = browserHeaders("private");
@@ -41,12 +52,12 @@ const IMMUTABLE_HEADERS = { ...HEADERS, "Cache-Control": "private, max-age=31536
 /**
  * ISO-5: the app host's response with the gallery's CSP, replacing any other. index.ts applies it to every app-host
  * response at its outer boundary, so refusals before the gallery (405, 403, 503) and failures (500) carry it as well as
- * pages and assets. `formAction` is the consent page's redirect origin, which consent.ts has checked; every other
- * response keeps `form-action 'none'`.
+ * pages and assets. `policy` comes only from the consent page, with the redirect origin consent.ts has checked, and
+ * from the confirmation pages; every other response keeps `form-action 'none'` and no script.
  */
-export function withGalleryPolicy(response: Response, formAction?: string): Response {
+export function withGalleryPolicy(response: Response, policy: PagePolicy = {}): Response {
   const answer = new Response(response.body, response);
-  answer.headers.set("Content-Security-Policy", contentSecurityPolicy(formAction));
+  answer.headers.set("Content-Security-Policy", contentSecurityPolicy(policy));
   return answer;
 }
 

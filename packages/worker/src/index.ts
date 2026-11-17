@@ -187,7 +187,9 @@ export function createWorker(deps: WorkerDeps): Worker {
           case "app": {
             if (url.pathname === AUTHORIZE_PATH) {
               const answer = await authorize(request, url, env, config, deps);
-              return withGalleryPolicy(withConsentHeaders(answer.response), answer.formAction);
+              const origin = answer.formAction;
+              const policy = origin === undefined ? {} : { forms: { origin } };
+              return withGalleryPolicy(withConsentHeaders(answer.response), policy);
             }
             return withGalleryPolicy(await browser(request, url, env, config, deps, "app", undefined));
           }
