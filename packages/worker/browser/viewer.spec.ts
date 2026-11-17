@@ -1,5 +1,6 @@
-// The viewer frame's script in browsers (design.md section 6, "The script"; PL-55), and the confirmation popup it
-// opens (section 10; PL-58's browser part), against the Worker in the local runtime.
+// The viewer frame's script in browsers (design.md section 6, "The script"; PL-55), the page's color scheme in the
+// frame (section 6, "Color scheme"; PL-54's browser part), and the confirmation popup the script opens (section 10;
+// PL-56's and PL-58's browser parts), against the Worker in the local runtime.
 import { expect, test, type Frame, type Page } from "@playwright/test";
 
 import { appOrigin, contentOrigin, create, update, withoutPopover } from "./support.ts";
@@ -32,6 +33,13 @@ async function framedAt(page: Page, path: string): Promise<Frame> {
   const frame = find();
   if (frame === undefined) throw new Error(`no frame at ${path}`);
   return frame;
+}
+
+/** Whether an opaque `rgb()` color is light or dark, by the sum of its channels. */
+function lightness(color: string): "light" | "dark" | undefined {
+  const channels = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(color)?.slice(1).map(Number);
+  if (channels === undefined) return undefined;
+  return channels.reduce((sum, channel) => sum + channel, 0) >= 3 * 128 ? "light" : "dark";
 }
 
 /** Whether a panel shows, by its box: popover and `hidden` both remove it from the layout. */
@@ -236,6 +244,30 @@ test.describe("PL-55: the frame's script", () => {
       await expect(page.locator("#viewer-menu")).toBeHidden();
     });
   });
+});
+
+// Design.md section 6, "Color scheme": the page follows the browser's preference as at the top level; the header does
+// not.
+test.describe("PL-54: the page's color scheme", () => {
+  for (const scheme of ["light", "dark"] as const) {
+    test(`shows the page in the browser's ${scheme} color scheme under the dark header`, async ({ page }) => {
+      const id = await create("Probe", probe());
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.goto(`${contentOrigin(id)}/`);
+      await expect(page).toHaveTitle("probe");
+      const inner = await framedAt(page, "/");
+      expect(await inner.evaluate(() => matchMedia("(prefers-color-scheme: light)").matches)).toBe(scheme === "light");
+      expect(await inner.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(scheme === "dark");
+      // What a page without a background of its own shows through: the canvas in the page's scheme.
+      const backgrounds = await page.evaluate(() =>
+        [".viewer__frame", ".viewer-header"].map((selector) => {
+          const element = document.querySelector(selector);
+          return element === null ? "" : getComputedStyle(element).backgroundColor;
+        }),
+      );
+      expect(backgrounds.map(lightness)).toEqual([scheme, "dark"]);
+    });
+  }
 });
 
 test.describe("PL-58: the confirmation popup", () => {

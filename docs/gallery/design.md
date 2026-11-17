@@ -32,7 +32,8 @@ save git shows the file changed by that one line; Pencil opens the file with or 
 ## Ground rules
 
 - **Dark only.** The owner uses a dark color scheme, so the gallery has one theme (`color-scheme: dark`). A light theme
-  would be a second token set with the same names.
+  would be a second token set with the same names. The viewer's header is dark too; the page in its frame follows the
+  browser's light or dark preference, as at the top level ([design.md](../design.md), section 6, "Color scheme").
 - **No script, forms or frames** (design.md, section 10). Every state is a link or plain markup. The exceptions are
   named: the consent page's form ([design.md](../design.md), section 7), which still runs no script: the browser's own
   validation and `:user-invalid` give its feedback; the confirmation forms (`confirm-public`, `confirm-delete`), which
