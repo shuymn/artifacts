@@ -28,6 +28,17 @@ function without(world: World, key: "API_TOKENS" | "OAUTH_KV"): void {
   world.env = env;
 }
 
+/** The policy a gallery page carries (ISO-5), read from a working Worker's app-host 404. */
+async function galleryPolicy(): Promise<string> {
+  const world = new World();
+  const response = await world.fetch(`https://${APP_HOST}/nothing`, {
+    headers: { "Cf-Access-Jwt-Assertion": await world.jwt({ aud: APP_AUD }) },
+  });
+  const policy = response.headers.get("Content-Security-Policy");
+  if (policy === null) throw new Error("the gallery's 404 carries no policy");
+  return policy;
+}
+
 const LOCAL_HOSTS = {
   APP_HOST: "app.localhost:8787",
   API_HOST: "api.localhost:8787",
@@ -293,6 +304,7 @@ describe("PL-46: optional API_TOKENS", () => {
   it.each(["", "not json", "[]", JSON.stringify({ codex: "x" })])(
     "answers 503 on every host for API_TOKENS %j, without storage",
     async (value) => {
+      const gallery = await galleryPolicy();
       const world = new World({ vars: { API_TOKENS: value } });
       const { db, bucket } = untouchable(world);
       const logs = captureLogs();
@@ -305,7 +317,9 @@ describe("PL-46: optional API_TOKENS", () => {
       ];
       for (const url of urls) {
         const response = await world.fetch(url, { headers: { Authorization: `Bearer ${TOKENS.codex}` } });
-        expect({ url, status: response.status }).toEqual({ url, status: 503 });
+        // The host class is unknown, so every host's answer carries the app host's policy (ISO-5).
+        const policy = response.headers.get("Content-Security-Policy");
+        expect({ url, status: response.status, policy }).toEqual({ url, status: 503, policy: gallery });
       }
       expect(db.batches).toBe(0);
       expect(bucket.calls).toEqual([]);
@@ -320,6 +334,7 @@ describe("PL-46: optional API_TOKENS", () => {
 // PL-47, section 11, ACC-2: OAuth is on outside a localhost configuration, and needs its storage there.
 describe("PL-47: OAuth storage and localhost", () => {
   it("answers 503 on every host without OAUTH_KV outside a localhost configuration, before Access or storage", async () => {
+    const gallery = await galleryPolicy();
     const world = new World();
     const created = await world.created({ title: "t", files: { "index.html": "page" } });
     await world.patch(created.artifact.id, { public: true });
@@ -339,7 +354,10 @@ describe("PL-47: OAuth storage and localhost", () => {
       "https://example.com/",
     ]) {
       const response = await world.fetch(url, { headers });
-      expect({ url, status: response.status }).toEqual({ url, status: 503 });
+      // The configuration parsed, so only the app host's answer carries its policy (ISO-5).
+      const policy = response.headers.get("Content-Security-Policy");
+      const expected = new URL(url).host === APP_HOST ? gallery : null;
+      expect({ url, status: response.status, policy }).toEqual({ url, status: 503, policy: expected });
       expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
     }
     expect(db.batches).toBe(0);

@@ -183,13 +183,16 @@ async function confirm(
 }
 
 /**
- * A refusal before the host is classified, which an invalid configuration prevents: the private class's headers, and
- * on a confirmation path also that route's headers and the gallery's policy without forms or scripts (design.md
- * section 10), whichever host the request reached, since they only restrict.
+ * A misconfiguration's 503 before routing (design.md section 11): the private class's headers on every host, and the
+ * gallery's policy (ISO-5) where the request may have reached the app host: `app` is true when the configuration did
+ * not parse, so the host class is unknown, or when it did and classifies the host as the app host. A confirmation path
+ * also gets that route's headers and the policy without forms or scripts (design.md section 10), whichever host the
+ * request reached. Each only restricts: the answer is plain text that loads nothing.
  */
-function unconfigured(url: URL): Response {
+function unconfigured(url: URL, app: boolean): Response {
   const response = plainResponse("private", 503);
-  return confirmationOf(url.pathname) === undefined ? response : withGalleryPolicy(withConfirmHeaders(response));
+  if (confirmationOf(url.pathname) !== undefined) return withGalleryPolicy(withConfirmHeaders(response));
+  return app ? withGalleryPolicy(response) : response;
 }
 
 /** The Worker's fetch handler; the execution context goes to the OAuth library only, and `cf` is not used. */
@@ -205,17 +208,17 @@ export function createWorker(deps: WorkerDeps): Worker {
           reason: parsed.code,
           ...(parsed.variable === undefined ? {} : { variable: parsed.variable }),
         });
-        // The host class is unknown, so the answer carries the private class's headers.
-        return unconfigured(url);
+        // The host class is unknown, so the answer carries the private class's headers and the app host's policy.
+        return unconfigured(url, true);
       }
       const { config } = parsed;
+      const route = classifyHost(url.host, config);
       // Section 11: with OAuth on, a Worker without its storage answers as for an invalid variable, so a deployment
       // never runs with OAuth silently off.
       if (config.oauth && env.OAUTH_KV === undefined) {
         logEvent("config.invalid", { reason: "missing", binding: "OAUTH_KV" });
-        return unconfigured(url);
+        return unconfigured(url, route.kind === "app");
       }
-      const route = classifyHost(url.host, config);
       try {
         switch (route.kind) {
           case "unmatched":

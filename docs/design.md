@@ -1279,6 +1279,12 @@ The steps are in [operations.md](operations.md).
   million KV reads and 1 million writes a month ([KV pricing](https://developers.cloudflare.com/kv/platform/pricing/));
   a request with an OAuth token costs two reads, its token and its grant's revocation record, and a sign-in or a
   refresh a few writes.
+- **Misconfiguration:** an invalid variable, or OAuth without `OAUTH_KV`, answers 503 in plain text before routing,
+  logs `config.invalid` and touches no storage. The answer carries the private class's headers on every host and the
+  gallery's CSP (section 10, ISO-5) on the app host. With a variable invalid, the Worker cannot tell the app host from
+  the others, so every host's answer carries the policy, which only restricts an answer that is plain text and loads
+  nothing; with the configuration parsed and `OAUTH_KV` missing, only the app host's does. On a confirmation path the
+  answer also carries that route's headers and policy (section 10), whichever host the request reached.
 - **Releases:** `main` is never deployed. release-please keeps a release PR open; merging it tags a version as a
   draft release, a workflow builds the CLI binaries, attaches them and publishes it, then fast-forwards the `release`
   branch to it, and Workers Builds deploys `release` only.

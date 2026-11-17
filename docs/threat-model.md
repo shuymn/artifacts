@@ -293,9 +293,14 @@ and the threats are the three adversaries below, not untrusted users.
   opener; the result page sends the window that opened it to its target and closes, and a tab without an opener keeps
   its links: pinned by behavior (`browser/viewer.spec.ts`: the viewer's popup in Chromium, Firefox and WebKit, after a
   visibility change and a delete and on Cancel, and the same pages opened as a tab) (PL-56, PL-58). A
-  misconfiguration (an invalid variable, or OAuth without `OAUTH_KV`) answers 503 before the host is classified; that
-  answer carries the policy on the confirmation paths only, so on any other app-host path it has no CSP, and it has no
-  body but its status text.
+  misconfiguration (an invalid variable, or OAuth without `OAUTH_KV`) answers 503 before routing, with no body but its
+  status text, and that answer carries the gallery's policy on every app-host path. With a variable invalid the host
+  class is unknown, so every host's answer carries it, as it carries the private class's headers: the policy only
+  restricts an answer that loads nothing. With `OAUTH_KV` missing the configuration parsed, so only the app host's
+  answer carries it, and a confirmation path's on any host. _Enforced (main)_ in `src/index.ts`, pinned by behavior
+  (`src/gallery/gallery.test.ts`: both answers on the app host, in the header on every status;
+  `src/routing.test.ts`: every host's answer for an invalid `API_TOKENS`, and without `OAUTH_KV` the app host's alone)
+  (PL-47).
 
 ### Serving (SRV)
 
