@@ -20,6 +20,8 @@ wrangler.deploy.jsonc
 
 # Test and coverage output
 coverage/
+test-results/
+playwright-report/
 
 # Local scratch files
 .tmp/

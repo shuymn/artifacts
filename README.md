@@ -25,6 +25,8 @@ pnpm run lint               # oxlint with type-aware rules
 pnpm run fmt                # oxfmt check (pnpm run fmt:fix to apply)
 pnpm run typecheck          # TypeScript
 pnpm run test               # Vitest (the CLI's unit tests under Bun)
+pnpm --filter @artifacts/worker exec playwright install chromium firefox webkit  # the browser tests' browsers
+pnpm run test:browser       # Playwright: the viewer frame in Chromium, Firefox and WebKit
 ```
 
 The GitHub repository settings are declared in `.github/infra.yaml`; review
