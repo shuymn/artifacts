@@ -129,9 +129,13 @@ Commands:
   export <id> [--version <n>] [-o <file>]
       Download the latest version (or version n) as a ZIP archive to <file>, by default <id>-v<n>.zip in the current
       directory. An existing <file> is never replaced: export refuses it, and one that appears during the download
-      stays as it is while export fails. The download fails after 60 s without a byte; on any failure, export removes
-      what it wrote. A version with paths that cannot be extracted as stored (holding "\\", or a file that another
-      path uses as a directory) is refused, naming them.
+      stays as it is while export fails. The archive goes to <file>.<random>.part first and into <file> only once
+      every byte the API announced in Content-Length has arrived; an answer without Content-Length is refused. The
+      download fails after 60 s without a byte, however long it takes in all. On a failure, or an interrupt during
+      the download, export exits 1 and removes its .part file, or names it when it cannot; once the archive is being
+      put in place, export finishes it despite an interrupt. A forced end (SIGKILL; on Windows, taskkill /F or closing
+      the console) leaves the .part file. A version with paths that cannot be extracted as stored (holding "\\", or a
+      file that another path uses as a directory) is refused, naming them. export takes no --json.
   public <id> on|off                  Serve every version at the artifact's public URL without sign-in, or stop.
   archive <id> on|off|auto            Archive the artifact, keep it out of the archive, or archive it by age.
   delete <id>                         Delete the artifact: every URL answers 404.
@@ -142,7 +146,7 @@ Commands:
   --version                           Print the CLI's version.
 
 Options:
-  --json   Print the API's JSON instead of text (list: every page's artifacts in one object).
+  --json   Print the API's JSON instead of text (list: every page's artifacts in one object; not export).
 
 Configuration (environment):
   ARTIFACTS_API_URL   The API origin, such as https://artifacts-api.example.com (http only for localhost).
