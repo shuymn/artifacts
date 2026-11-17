@@ -903,23 +903,30 @@ download `GET /a/<id>/v/<n>/export` behind Access (section 10; the viewer's Expo
   object before it answers, so a failure until then is an operation error (`not_found`, `not_extractable`,
   `unavailable`, `internal`): a `get` that fails or stalls is `unavailable`, and an object the version lists that R2
   does not hold is `internal`, an inconsistency rather than an outage. It then answers 200 and feeds the library one
-  file at a time from an async generator: one R2 body is open at a time, and each `get` and each read of a body's next
+  file at a time from an async iterator: one R2 body is open at a time, and each `get` and each read of a body's next
   chunk waits at most the R2 timeout. The export reads each body through its own reader and cancels it on every exit. A
   failure after the headers (an R2 call that fails or stalls, an object whose length differs from its listed size, the
   CPU limit) errors the stream: the client sees an aborted transfer, never a complete-looking archive, and
   `operation.failed` logs its class, except after the CPU limit, which ends the invocation before it can log. When the
-  client goes away, the library calls `throw()` on the generator (since 2.4.3), whose `finally` cancels the body it
-  holds, and no further object is read; a cancellation is not logged.
+  client goes away, the pipe learns it at its next write (Headers, below) and cancels the library's stream, and the
+  library calls `throw()` on the iterator (since 2.4.3), which cancels the body it holds; no further object is read, and
+  the cancellation is not logged. The iterator is written by hand rather than as an async generator: a generator that
+  has not started runs no `finally` on `throw()`, so the first body, fetched before the answer, would stay open when the
+  client goes away before the first entry; the iterator also cancels a body whose `get` completes after the
+  cancellation, and returns no entry for it. One cancellation is logged: when the client goes away while R2 stalls, no
+  write comes to tell the pipe, so the stream ends at the R2 read timeout and logs `timeout`.
 - **Headers:** `Content-Type: application/zip`, `Content-Disposition: attachment; filename="<id>-v<n>.zip"`,
   `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, and `Content-Length`, so a client can tell a cut stream
   from a whole one. Workers ignore a `Content-Length` that code sets on a response whose body is a plain stream and send
-  it only for a fixed-length body ([Response](https://developers.cloudflare.com/workers/runtime-apis/response/#set-the-content-length-header)),
-  and `client-zip` sets it on a plain one. The export therefore pipes the library's stream (`makeZip`) through a
-  `FixedLengthStream` of the length the library's `predictLength` computes from the listed names and sizes, and
-  answers with its readable side. The pipe carries an error forward, so a failure errors the response, and a
-  cancellation back, so the client going away cancels the library's stream and with it the generator; the stream
-  refuses more or fewer bytes than that length, which errors it as well. A `HEAD` answers the `GET`'s headers without
-  reading R2.
+  it only for a fixed-length body
+  ([Response](https://developers.cloudflare.com/workers/runtime-apis/response/#set-the-content-length-header)), and
+  `client-zip` sets it on a plain one. The export therefore pipes the library's stream (`makeZip`) through a
+  `FixedLengthStream` of the length the library's `predictLength` computes from the listed names and sizes, and answers
+  with its readable side. The pipe carries an error forward, so a failure errors the response, and a cancellation back,
+  so the client going away cancels the library's stream and with it the iterator. The runtime errors the stream's
+  writable side only when the pipe writes to it after the response was cancelled (checked in the local runtime), so a
+  cancellation arrives with the archive's next chunk. The stream refuses more or fewer bytes than that length, which
+  errors it as well. A `HEAD` answers the `GET`'s headers without reading R2.
 - **Bounds:** a version has at most 2000 files (section 6), so an export makes at most 2000 R2 reads, one per file,
   against 10,000 subrequests per request, and the library keeps at most 2000 central-directory records of about
   1.1 KiB at most with their paths, some 2 MiB. Memory does not grow with the version's size, since one chunk at a
