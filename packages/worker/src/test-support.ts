@@ -501,9 +501,19 @@ export async function readToEnd(
       return { text, aborted: true };
     }
   };
-  const result = await Promise.race([read(), new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), ms))]);
-  if (result === "hung") reader.cancel().catch(() => {});
-  return result;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      read(),
+      new Promise<"hung">((resolve) => {
+        timer = setTimeout(() => resolve("hung"), ms);
+      }),
+    ]);
+    if (result === "hung") reader.cancel().catch(() => {});
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

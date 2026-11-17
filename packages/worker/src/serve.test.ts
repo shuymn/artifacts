@@ -17,6 +17,7 @@ import {
 } from "./test-support.ts";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -640,15 +641,16 @@ describe("section 8: a served file's body after the headers", () => {
 
   // The runtime tells the pipe of a cancelled response at its next write, so the body sends one more chunk after the
   // client goes away; that write cancels the body, while the read after it waits. That read then ends short, which is
-  // not a failure, and no timer is left to report a stall.
-  it("cancels the body when the client goes away, without a log", async () => {
-    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 2_000, kvReadMs: 2_000 } });
+  // not a failure. The clock is the test's from the request on, so the R2 timeout runs only when the test advances it.
+  it("cancels the body when the client goes away, without a log or a timer left", async () => {
+    const r2Ms = 50;
+    const world = new World({ timeouts: { r2Ms, d1ReadMs: 2_000, kvReadMs: 2_000 } });
     const stored = "x".repeat(100_000);
     const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": stored } })).artifact.id;
     const bucket = new BucketProbe();
     world.env = { ...world.env, FILES: bucket.binding };
     const goOn = Promise.withResolvers<void>();
-    const cancelled = Promise.withResolvers<"cancelled">();
+    const cancelled = Promise.withResolvers<void>();
     let pulls = 0;
     const flowing = new ReadableStream<Uint8Array>(
       {
@@ -658,12 +660,13 @@ describe("section 8: a served file's body after the headers", () => {
           if (pulls > 2) await never();
           controller.enqueue(new TextEncoder().encode("x".repeat(10)));
         },
-        cancel: () => cancelled.resolve("cancelled"),
+        cancel: () => cancelled.resolve(),
       },
       { highWaterMark: 0 },
     );
     bucket.behave = (op) => (op === "get" ? Promise.resolve({ body: flowing }) : undefined);
     const logs = captureLogs();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const response = await world.content(id, "/a.txt");
     expect(response.status).toBe(200);
     const reader = response.body?.getReader();
@@ -671,13 +674,12 @@ describe("section 8: a served file's body after the headers", () => {
     expect((await reader.read()).done).toBe(false);
     await reader.cancel();
     goOn.resolve();
-    expect(await Promise.race([cancelled.promise, new Promise((resolve) => setTimeout(resolve, 500, "open"))])).toBe(
-      "cancelled",
-    );
+    await cancelled.promise;
     // Cancelled while its third read waited, long before its 100,000 bytes.
     expect(pulls).toBe(3);
-    // Past the R2 timeout: a read left waiting would fail and log by now.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // Past the R2 timeout: a read left waiting would time out and log now.
+    await vi.advanceTimersByTimeAsync(r2Ms);
+    expect(vi.getTimerCount()).toBe(0);
     expect(logEvents(logs.lines)).toEqual([]);
   });
 });
