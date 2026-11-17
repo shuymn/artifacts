@@ -146,9 +146,11 @@ describe("SRV-1: response headers", () => {
     const file = created.version.files.find(
       (f) => `/${f.path}` === path.replace(/^\/_v\/1/, "").replace(/\/$/, "/index.html"),
     );
-    for (const [response, classHeaders] of [
-      [await world.content(id, path), PRIVATE_HEADERS],
-      [await world.public(id, path), PUBLIC_HEADERS],
+    // HTML on a private host has two representations, the file and the viewer frame (PL-53).
+    const privateVary = type.startsWith("text/html") ? "Sec-Fetch-Dest, Accept-Encoding" : "Accept-Encoding";
+    for (const [response, classHeaders, vary] of [
+      [await world.content(id, path), PRIVATE_HEADERS, privateVary],
+      [await world.public(id, path), PUBLIC_HEADERS, "Accept-Encoding"],
     ] as const) {
       expect(response.status).toBe(200);
       expect(Object.fromEntries(response.headers)).toEqual({
@@ -156,7 +158,7 @@ describe("SRV-1: response headers", () => {
         "content-type": type,
         "content-length": String(file?.size),
         etag: expect.stringMatching(/^"[0-9a-f]{32}"$/),
-        vary: "Accept-Encoding",
+        vary,
       });
       noCors(response);
     }

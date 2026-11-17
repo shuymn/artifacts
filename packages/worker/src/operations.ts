@@ -543,6 +543,57 @@ export async function lookupServedFile(deps: OperationDeps, input: LookupInput):
   });
 }
 
+/** Design.md section 6, "The viewer frame": the history lists the newest 10 versions. */
+export const VIEWER_HISTORY = 10;
+
+/** What the viewer frame's header and menu show of the artifact (design.md section 6, "The viewer frame"). */
+export type ViewerData = {
+  readonly artifact: ArtifactJson;
+  /** The version the path selects. */
+  readonly shown: VersionJson;
+  /** The newest versions, newest first, at most VIEWER_HISTORY. */
+  readonly history: readonly VersionJson[];
+};
+
+/** The served file's lookup, and what the viewer frame shows when the artifact is live. */
+export type ViewerLookup = { readonly lookup: ServedLookup; readonly viewer: ViewerData | undefined };
+
+/**
+ * `lookupFile`, or with `fallback` `lookupServedFile`, on a private content host for a request that may get the
+ * viewer frame: the same batch also reads the artifact, the version the path selects and the newest versions, so the
+ * header shows one snapshot with the file (design.md section 6, "Order"). The artifact row stands for
+ * `selectVisibleArtifact`, since a private host serves any live artifact.
+ */
+export async function lookupForViewer(
+  deps: OperationDeps,
+  input: Omit<LookupInput, "publicOnly">,
+  fallback: boolean,
+): Promise<Result<ViewerLookup>> {
+  const { id, path } = input;
+  return guarded(id, async (): Promise<Result<ViewerLookup>> => {
+    const now = deps.now();
+    const [files, artifactResult, shownResult, historyResult] = await read(database(deps), [
+      servedFiles(deps, { ...input, publicOnly: false }),
+      selectArtifact(deps.db, id),
+      selectVersion(deps.db, id, path.version),
+      selectVersionPage(deps.db, id, null, VIEWER_HISTORY),
+    ]);
+    const artifact = rows(artifactResult, ARTIFACT_ROW)[0];
+    const shown = rows(shownResult, VERSION_ROW)[0];
+    const viewer =
+      artifact === undefined || shown === undefined
+        ? undefined
+        : {
+            artifact: artifactJson(deps, artifact, now),
+            shown: versionJson(deps, id, shown),
+            history: rows(historyResult, VERSION_ROW).map((row) => versionJson(deps, id, row)),
+          };
+    const found = matchFile(id, path, rows(files, FILE_ROW));
+    if (found !== undefined) return succeed({ lookup: found, viewer });
+    return fallback && artifact !== undefined ? succeed({ lookup: { kind: "absent" }, viewer }) : NOT_FOUND;
+  });
+}
+
 const servedFiles = (deps: OperationDeps, input: LookupInput): D1PreparedStatement =>
   selectServedFiles(deps.db, input.id, input.path.version, input.publicOnly, [input.path.file, input.path.directory]);
 

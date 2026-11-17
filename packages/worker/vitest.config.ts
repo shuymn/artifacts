@@ -31,8 +31,8 @@ export default defineConfig({
           include: ["src/**/*.test.ts"],
           exclude: ["src/e2e.test.ts"],
           setupFiles: ["./src/test-setup.ts"],
-          // Vitest empties CSS it does not process; the token test reads gallery.css as text.
-          css: { include: [/gallery\.css/] },
+          // Vitest empties CSS it does not process; the token tests read gallery.css and viewer.css as text.
+          css: { include: [/(gallery|viewer)\.css/] },
         },
       },
       {
