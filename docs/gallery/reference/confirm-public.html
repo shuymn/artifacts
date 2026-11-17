@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="text-scale" content="scale" />
+    <title>Make public · artifacts</title>
+    <!-- Reference only: the Worker serves the fonts itself. -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    />
+    <link rel="stylesheet" href="../../../packages/worker/src/gallery/gallery.css" />
+    <link rel="icon" href="../../../packages/worker/src/gallery/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="../../../packages/worker/src/gallery/icon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <a class="brand__link" href="/"
+          ><img
+            class="brand__icon"
+            src="../../../packages/worker/src/gallery/icon.svg"
+            alt=""
+            width="16"
+            height="16"
+          />artifacts</a
+        >
+        <span class="brand__version">v0.3.0</span>
+      </div>
+    </header>
+    <main class="page page--popup">
+      <hgroup class="page-heading">
+        <h1>Make this artifact public?</h1>
+        <p>Anyone with its public link can open it without signing in.</p>
+      </hgroup>
+      <dl class="info">
+        <div class="info-row">
+          <dt>Artifact</dt>
+          <dd>Quarterly revenue chart</dd>
+        </div>
+        <div class="info-row">
+          <dt>ID</dt>
+          <dd>ak2x7m4q9wz3c5v8b2n6r4t7y1</dd>
+        </div>
+        <div class="info-row">
+          <dt>Versions</dt>
+          <dd>3; every version becomes public</dd>
+        </div>
+        <div class="info-row">
+          <dt>Public link</dt>
+          <dd>https://ak2x7m4q9wz3c5v8b2n6r4t7y1-pub.example.com/</dd>
+        </div>
+      </dl>
+      <p class="notice">
+        The link shows the latest version, and /_v/&lt;n&gt;/ shows each earlier one. Make it private again at any time.
+      </p>
+      <form class="form" method="post" action="/a/ak2x7m4q9wz3c5v8b2n6r4t7y1/public">
+        <input type="hidden" name="public" value="true" />
+        <div class="form__actions">
+          <button class="button button--primary" type="submit">Make public</button>
+          <a class="button button--secondary" href="/a/ak2x7m4q9wz3c5v8b2n6r4t7y1">Cancel</a>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

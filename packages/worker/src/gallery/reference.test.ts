@@ -7,13 +7,33 @@ import { describe, expect, it } from "vitest";
 
 import archivedHtml from "../../../../docs/gallery/reference/archived.html?raw";
 import artifactHtml from "../../../../docs/gallery/reference/artifact.html?raw";
+import confirmDeleteHtml from "../../../../docs/gallery/reference/confirm-delete.html?raw";
+import confirmPublicHtml from "../../../../docs/gallery/reference/confirm-public.html?raw";
+import confirmResultHtml from "../../../../docs/gallery/reference/confirm-result.html?raw";
 import consentErrorHtml from "../../../../docs/gallery/reference/consent-error.html?raw";
 import consentHtml from "../../../../docs/gallery/reference/consent.html?raw";
 import indexHtml from "../../../../docs/gallery/reference/index.html?raw";
 import rootPackage from "../../../../package.json" with { type: "json" };
-import type { ArtifactJson, GalleryArtifact, GalleryList, ListedArtifact, VersionJson } from "../operations.ts";
+import type {
+  ArtifactJson,
+  ConfirmationArtifact,
+  GalleryArtifact,
+  GalleryList,
+  ListedArtifact,
+  VersionJson,
+} from "../operations.ts";
 import { assetPath } from "./assets.ts";
-import { artifactPage, consentErrorPage, consentPage, listPage, type Chrome, type ConsentView } from "./pages.ts";
+import {
+  artifactPage,
+  consentErrorPage,
+  consentPage,
+  deletePage,
+  listPage,
+  resultPage,
+  visibilityPage,
+  type Chrome,
+  type ConsentView,
+} from "./pages.ts";
 import { decodeEntities, parseHtml, textOf, type HtmlNode } from "./test-html.ts";
 
 /** The time the reference pages' relative times count from: "2 hours ago" for 09:12. */
@@ -207,6 +227,13 @@ const ARTIFACT: GalleryArtifact = {
   },
 };
 
+/** The confirmation pages' artifact: the artifact page's, private, with its latest version. */
+const CONFIRMATION: ConfirmationArtifact = {
+  artifact: { ...ARTIFACT.artifact, public: false, public_url: null },
+  latest: V3,
+  publicUrl: `https://${ID}-pub.example.com/`,
+};
+
 /**
  * The consent page of the reference: Claude Code, identified by its CIMD document's domain, signing in to MCP from a
  * loopback port. The reference shows the handle as `…`.
@@ -310,6 +337,10 @@ const PAGES = [
   ["consent.html", consentHtml, () => consentPage(CONSENT), []],
   // The reference shows the error of a transaction that expired, was used, or belongs to another browser.
   ["consent-error.html", consentErrorHtml, () => consentErrorPage("transaction"), []],
+  ["confirm-public.html", confirmPublicHtml, () => visibilityPage(CONFIRMATION), []],
+  ["confirm-delete.html", confirmDeleteHtml, () => deletePage(CONFIRMATION), []],
+  // The reference shows the result of making the artifact public.
+  ["confirm-result.html", confirmResultHtml, () => resultPage({ change: "public", artifact: ARTIFACT.artifact }), []],
 ] as const;
 
 describe("templates and reference pages", () => {
@@ -320,6 +351,25 @@ describe("templates and reference pages", () => {
       ["head", "body"],
     ]);
     expect(shape(withoutPreloads(got), new Map(cursors), VERSIONS)).toEqual(shape(want, ASSET_LINKS));
+  });
+
+  // Make private is the same screen with its own texts (design.md section 10): the reference's elements and attributes,
+  // the state the form posts aside.
+  it("renders the page for a public artifact with the elements of confirm-public.html", async () => {
+    const [want, got] = await Promise.all([
+      parseHtml(confirmPublicHtml),
+      parseHtml(visibilityPage({ ...CONFIRMATION, artifact: ARTIFACT.artifact }).text),
+    ]);
+    const untexted = (node: Shape): Shape => ({ ...node, text: [], children: node.children.map(untexted) });
+    const posted = shape(withoutPreloads(got), new Map());
+    const input = posted.children
+      .flatMap(function all(node): Shape[] {
+        return [node, ...node.children.flatMap(all)];
+      })
+      .find((node) => node.tag === "input");
+    expect(input?.attributes).toEqual({ name: "public", type: "hidden", value: "false" });
+    if (input !== undefined) input.attributes.value = "true";
+    expect(untexted(posted)).toEqual(untexted(shape(want, ASSET_LINKS)));
   });
 
   it.each(PAGES)(

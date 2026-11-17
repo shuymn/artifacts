@@ -284,6 +284,16 @@ a:focus-visible,
   inline-size: min(var(--size-prose), 100% - 2 * var(--space-4));
 }
 
+/*
+ * The confirmation pages, laid out for the 480 px popup the viewer opens: the window's full width with space.6 around
+ * the column and space.7 below it. In a wider window (the artifact page's own links), the column keeps the prose width.
+ */
+.page--popup {
+  inline-size: auto;
+  max-inline-size: var(--size-prose);
+  padding: var(--space-6) var(--space-6) var(--space-7);
+}
+
 .page-heading {
   display: flex;
   flex-direction: column;
@@ -570,7 +580,13 @@ a:focus-visible,
   color: var(--color-notice-fg);
 }
 
-/* The consent page's form: the field, then the buttons. */
+/* notice/kind=danger: beside what cannot be undone, in the colors of the button that does it. */
+.notice--danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+/* The consent page's and the confirmation pages' forms: the field, if any, then the buttons. */
 .form {
   display: flex;
   flex-direction: column;
@@ -643,4 +659,15 @@ a:focus-visible,
   border-color: var(--color-control-border);
   background: transparent;
   color: var(--color-text);
+}
+
+/* button/kind=danger: the one action that cannot be undone, the primary's size in the danger color. */
+.button--danger {
+  background: var(--color-danger);
+  color: var(--color-bg);
+}
+
+/* A confirmation page's Cancel is a link styled as a button, and keeps a button's look on hover. */
+.button:hover {
+  text-decoration: none;
 }

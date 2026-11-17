@@ -7,6 +7,14 @@
  */
 import { AccessVerifier, type AccessSettings } from "./access.ts";
 import { parseConfig, type Config } from "./config.ts";
+import {
+  CONFIRMATION_METHODS,
+  confirmationOf,
+  serveConfirmation,
+  withConfirmHeaders,
+  type Confirmation,
+  type ConfirmationAnswer,
+} from "./confirm.ts";
 import { serveConsent, withConsentHeaders, type ConsentAnswer } from "./consent.ts";
 import { checkCredential, resourceMetadataAllow, resourceOfPath, serveResourceMetadata } from "./credentials.ts";
 import { serveGallery, withGalleryPolicy } from "./gallery/route.ts";
@@ -154,6 +162,26 @@ async function authorize(
   return serveConsent(request, url, env.OAUTH_KV, config, { now: deps.now, kvReadMs: deps.timeouts.kvReadMs });
 }
 
+/**
+ * The confirmation pages on the app host (design.md section 10): GET, HEAD and POST, any other method 405 (ISO-3),
+ * then Access with the app audience (ACC-1), before the body is read or storage touched. Every answer, these refusals
+ * included, gets the pages' headers (`withConfirmHeaders`) where `fetch` returns it.
+ */
+async function confirm(
+  request: Request,
+  env: Env,
+  config: Config,
+  deps: WorkerDeps,
+  confirmation: Confirmation,
+): Promise<ConfirmationAnswer> {
+  if (!CONFIRMATION_METHODS.some((method) => method === request.method)) {
+    return { response: plainResponse("private", 405, { Allow: CONFIRMATION_METHODS.join(", ") }) };
+  }
+  const refusal = await refuseWithoutAccess(request, config, deps, "app");
+  if (refusal !== undefined) return { response: refusal };
+  return serveConfirmation(request, confirmation, operationDeps(env, config, deps));
+}
+
 /** The Worker's fetch handler; the execution context goes to the OAuth library only, and `cf` is not used. */
 export type Worker = { fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> };
 
@@ -191,6 +219,11 @@ export function createWorker(deps: WorkerDeps): Worker {
               const policy = origin === undefined ? {} : { forms: { origin } };
               return withGalleryPolicy(withConsentHeaders(answer.response), policy);
             }
+            const confirmation = confirmationOf(url.pathname);
+            if (confirmation !== undefined) {
+              const answer = await confirm(request, env, config, deps, confirmation);
+              return withGalleryPolicy(withConfirmHeaders(answer.response), answer.policy);
+            }
             return withGalleryPolicy(await browser(request, url, env, config, deps, "app", undefined));
           }
           case "content":
@@ -209,7 +242,9 @@ export function createWorker(deps: WorkerDeps): Worker {
         if (route.kind === "api") return jsonResponse(500, { error: { code: "internal", message: "internal error" } });
         const failure = plainResponse(route.kind === "public" ? "public" : "private", 500);
         if (route.kind !== "app") return failure;
-        return withGalleryPolicy(url.pathname === AUTHORIZE_PATH ? withConsentHeaders(failure) : failure);
+        if (url.pathname === AUTHORIZE_PATH) return withGalleryPolicy(withConsentHeaders(failure));
+        if (confirmationOf(url.pathname) !== undefined) return withGalleryPolicy(withConfirmHeaders(failure));
+        return withGalleryPolicy(failure);
       }
     },
   };

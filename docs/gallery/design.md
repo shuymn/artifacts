@@ -2,7 +2,8 @@
 
 The gallery's screens are designed in Pencil from tokens and components, and the code uses the same tokens and
 components by name. The design file is [`gallery.pen`](gallery.pen): the boards Typography and Components above one
-screen per page (`index`, `archived`, `artifact`, `consent`, `consent-error`, `confirm-public`, `confirm-delete`) and
+screen per page (`index`, `archived`, `artifact`, `consent`, `consent-error`, `confirm-public`, `confirm-delete`,
+`confirm-result`) and
 the viewer's screens (`viewer`, `viewer — menu open`, `viewer — history, pinned v2`), at the width `size.page` gives.
 The viewer is the frame a private page opens in on its content host ([design.md](../design.md), section 6, "The viewer
 frame"), not a page of the app host, and shares the design system. Files carry the design into the code, and the
@@ -14,7 +15,8 @@ implementation follows them exactly:
 - `viewer.css` (beside `gallery.css`): the viewer's stylesheet, which the frame page inlines. It declares the custom
   properties it uses, with the same names and values, and the viewer's components.
 - [`reference/`](reference/): one static page per screen (`index.html`, `archived.html`, `artifact.html`,
-  `consent.html`, `consent-error.html`, `confirm-public.html`, `confirm-delete.html`, `viewer.html`) with the markup
+  `consent.html`, `consent-error.html`, `confirm-public.html`, `confirm-delete.html`, `confirm-result.html`,
+  `viewer.html`) with the markup
   the Worker's templates must produce. They load `gallery.css`, or `viewer.css` for the viewer, and render like the
   Pencil screens; `viewer.html` shows the menu open and the history beside it, and an empty frame.
 
@@ -155,6 +157,7 @@ reference pages show each in place.
 | `button`          | `kind=primary` / `kind=secondary`        | `button.button.button--primary` / `.button--secondary`                                                          |
 |                   | `kind=danger`                            | `button.button.button--danger`, on the delete confirmation                                                      |
 | `notice`          |                                          | `p.notice`                                                                                                      |
+|                   | `kind=danger`                            | `p.notice.notice--danger`, in `color.danger` on `color.danger-bg`, on the delete confirmation                   |
 | `viewer-header`   |                                          | `header.viewer-header`; see below                                                                               |
 | `icon-button`     |                                          | `button.icon-button[popovertarget][aria-label]` > an inline SVG with `aria-hidden`                              |
 | `viewer-menu`     |                                          | `div.viewer-menu[popover][id]`; see below                                                                       |
@@ -169,12 +172,14 @@ In `viewer-header`, `a.viewer-header__home` (the icon) comes first, then `h1.vie
 `a`, with `aria-current="page"` on the shown version, then the link to all versions.
 
 Screens also use `main.page` (`.page--detail` on an artifact page, `.page--narrow` on the consent pages, `.page--popup`,
-the popup window's full width with `space.6` padding, on the confirmation pages), `hgroup.page-heading`, `header.artifact-heading`, `section.section`,
+the popup window's full width with `space.6` padding at the top and sides and `space.7` below, on the confirmation
+pages and the result page), `hgroup.page-heading`, `header.artifact-heading`, `section.section`,
 `div.data-table[role=region][tabindex=0][aria-labelledby]` around each `table`, and `form.form` > the field and
 `div.form__actions` > the buttons; `.cell--grow` marks the column that takes the remaining width (the version title,
 the file path). The input lists its help in `aria-describedby`; see `reference/consent.html` for its attributes. A
-confirmation page's Cancel is an `a` styled as `button--secondary`. The viewer's page is `body.viewer` holding the
-`viewer-header` and `iframe.viewer__frame`.
+confirmation page's Cancel is an `a` styled as `button--secondary`. The result page lists its links as
+`info-row/value=link` rows; the one its script follows carries `data-opener`. The viewer's page is `body.viewer`
+holding the `viewer-header` and `iframe.viewer__frame`.
 
 Lists and tables carry their roles explicitly (`role=list`; `table`, `rowgroup`, `row`, `columnheader`, `cell`):
 Safari drops list semantics without list markers, and browsers may drop table semantics when the narrow layout
@@ -216,8 +221,11 @@ do in CSS.
   header's right edge. It closes on Escape, on a click outside it in the header, and when the focus moves into the
   page; History opens its list beside the menu, marking the shown version with `aria-current="page"`. Delete is in
   `color.danger`. The items of the menu and the history show the focus ring of links.
-- **Confirmation pages** are laid out for a window 480 px wide, the size the viewer opens them at: the narrow column
-  takes the window's width less the gutter, and the buttons wrap.
+- **Confirmation pages** are laid out for a window 480 px wide, the size the viewer opens them at: the column takes the
+  window's width less the padding, and the buttons wrap. In a wider window, as from the artifact page's own links, the
+  column keeps `size.prose`.
+- **The result page** shows its links; its script, where a window opened it, sends that window to the link marked
+  `data-opener` and closes itself, so the static design shows the page as a tab without an opener keeps it.
 - **Focus.** Links, the scrollable table regions, the input, the buttons, the viewer's icon button and its menu items
   show `focus.width` of `color.focus` on `:focus-visible`.
 - **The field's message** shows only while the input matches `:user-invalid`: after the owner changes the value and

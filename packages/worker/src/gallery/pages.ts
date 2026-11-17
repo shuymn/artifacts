@@ -1,14 +1,15 @@
 /**
- * The gallery's pages and the consent pages (design.md sections 7 and 10). Each template produces the markup of its
- * reference page (docs/gallery/reference/), element for element and class for class; reference.test.ts holds them to
- * it. Every value goes through `html`, which escapes it (ISO-5). No page has a script or a frame, and only the consent
- * page has a form.
+ * The gallery's pages, the consent pages and the confirmation pages (design.md sections 7 and 10). Each template
+ * produces the markup of its reference page (docs/gallery/reference/), element for element and class for class;
+ * reference.test.ts holds them to it. Every value goes through `html`, which escapes it (ISO-5). No page has a frame;
+ * only the consent page and the confirmation pages have a form, and only the confirmation result page a script.
  */
 
 import rootPackage from "../../../../package.json" with { type: "json" };
 import type {
   ArchiveCounts,
   ArtifactJson,
+  ConfirmationArtifact,
   GalleryArtifact,
   GalleryList,
   ListedArtifact,
@@ -86,8 +87,8 @@ const SECTIONS: Readonly<Record<Section, { readonly label: string; readonly href
 
 const sectionOf = (artifact: ArtifactJson): Section => (artifact.archived ? "archived" : "active");
 
-/** A whole page: its title, the header (the brand, then `nav` when given) and `main`. */
-function frame(title: string, nav: Markup | null, main: Markup): Markup {
+/** A whole page: its title, the header (the brand, then `nav` when given), `main`, then `script` when given. */
+function frame(title: string, nav: Markup | null, main: Markup, script: Markup | null = null): Markup {
   return html`<!doctype html>
     <html lang="en">
       <head>
@@ -99,7 +100,7 @@ function frame(title: string, nav: Markup | null, main: Markup): Markup {
       </head>
       <body>
         <header class="site-header">${BRAND} ${nav}</header>
-        ${main}
+        ${main} ${script}
       </body>
     </html> `;
 }
@@ -215,11 +216,17 @@ function pager(label: string, parameter: string, cursor: string | null, text: st
   return html`<nav class="pager" aria-label="${label}"><a href="${href}">${text}</a></nav>`;
 }
 
-function infoLink(label: string, url: string): Markup {
+/** An info row whose value is a link; `opener` marks the result page's target (`data-opener`). */
+function infoAction(label: string, href: string, text: string, opener = false): Markup {
   return html` <div class="info-row">
     <dt>${label}</dt>
-    <dd class="info-row__link"><a href="${url}">${url} ↗</a></dd>
+    <dd class="info-row__link"><a href="${href}" ${opener && html`data-opener`}>${text}</a></dd>
   </div>`;
+}
+
+/** An info row linking a URL of another host, which it shows. */
+function infoLink(label: string, url: string, opener = false): Markup {
+  return infoAction(label, url, `${url} ↗`, opener);
 }
 
 function infoText(label: string, value: Value): Markup {
@@ -292,6 +299,9 @@ export function artifactPage(chrome: Chrome, data: GalleryArtifact): Markup {
         artifact.public_url === null
           ? infoText("Public URL", "Not public")
           : infoLink("Public URL", artifact.public_url),
+        infoAction("Visibility", `/a/${artifact.id}/public`, artifact.public ? "Make private…" : "Make public…"),
+        infoAction("Download", `/a/${artifact.id}/v/${latest.number}/export`, `Export v${latest.number} (.zip)`),
+        infoAction("Deletion", `/a/${artifact.id}/delete`, "Delete…"),
         infoText("Latest", html`v${latest.number} · ${time(latest.created_at)} by ${latest.published_by}`),
         infoText("Created", html`${time(artifact.created_at)} by ${first.published_by}`),
         infoText("Archive", archiveState(artifact, chrome)),
@@ -501,4 +511,166 @@ export function consentErrorPage(kind: ConsentErrorKind): Markup {
     </hgroup>
   </main>`;
   return frame(error.title, null, main);
+}
+
+const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/**
+ * A confirmation page's form: it posts to its own path, with the desired state (never a toggle) when it has a field,
+ * and pairs its button with Cancel, a link to the artifact's page. Closing the window would need script, which these
+ * pages do not run.
+ */
+function confirmForm(id: string, action: "public" | "delete", field: Value, button: Markup): Markup {
+  return html`<form class="form" method="post" action="/a/${id}/${action}">
+    ${field}
+    <div class="form__actions">
+      ${button}
+      <a class="button button--secondary" href="/a/${id}">Cancel</a>
+    </div>
+  </form>`;
+}
+
+/** The texts of `/a/<id>/public`, by the state the form asks for. */
+const VISIBILITY = {
+  true: {
+    title: "Make public",
+    heading: "Make this artifact public?",
+    lead: "Anyone with its public link can open it without signing in.",
+    versions: "every version becomes public",
+    notice:
+      "The link shows the latest version, and /_v/<n>/ shows each earlier one. Make it private again at any time.",
+    button: "Make public",
+  },
+  false: {
+    title: "Make private",
+    heading: "Make this artifact private?",
+    lead: "Its public link stops working.",
+    versions: "every version becomes private",
+    notice: "Every version’s public URL answers 404 from the next request. Make it public again at any time.",
+    button: "Make private",
+  },
+} as const;
+
+/**
+ * `GET /a/<id>/public`: for a private artifact, Make public; for a public one, Make private. Either names the
+ * artifact, its versions and its public URL, and posts the state it offers.
+ */
+export function visibilityPage(view: ConfirmationArtifact): Markup {
+  const { artifact } = view;
+  const wanted = !artifact.public;
+  const text = VISIBILITY[`${wanted}`];
+  const main = html`<main class="page page--popup">
+    <hgroup class="page-heading">
+      <h1>${text.heading}</h1>
+      <p>${text.lead}</p>
+    </hgroup>
+    <dl class="info">
+      ${[
+        infoText("Artifact", artifact.title),
+        infoText("ID", artifact.id),
+        infoText("Versions", `${artifact.latest_version}; ${text.versions}`),
+        infoText("Public link", view.publicUrl),
+      ]}
+    </dl>
+    <p class="notice">${text.notice}</p>
+    ${confirmForm(
+      artifact.id,
+      "public",
+      html`<input type="hidden" name="public" value="${String(wanted)}" />`,
+      html`<button class="button button--primary" type="submit">${text.button}</button>`,
+    )}
+  </main>`;
+  return frame(text.title, null, main);
+}
+
+/** `GET /a/<id>/delete`: what deleting removes, and Delete. */
+export function deletePage(view: ConfirmationArtifact): Markup {
+  const { artifact, latest } = view;
+  const versions = `${counted(artifact.latest_version, "version")}, ${counted(latest.file_count, "file")}, ${byteSize(latest.total_bytes)}`;
+  const main = html`<main class="page page--popup">
+    <hgroup class="page-heading">
+      <h1>Delete this artifact?</h1>
+      <p>It cannot be restored, and its ID is never used again.</p>
+    </hgroup>
+    <dl class="info">
+      ${[
+        infoText("Artifact", artifact.title),
+        infoText("ID", artifact.id),
+        infoText("Versions", versions),
+        infoText("Visibility", artifact.public ? "Public" : "Private"),
+      ]}
+    </dl>
+    <p class="notice notice--danger">
+      Every URL of every version answers 404 at once, and the files are removed. Export a version first if you want a
+      copy.
+    </p>
+    ${confirmForm(
+      artifact.id,
+      "delete",
+      null,
+      html`<button class="button button--danger" type="submit">Delete</button>`,
+    )}
+  </main>`;
+  return frame("Delete artifact", null, main);
+}
+
+/**
+ * The result page's one script (design.md section 10), the same bytes on every result page, which the CSP admits by
+ * their hash. Its target is the page's link marked `data-opener`: the artifact's URL after a visibility change, the
+ * gallery after a deletion. When a window opened this one (the viewer's popup), it sends that window there and closes
+ * this one; without an opener (a tab, or the artifact page's own links), the page's links remain.
+ */
+const RESULT_SCRIPT = html`<script>
+  const target = document.querySelector("a[data-opener]");
+  if (target !== null && window.opener !== null && !window.opener.closed) {
+    window.opener.location.replace(target.href);
+    window.close();
+  }
+</script>`;
+
+/** The script's text, whose SHA-256 the result page's CSP names. */
+export const RESULT_SCRIPT_TEXT = RESULT_SCRIPT.text.slice("<script>".length, -"</script>".length);
+
+/** What a successful confirmation changed. */
+export type ResultView =
+  | { readonly change: "public" | "private"; readonly artifact: ArtifactJson }
+  | { readonly change: "deleted"; readonly id: string };
+
+/** The page a successful `POST` answers with itself: what changed, links to the artifact, its page and the gallery. */
+export function resultPage(view: ResultView): Markup {
+  const gallery = (opener: boolean) => infoAction("Gallery", "/", "All artifacts", opener);
+  if (view.change === "deleted") {
+    const main = html`<main class="page page--popup">
+      <hgroup class="page-heading">
+        <h1>The artifact is deleted</h1>
+        <p>Every URL of every version answers 404, and its ID is never used again.</p>
+      </hgroup>
+      <dl class="info">${[infoText("ID", view.id), gallery(true)]}</dl>
+    </main>`;
+    return frame("Deleted", null, main, RESULT_SCRIPT);
+  }
+  const { artifact } = view;
+  const made = view.change === "public";
+  const main = html`<main class="page page--popup">
+    <hgroup class="page-heading">
+      <h1>The artifact is ${view.change}</h1>
+      <p>
+        ${
+          made
+            ? "Anyone with its public link can open it without signing in."
+            : "Its public link answers 404 from the next request."
+        }
+      </p>
+    </hgroup>
+    <dl class="info">
+      ${[
+        infoText("Artifact", artifact.title),
+        infoLink("Artifact URL", artifact.url, true),
+        artifact.public_url !== null && infoLink("Public URL", artifact.public_url),
+        infoAction("Details", `/a/${artifact.id}`, "Artifact page"),
+        gallery(false),
+      ]}
+    </dl>
+  </main>`;
+  return frame(made ? "Made public" : "Made private", null, main, RESULT_SCRIPT);
 }

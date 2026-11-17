@@ -2,7 +2,8 @@
  * The shared operation layer (design.md section 8; P5). Each operation takes input the adapter validated with the
  * schemas of schemas.ts, the caller's publisher where it changes something, and its dependencies; it returns a result
  * or an operation error from errors.ts's closed set. REST (rest.ts) and MCP decode, call and encode only, so both give
- * the same results and errors for the same input.
+ * the same results and errors for the same input. The app host's confirmation pages (confirm.ts) call Public and
+ * Delete as REST does, with `GALLERY` in place of a publisher.
  */
 import { archiveLength, archiveStream, unextractablePaths } from "./archive.ts";
 import type { Config } from "./config.ts";
@@ -74,11 +75,24 @@ export type OperationDeps = {
 };
 
 /**
- * What a change log carries of its publisher (TOK-3): the publisher name, under `token` as for an API token's name, and
- * an OAuth grant's ID, since names may repeat across grants.
+ * The app host's confirmation pages (design.md section 10), which change an artifact for the owner's browser: it holds
+ * no credential, so the change has no publisher.
  */
-function changedBy(publisher: Publisher): { readonly token: Publisher["name"]; readonly grant?: GrantId } {
-  return { token: publisher.name, ...(publisher.grant === undefined ? {} : { grant: publisher.grant }) };
+export const GALLERY = { via: "gallery" } as const;
+
+/** Who asks for a setting or a delete: a credential's publisher, or the confirmation pages. */
+export type Caller = Publisher | typeof GALLERY;
+
+/**
+ * What a change log carries of its caller (TOK-3): the publisher name, under `token` as for an API token's name, and
+ * an OAuth grant's ID, since names may repeat across grants; or, from the confirmation pages, `via: "gallery"` alone,
+ * which no token name can be taken for.
+ */
+function changedBy(
+  caller: Caller,
+): { readonly token: Publisher["name"]; readonly grant?: GrantId } | { readonly via: "gallery" } {
+  if ("via" in caller) return { via: caller.via };
+  return { token: caller.name, ...(caller.grant === undefined ? {} : { grant: caller.grant }) };
 }
 
 /** A file of a publish: a path in its stored form (filePathSchema), an optional given type, and its bytes. */
@@ -640,7 +654,7 @@ export type SettingsInput = {
  */
 export async function updateSettings(
   deps: OperationDeps,
-  publisher: Publisher,
+  caller: Caller,
   input: SettingsInput,
 ): Promise<Result<{ readonly artifact: ArtifactJson }>> {
   if (input.public === undefined && input.archive === undefined) {
@@ -653,7 +667,7 @@ export async function updateSettings(
     const artifact = rows(results[1], ARTIFACT_ROW)[0];
     if ((results[0]?.meta.changes ?? 0) === 0 || artifact === undefined) return NOT_FOUND;
     logEvent("artifact.changed", {
-      ...changedBy(publisher),
+      ...changedBy(caller),
       artifact: id,
       ...(input.public === undefined ? {} : { public: input.public }),
       ...(input.archive === undefined ? {} : { archive: input.archive }),
@@ -669,7 +683,7 @@ export async function updateSettings(
  */
 export async function deleteArtifact(
   deps: OperationDeps,
-  publisher: Publisher,
+  caller: Caller,
   input: { readonly id: string },
 ): Promise<Result<{ readonly deleted: ArtifactId }>> {
   const id = input.id;
@@ -677,7 +691,7 @@ export async function deleteArtifact(
   return guarded(id, async () => {
     const results = await write(database(deps), deleteStatements(deps.db, id, deps.now()));
     if (rows(results[0], STATE_ROW)[0] === undefined) return NOT_FOUND;
-    logEvent("artifact.deleted", { ...changedBy(publisher), artifact: id });
+    logEvent("artifact.deleted", { ...changedBy(caller), artifact: id });
     try {
       await deletePrefix(objectStore(deps), id);
     } catch (error) {
@@ -785,6 +799,40 @@ export async function getForGallery(
       first: versionJson(deps, id, first),
       versions: { versions: shown.map((row) => versionJson(deps, id, row)), next_cursor: next },
       counts: countsOf(counts),
+    });
+  });
+}
+
+export type ConfirmationArtifact = {
+  readonly artifact: ArtifactJson;
+  /** The latest version, without files. */
+  readonly latest: VersionJson;
+  /** The artifact's public URL, whether or not it is public now. */
+  readonly publicUrl: string;
+};
+
+/**
+ * What a confirmation page shows (design.md section 10): a live artifact and its latest version, from one snapshot, and
+ * its public URL.
+ */
+export async function getForConfirmation(
+  deps: OperationDeps,
+  input: { readonly id: string },
+): Promise<Result<ConfirmationArtifact>> {
+  const id = input.id;
+  if (!isArtifactId(id)) return NOT_FOUND;
+  return guarded(id, async () => {
+    const [artifactResult, latestResult] = await read(database(deps), [
+      selectArtifact(deps.db, id),
+      selectVersion(deps.db, id, null),
+    ]);
+    const artifact = rows(artifactResult, ARTIFACT_ROW)[0];
+    const latest = rows(latestResult, VERSION_ROW)[0];
+    if (artifact === undefined || latest === undefined) return NOT_FOUND;
+    return succeed({
+      artifact: artifactJson(deps, artifact, deps.now()),
+      latest: versionJson(deps, id, latest),
+      publicUrl: `${publicOrigin(deps.config, id)}/`,
     });
   });
 }
