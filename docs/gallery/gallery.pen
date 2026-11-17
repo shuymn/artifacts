@@ -206,6 +206,31 @@
       "children": [
         {
           "type": "frame",
+          "id": "GKN38",
+          "name": "notice/kind=danger",
+          "reusable": true,
+          "width": 720,
+          "fill": "$color.danger-bg",
+          "cornerRadius": "$radius.md",
+          "padding": [
+            "$space.3",
+            "$space.4"
+          ],
+          "children": [
+            {
+              "id": "dqFB9",
+              "type": "ref",
+              "ref": "pnwzV",
+              "name": "Text",
+              "content": "Every URL of every version answers 404 at once, and the files are removed.",
+              "fill": "$color.danger",
+              "textGrowth": "fixed-width",
+              "width": "fill_container"
+            }
+          ]
+        },
+        {
+          "type": "frame",
           "id": "V2bgV",
           "name": "badge",
           "gap": "$space.4",
@@ -1624,6 +1649,48 @@
                     },
                     "fC3ak": {
                       "content": "https://ak2x7m4q9wz3c5v8b2n6r4t7y1-pub.example.com/ ↗"
+                    }
+                  }
+                },
+                {
+                  "id": "Ft6R1",
+                  "type": "ref",
+                  "ref": "a175i",
+                  "name": "info-row",
+                  "descendants": {
+                    "g6bvSG": {
+                      "content": "Visibility"
+                    },
+                    "fC3ak": {
+                      "content": "Make private…"
+                    }
+                  }
+                },
+                {
+                  "id": "l8mJ2",
+                  "type": "ref",
+                  "ref": "a175i",
+                  "name": "info-row",
+                  "descendants": {
+                    "g6bvSG": {
+                      "content": "Download"
+                    },
+                    "fC3ak": {
+                      "content": "Export v3 (.zip)"
+                    }
+                  }
+                },
+                {
+                  "id": "B2vxod",
+                  "type": "ref",
+                  "ref": "a175i",
+                  "name": "info-row",
+                  "descendants": {
+                    "g6bvSG": {
+                      "content": "Deletion"
+                    },
+                    "fC3ak": {
+                      "content": "Delete…"
                     }
                   }
                 },
@@ -4293,6 +4360,23 @@
                   }
                 },
                 {
+                  "id": "v7jfHg",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "ID"
+                    },
+                    "kqZe5": {
+                      "content": "ak2x7m4q9wz3c5v8b2n6r4t7y1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  }
+                },
+                {
                   "id": "I181Q",
                   "type": "ref",
                   "ref": "HJDOQ",
@@ -4320,7 +4404,7 @@
                       "content": "Public link"
                     },
                     "kqZe5": {
-                      "content": "https://<id>-pub.example.com/",
+                      "content": "https://ak2x7m4q9wz3c5v8b2n6r4t7y1-pub.example.com/",
                       "textGrowth": "fixed-width",
                       "width": "fill_container"
                     }
@@ -4469,7 +4553,7 @@
                   "type": "ref",
                   "ref": "pnwzV",
                   "name": "Subtitle",
-                  "content": "It cannot be restored.",
+                  "content": "It cannot be restored, and its ID is never used again.",
                   "fill": "$color.text-muted",
                   "textGrowth": "fixed-width",
                   "width": "fill_container"
@@ -4511,6 +4595,23 @@
                   }
                 },
                 {
+                  "id": "PkPdO",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "ID"
+                    },
+                    "kqZe5": {
+                      "content": "ak2x7m4q9wz3c5v8b2n6r4t7y1",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  }
+                },
+                {
                   "id": "pvvaQ",
                   "type": "ref",
                   "ref": "HJDOQ",
@@ -4521,7 +4622,7 @@
                       "content": "Versions"
                     },
                     "kqZe5": {
-                      "content": "3 versions, 14 files, 412 KB",
+                      "content": "3 versions, 4 files, 48.2 KB",
                       "textGrowth": "fixed-width",
                       "width": "fill_container"
                     }
@@ -4565,16 +4666,14 @@
               ]
             },
             {
-              "id": "wYnbY",
+              "id": "RrRIj",
               "type": "ref",
-              "ref": "Lst9o",
+              "ref": "GKN38",
               "name": "notice",
               "width": "fill_container",
-              "fill": "$color.danger-bg",
               "descendants": {
-                "Aupm5": {
-                  "content": "Every URL of every version answers 404 at once, and the files are removed. Export a version first if you want a copy.",
-                  "fill": "$color.danger"
+                "dqFB9": {
+                  "content": "Every URL of every version answers 404 at once, and the files are removed. Export a version first if you want a copy."
                 }
               }
             },
@@ -4623,6 +4722,178 @@
                       }
                     }
                   ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "NCYI3",
+      "x": 5440,
+      "y": 1900,
+      "name": "confirm-result (popup window)",
+      "clip": true,
+      "width": 480,
+      "fill": "$color.bg",
+      "layout": "vertical",
+      "alignItems": "center",
+      "children": [
+        {
+          "id": "S6uZrH",
+          "type": "ref",
+          "ref": "z6iAY",
+          "name": "site-header",
+          "width": "fill_container",
+          "descendants": {
+            "PlBqI": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "U9KkJB",
+          "name": "page page--popup",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": "$space.5",
+          "padding": [
+            "$space.6",
+            "$space.6",
+            "$space.7",
+            "$space.6"
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "hqYV9",
+              "name": "page-heading",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$space.1",
+              "children": [
+                {
+                  "id": "PxGQc",
+                  "type": "ref",
+                  "ref": "ksPem",
+                  "name": "Title",
+                  "content": "The artifact is public",
+                  "fill": "$color.text"
+                },
+                {
+                  "id": "JXHMN",
+                  "type": "ref",
+                  "ref": "pnwzV",
+                  "name": "Subtitle",
+                  "content": "Anyone with its public link can open it without signing in.",
+                  "fill": "$color.text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "V9QwRi",
+              "name": "info",
+              "width": "fill_container",
+              "fill": "$color.surface",
+              "cornerRadius": "$radius.md",
+              "stroke": "$color.border",
+              "strokeWidth": "$border.width",
+              "strokeAlignment": "inner",
+              "layout": "vertical",
+              "gap": "$space.3",
+              "padding": [
+                "$space.4",
+                "$space.5"
+              ],
+              "children": [
+                {
+                  "id": "S7POW1",
+                  "type": "ref",
+                  "ref": "HJDOQ",
+                  "name": "info-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "VbdJD": {
+                      "content": "Artifact"
+                    },
+                    "kqZe5": {
+                      "content": "Quarterly revenue chart"
+                    }
+                  }
+                },
+                {
+                  "id": "w6J96K",
+                  "type": "ref",
+                  "ref": "a175i",
+                  "name": "info-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "g6bvSG": {
+                      "content": "Artifact URL"
+                    },
+                    "fC3ak": {
+                      "content": "https://ak2x7m4q9wz3c5v8b2n6r4t7y1-art.example.com/ ↗",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  }
+                },
+                {
+                  "id": "ZPkwd",
+                  "type": "ref",
+                  "ref": "a175i",
+                  "name": "info-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "g6bvSG": {
+                      "content": "Public URL"
+                    },
+                    "fC3ak": {
+                      "content": "https://ak2x7m4q9wz3c5v8b2n6r4t7y1-pub.example.com/ ↗",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  }
+                },
+                {
+                  "id": "xCo0V",
+                  "type": "ref",
+                  "ref": "a175i",
+                  "name": "info-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "g6bvSG": {
+                      "content": "Details"
+                    },
+                    "fC3ak": {
+                      "content": "Artifact page",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  }
+                },
+                {
+                  "id": "ecmOj",
+                  "type": "ref",
+                  "ref": "a175i",
+                  "name": "info-row",
+                  "width": "fill_container",
+                  "descendants": {
+                    "g6bvSG": {
+                      "content": "Gallery"
+                    },
+                    "fC3ak": {
+                      "content": "All artifacts",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  }
                 }
               ]
             }
