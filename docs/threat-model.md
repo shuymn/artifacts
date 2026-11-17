@@ -397,11 +397,13 @@ and the threats are the three adversaries below, not untrusted users.
   shorter and one longer than its listing; `src/archive.test.ts`: a cancellation before the first entry and one while
   a body's open is pending) (PL-62). A served file's body (a content or public host, the REST file route) likewise
   waits the R2 timeout at most for each chunk and cancels the body on every exit, and a failure after the headers
-  aborts the transfer: _Enforced (main)_ in `src/objects.ts`, `src/operations.ts`, pinned by behavior
-  (`src/serve.test.ts`, `src/rest.test.ts`: a body that fails or stalls midway, one shorter and one longer than its
-  listing; `src/serve.test.ts`: a stalled body cancelled, and the client going away cancelling the body unlogged). The
-  runtime tells either of a cancelled response at its next write, so a body that R2 stalls as the client goes away ends
-  at the R2 timeout, and is logged as one.
+  aborts the transfer before the file's last byte, which waits for the body's end: _Enforced (main)_ in
+  `src/objects.ts`, `src/operations.ts`, pinned by behavior (`src/serve.test.ts`, `src/rest.test.ts`: a body that fails
+  or stalls midway, one shorter and one longer than its listing; `src/serve.test.ts`: a stalled body cancelled, and the
+  client going away cancelling the body unlogged with no timer left; `src/e2e.test.ts`, over a socket: a body that
+  stalls, fails or runs one byte past after the whole file, cut short of its last byte, and an empty file's 500 and
+  503 before the response). The runtime tells either of a cancelled response at its next write, so a body that R2
+  stalls as the client goes away ends at the R2 timeout, and is logged as one.
 
 ### Data (DATA)
 

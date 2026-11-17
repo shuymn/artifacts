@@ -977,10 +977,13 @@ lists that R2 does not hold or holds at another length: an inconsistency rather 
 section 7 states. Each failure logs `operation.failed` with its class, and a browser host (section 6) answers its status
 in plain text. These are failures before the response begins. A served file (a content or public host, the REST file
 route) then streams its object as the export does: each chunk waits at most the R2 timeout, and a read that fails or
-stalls, or bytes short of or past the listed size, error the stream, so the client sees an aborted transfer under the
-`Content-Length` it was given, never a whole-looking one, and logs `operation.failed` with its class. The client going
-away cancels the body unlogged, except while R2 stalls, when the body ends at the R2 timeout and logs `timeout` (Export,
-above). `read_file` reads the whole body, at most 1 MiB, before it answers.
+stalls, or bytes short of or past the listed size, error the stream and log `operation.failed` with its class. The
+client sees an aborted transfer under the `Content-Length` it was given, never a whole-looking one: a client that holds
+every byte `Content-Length` names takes the body as whole, whatever follows, so the file's last byte is held until R2's
+body has ended at the listed size (the export's last bytes, its central directory, likewise follow the end of every
+body). An empty file has no byte to hold, so its end is read before the response, and a failure there is an operation
+error as the `get`'s is. The client going away cancels the body unlogged, except while R2 stalls, when the body ends at
+the R2 timeout and logs `timeout` (Export, above). `read_file` reads the whole body, at most 1 MiB, before it answers.
 
 **Transport and protocol errors** come before or around an operation: 401 `unauthorized` with
 `WWW-Authenticate: Bearer`, which names the route's protected resource metadata where OAuth is on (section 7), 403 for

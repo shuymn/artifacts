@@ -634,9 +634,10 @@ function matchFile(id: ArtifactId, path: ResolvedPath, found: readonly FileRow[]
 }
 
 /**
- * A looked-up file's bytes as a response streams them: the `get` under the R2 timeout, an operation error when it fails,
- * then each chunk under the R2 timeout and exactly the listed size, a failure after that aborting the stream and logging
- * `operation.failed` as a failed read logs it (design.md section 8, "Storage failures").
+ * A looked-up file's bytes as a response streams them: the `get` (and for an empty file its end) under the R2 timeout,
+ * an operation error when it fails, then each chunk under the R2 timeout and exactly the listed size, a failure after
+ * that aborting the stream before its last byte and logging `operation.failed` as a failed read logs it (design.md
+ * section 8, "Storage failures").
  */
 export async function openFile(
   deps: OperationDeps,
@@ -646,7 +647,7 @@ export async function openFile(
   const store = objectStore(deps);
   const failed = (error: unknown) => logFailed(error, { artifact: id });
   return guarded(id, () =>
-    readObject(id, async () => responseBody(store, (await getObject(store, id, file.sha256)).body, file.size, failed)),
+    readObject(id, async () => responseBody(store, await getObject(store, id, file.sha256), file.size, failed)),
   );
 }
 

@@ -206,27 +206,54 @@ export async function* streamBody(
 /**
  * A fetched object's body as a response streams it (design.md section 8, "Storage failures"): `streamBody`'s chunks
  * piped into a `FixedLengthStream` of `size`, so the response keeps its `Content-Length`, which Workers send only for a
- * body of known length. A failure (a read that fails or stalls past the R2 timeout, bytes short of or past `size`) is
- * reported once to `failed` and errors the stream, so the client sees an aborted transfer, never a clean short or long
- * one. The client going away cancels the pipe at its next write, and with it the body, unreported; when R2 stalls then,
- * no write comes, so the body ends at the R2 timeout and is reported as a stall.
+ * body of known length. The byte that completes `size` is held until `streamBody` ends where it should: a client that
+ * has `size` bytes sees a whole transfer, so a stall or an extra byte after them could no longer cut it short. A failure
+ * (a read that fails or stalls past the R2 timeout, bytes short of or past `size`) is reported once to `failed` and
+ * errors the stream before that byte, so the client sees an aborted transfer. An empty body has no byte to hold, so its
+ * end is read before the response, and its failures are thrown as `readBody` throws them. The client going away cancels
+ * the pipe at its next write, and with it the body, unreported; when R2 stalls then, no write comes, so the body ends
+ * at the R2 timeout and is reported as a stall.
  */
-export function responseBody(
+export async function responseBody(
   store: ObjectStore,
-  body: ReadableStream<Uint8Array>,
+  object: R2ObjectBody,
   size: number,
   failed: (error: unknown) => void,
-): ReadableStream<Uint8Array> {
-  const reader = body.getReader();
+): Promise<ReadableStream<Uint8Array>> {
+  const fixed = new FixedLengthStream(size);
+  if (size === 0) {
+    await readBody(store, object, 0);
+    fixed.writable.close().catch(() => {});
+    return fixed.readable;
+  }
+  const reader = object.body.getReader();
   const chunks = streamBody(store, reader, size);
   let cancelled = false;
+  let received = 0;
+  let last: Uint8Array | undefined;
   const source = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        const next = await chunks.next();
-        if (cancelled) return;
-        if (next.done) controller.close();
-        else controller.enqueue(next.value);
+        // A pull that neither enqueues, closes nor errors is followed by no other, so empty chunks are read past.
+        for (;;) {
+          const next = await chunks.next();
+          if (cancelled) return;
+          if (next.done) {
+            if (last !== undefined) controller.enqueue(last);
+            controller.close();
+            return;
+          }
+          let chunk = next.value;
+          received += chunk.byteLength;
+          if (received === size && chunk.byteLength > 0) {
+            last = chunk.subarray(chunk.byteLength - 1);
+            chunk = chunk.subarray(0, chunk.byteLength - 1);
+          }
+          if (chunk.byteLength > 0) {
+            controller.enqueue(chunk);
+            return;
+          }
+        }
       } catch (error) {
         // After a cancellation the reader ends short; that is not a failure.
         if (cancelled) return;
@@ -241,7 +268,6 @@ export function responseBody(
       chunks.return(undefined).catch(() => {});
     },
   });
-  const fixed = new FixedLengthStream(size);
   source.pipeTo(fixed.writable).catch(() => {});
   return fixed.readable;
 }
