@@ -234,7 +234,7 @@ export async function responseBody(
   const source = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        // A pull that neither enqueues, closes nor errors is followed by no other, so empty chunks are read past.
+        // A pull that neither enqueues, closes nor errors may be followed by no other, so empty chunks are read past.
         for (;;) {
           const next = await chunks.next();
           if (cancelled) return;

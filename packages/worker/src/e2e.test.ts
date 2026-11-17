@@ -226,6 +226,12 @@ describe("section 8: a served file's body over HTTP", () => {
       { "index.html": encoder.encode("page"), "a.txt": encoder.encode("abcd"), "empty.txt": new Uint8Array() },
       broken,
     );
+    const shared = await broken.fetch(`http://${API_HOST}/v1/artifacts/${id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ public: true }),
+    });
+    if (shared.status !== 200) throw new Error(`making the artifact public answered ${shared.status}`);
   }, 120_000);
 
   afterAll(async () => {
@@ -235,6 +241,7 @@ describe("section 8: a served file's body over HTTP", () => {
   const routes = (path: string) =>
     [
       ["the content host", `${id}-art.localhost`, `/${path}`, {}],
+      ["the public host", `${id}-pub.localhost`, `/${path}`, {}],
       [
         "the REST file route",
         API_HOST,
@@ -247,10 +254,13 @@ describe("section 8: a served file's body over HTTP", () => {
   it.each(["stall", "extra", "fail"])(
     "cuts the transfer short of the last byte when the body is whole and then has %s",
     async (mode) => {
+      const answers = [];
+      const expected = [];
       for (const [route, host, path, headers] of routes("a.txt")) {
-        const received = await receive(address, host, path, { ...headers, "X-Test-Body": mode });
-        expect({ route, ...received }).toEqual({ route, status: 200, length: "4", body: "abc", whole: false });
+        answers.push({ route, ...(await receive(address, host, path, { ...headers, "X-Test-Body": mode })) });
+        expected.push({ route, status: 200, length: "4", body: "abc", whole: false });
       }
+      expect(answers).toEqual(expected);
     },
     30_000,
   );
@@ -270,6 +280,7 @@ describe("section 8: a served file's body over HTTP", () => {
         answers.push({ status: received.status, whole, body: body.startsWith("{") ? JSON.parse(body) : body });
       }
       expect(answers).toEqual([
+        { status, whole: true, body: text },
         { status, whole: true, body: text },
         { status, whole: true, body: { error: { code, message: expect.any(String) } } },
       ]);

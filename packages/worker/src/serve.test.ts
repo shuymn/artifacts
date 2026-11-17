@@ -601,6 +601,41 @@ describe("section 8: a served file's R2 read", () => {
 // Design.md section 8, "Storage failures": after the headers, a body that fails, stalls, or holds fewer or more bytes
 // than the stored size aborts the transfer and logs `operation.failed`; the client never gets a clean short or long 200.
 describe("section 8: a served file's body after the headers", () => {
+  // The last byte is held until the body ends, so a chunk may shrink to nothing; each must still come out whole.
+  it.each<[string, string, readonly string[]]>([
+    ["empty chunks before, between and after the bytes", "abcd", ["", "ab", "", "", "cd", "", ""]],
+    ["a file of one byte", "a", ["a"]],
+    ["a file of one byte among empty chunks", "a", ["", "a", ""]],
+    ["a last chunk of exactly one byte", "abcd", ["abc", "d"]],
+    ["one byte per chunk", "abcdefghijklmnopqrstuvwxyz0123456789", "abcdefghijklmnopqrstuvwxyz0123456789".split("")],
+    ["an empty file in empty chunks", "", ["", ""]],
+  ])("serves a sound file whole across %s", async (_label, stored, chunks) => {
+    const world = new World();
+    const id = (await world.created({ title: "t", files: { "index.html": "page", "a.txt": stored } })).artifact.id;
+    const bucket = new BucketProbe();
+    world.env = { ...world.env, FILES: bucket.binding };
+    bucket.behave = (op) => {
+      if (op !== "get") return undefined;
+      const queue = [...chunks];
+      const body = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            const next = queue.shift();
+            if (next === undefined) controller.close();
+            else controller.enqueue(new TextEncoder().encode(next));
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      return Promise.resolve({ body });
+    };
+    const logs = captureLogs();
+    const response = await world.content(id, "/a.txt");
+    expect([response.status, response.headers.get("Content-Length")]).toEqual([200, String(stored.length)]);
+    expect(await readToEnd(response)).toEqual({ text: stored, aborted: false });
+    expect(logEvents(logs.lines)).toEqual([]);
+  });
+
   it.each(brokenBodies("text"))(
     "aborts a content and a public host's transfer when the body %s, and logs it",
     async (_label, body, reason) => {
