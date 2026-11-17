@@ -1,6 +1,8 @@
 // The viewer frame's script in browsers (design.md section 6, "The script"; PL-55), the page's color scheme in the
 // frame (section 6, "Color scheme"; PL-54's browser part), and the confirmation popup the script opens (section 10;
 // PL-56's and PL-58's browser parts), against the Worker in the local runtime.
+import { inflateSync } from "node:zlib";
+
 import { expect, test, type Frame, type Page } from "@playwright/test";
 
 import { appOrigin, contentOrigin, create, update, withoutPopover } from "./support.ts";
@@ -35,11 +37,28 @@ async function framedAt(page: Page, path: string): Promise<Frame> {
   return frame;
 }
 
-/** Whether an opaque `rgb()` color is light or dark, by the sum of its channels. */
-function lightness(color: string): "light" | "dark" | undefined {
-  const channels = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(color)?.slice(1).map(Number);
-  if (channels === undefined) return undefined;
-  return channels.reduce((sum, channel) => sum + channel, 0) >= 3 * 128 ? "light" : "dark";
+/**
+ * Whether the browser shows the point (x, y) of the viewport light or dark, by the sum of its color's channels in a
+ * screenshot of it. The PNG's first pixel is stored as is whatever its row's filter, since every filter predicts it
+ * from zeros.
+ */
+async function shownAt(page: Page, x: number, y: number): Promise<"light" | "dark"> {
+  const png = await page.screenshot({ clip: { x, y, width: 1, height: 1 } });
+  const data: Buffer[] = [];
+  let format = "";
+  for (let offset = 8; offset < png.length;) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString("latin1", offset + 4, offset + 8);
+    const body = png.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") format = `${body.readUInt8(8)}/${body.readUInt8(9)}`;
+    if (type === "IDAT") data.push(body);
+    offset += 12 + length;
+  }
+  // Eight bits per channel, RGB or RGBA.
+  if (format !== "8/2" && format !== "8/6") throw new Error(`a screenshot in an unexpected format: ${format}`);
+  const pixels = inflateSync(Buffer.concat(data));
+  const sum = pixels.readUInt8(1) + pixels.readUInt8(2) + pixels.readUInt8(3);
+  return sum >= 3 * 128 ? "light" : "dark";
 }
 
 /** Whether a panel shows, by its box: popover and `hidden` both remove it from the layout. */
@@ -247,27 +266,58 @@ test.describe("PL-55: the frame's script", () => {
 });
 
 // Design.md section 6, "Color scheme": the page follows the browser's preference as at the top level; the header does
-// not.
+// not. The page takes either scheme and paints no background, so what shows in the frame is the canvas of the scheme
+// it uses: transparent over the iframe's background where the two schemes match, opaque in the page's otherwise.
+const PLAIN = {
+  "index.html": `<!doctype html><meta name="color-scheme" content="light dark"><title>plain</title><p>plain</p>`,
+};
+
+const prefersDark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+
+/** The frame page at the plain page: what the browser prefers, what the page sees and shows, and the header. */
+async function schemes(page: Page, id: string) {
+  await page.goto(`${contentOrigin(id)}/`);
+  await expect(page).toHaveTitle("plain");
+  const inner = await framedAt(page, "/");
+  const frame = await page.locator("#viewer-frame").boundingBox();
+  const header = await page.locator(".viewer-header").boundingBox();
+  if (frame === null || header === null) throw new Error("the frame page has no frame or no header");
+  return {
+    browser: (await page.evaluate(prefersDark)) ? "dark" : "light",
+    sees: (await inner.evaluate(prefersDark)) ? "dark" : "light",
+    shows: await shownAt(page, frame.x + frame.width / 2, frame.y + frame.height / 2),
+    header: await shownAt(page, header.x + 2, header.y + 2),
+  };
+}
+
 test.describe("PL-54: the page's color scheme", () => {
-  for (const scheme of ["light", "dark"] as const) {
-    test(`shows the page in the browser's ${scheme} color scheme under the dark header`, async ({ page }) => {
-      const id = await create("Probe", probe());
-      await page.emulateMedia({ colorScheme: scheme });
-      await page.goto(`${contentOrigin(id)}/`);
-      await expect(page).toHaveTitle("probe");
-      const inner = await framedAt(page, "/");
-      expect(await inner.evaluate(() => matchMedia("(prefers-color-scheme: light)").matches)).toBe(scheme === "light");
-      expect(await inner.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(scheme === "dark");
-      // What a page without a background of its own shows through: the canvas in the page's scheme.
-      const backgrounds = await page.evaluate(() =>
-        [".viewer__frame", ".viewer-header"].map((selector) => {
-          const element = document.querySelector(selector);
-          return element === null ? "" : getComputedStyle(element).backgroundColor;
-        }),
+  // One test for both, so it fails whichever scheme the iframe would hold the page in.
+  test("shows the page in the browser's light and then dark preference, under the dark header", async ({
+    page,
+    browserName,
+    playwright,
+  }) => {
+    const id = await create("Plain", PLAIN);
+    for (const scheme of ["light", "dark"] as const) {
+      const expected = { browser: scheme, sees: scheme, shows: scheme, header: "dark" };
+      if (browserName !== "chromium") {
+        await page.emulateMedia({ colorScheme: scheme });
+        expect(await schemes(page, id)).toEqual(expected);
+        continue;
+      }
+      // Chromium applies an emulated preference in every frame, over the iframe's color scheme, so it runs on its own
+      // preference without emulation: light by default, dark with `--force-dark-mode`, which its headless shell
+      // ignores and its full build takes.
+      const own = await playwright.chromium.launch(
+        scheme === "dark" ? { channel: "chromium", args: ["--force-dark-mode"] } : {},
       );
-      expect(backgrounds.map(lightness)).toEqual([scheme, "dark"]);
-    });
-  }
+      try {
+        expect(await schemes(await own.newPage({ colorScheme: null }), id)).toEqual(expected);
+      } finally {
+        await own.close();
+      }
+    }
+  });
 });
 
 test.describe("PL-58: the confirmation popup", () => {
