@@ -751,8 +751,9 @@ Worker, keep the frame page's `ETag` and `Vary`, and keep `Content-Length` on a 
 
     Pass: `application/zip`, a `content-length` equal to the file's size, `attachment; filename="<ID>-v1.zip"`,
     `no-store`; `unzip -l` lists the version's files; `cmp` prints nothing. The viewer's Export item downloads the same
-    archive. A missing `content-length` means the edge drops it from a streamed response; the archive is still whole,
-    but a cut stream then shows only as an archive that does not open.
+    archive. A missing `content-length` is a failure: the Worker streams the archive through a `FixedLengthStream`
+    (design.md section 8, "Export"), so the runtime sends the length, and something between it and the client removed
+    it.
 
 Afterwards: `ARTIFACTS_TOKEN=$TOKEN artifacts delete "$ID"` (and `"$ID2"` after check 15), revoke the check token,
 and revoke the grants made only for the checks. After check 18, deleting the probe from the viewer's menu (Delete…)
