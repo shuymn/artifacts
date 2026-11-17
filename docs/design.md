@@ -328,9 +328,9 @@ parameter changes only the representation; stored bytes never change (P4).
 **Order.** The method (ISO-3), Access (ACC-1) and the path (SRV-2) come first, then one D1 batch reads the file and,
 when the first two conditions hold, the artifact and the version rows the header shows, from one snapshot. Existence
 answers 404 as before. Then the Worker chooses the representation and evaluates that representation's validator: the
-frame page's `ETag` is 32 hex digits of the SHA-256 of its rendered bytes, as a gallery page's (section 10), and a
-file's is the one above. A matching `If-None-Match` answers 304 with the 200's headers, so no 304 skips a check (SRV-3).
-`HEAD` mirrors `GET`.
+frame page's `ETag` is 32 hex digits of the SHA-256 of its rendered bytes and the time zone it shows times in, as a
+gallery page's (section 10), and a file's is the one above. A matching `If-None-Match` answers 304 with the 200's
+headers, so no 304 skips a check (SRV-3). `HEAD` mirrors `GET`.
 
 **The page** is the header and one `<iframe>` that fills the rest of the viewport. The iframe loads the same path and
 query, and its request, with `Sec-Fetch-Dest: iframe`, gets the file as this section serves it; the page sees a
@@ -365,8 +365,8 @@ not. Every value is escaped by the gallery's template.
 **Menu.** A `popover`, opened by the header's button through `popovertarget` (the script stands in where the browser
 has no `popover`, below), listing:
 
-- the shown version and its time (UTC, as the gallery shows times); no publisher name, which the gallery shows, so the
-  menu keeps one fixed width;
+- the shown version and its time, in the request's time zone as the gallery shows times (section 10); no publisher
+  name, which the gallery shows, so the menu keeps one fixed width;
 - **Back to gallery**, the app host's `/`, and **Artifact details**, `/a/<id>` there: app-host links are absolute URLs
   built from the configuration;
 - **History**, a nested `popover`: the newest 10 versions, number and date only, the shown one marked, then the shown
@@ -1184,12 +1184,19 @@ A deleted artifact and any other path answer 404. Artifact text is escaped and t
 except the confirmation pages' and the result page's (ISO-5). The gallery links to artifacts rather than framing them:
 Access's behavior in frames is not documented.
 
-A page is `private, no-cache` with an `ETag`: 32 hex digits of the SHA-256 of its rendered bytes, so a matching
-`If-None-Match` answers 304 with the 200's headers (CSP, CORP, `nosniff`, referrer policy, `Cache-Control`). The tag
-covers everything the page shows, the archive counts, links and relative times included, which no stored timestamp
-would: a page with the same data an hour later reads differently. The Worker renders the page before it compares, after
-Access (ACC-1) and a successful query, so a 304 skips no check (SRV-3) and saves only the transfer; a refusal, a 404 and
-a failed read carry no tag.
+Times are in the time zone Cloudflare estimates for the request, `request.cf.timezone`, or in UTC when the request has
+none or `Intl` rejects it; each `<time>` keeps the UTC instant in `datetime` and names the zone in `title`
+([gallery/design.md](gallery/design.md), "Times"). The zone follows the request's IP address, so through a VPN or a
+relay it is the exit's.
+
+A page is `private, no-cache` with an `ETag`: 32 hex digits of the SHA-256 of its rendered bytes followed by the time
+zone it shows times in, so a matching `If-None-Match` answers 304 with the 200's headers (CSP, CORP, `nosniff`,
+referrer policy, `Cache-Control`). The tag covers everything the page shows, the archive counts, links and relative
+times included, which no stored timestamp would: a page with the same data an hour later reads differently. It covers
+the zone even where the bytes do not show it (a list's relative times read alike in every zone), so a 304 never
+revalidates a page rendered for another zone. The Worker renders the page before it compares, after Access (ACC-1) and
+a successful query, so a 304 skips no check (SRV-3) and saves only the transfer; a refusal, a 404 and a failed read
+carry no tag.
 
 Every page's header shows the gallery's icon and the wordmark, one link to `/`, then the release version, the root
 `package.json`'s, built into the Worker ([gallery/design.md](gallery/design.md), "Icon" and "Behavior the static design
@@ -1426,6 +1433,7 @@ OAuth rows run the Worker with production-shaped hosts and the test Access key s
 | PL-61 | If a version holds a path with `\` or a path that another path uses as a directory, then its export shall answer 409 `not_extractable` naming every such path, before any R2 read.                                                                                                                                                                          | section 8 (Export)        | `a\b`; `a` beside `a/b`; both in one version; a version without either exported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | PL-62 | While an export streams, the Worker shall hold at most one R2 body open, cancel it when the client goes away, and turn a failure after the headers into an aborted stream; a failure before them shall be an operation error.                                                                                                                               | RES-2, section 8 (Export) | a stubbed bucket counting open bodies; the response cancelled mid-file: that body cancelled and no later `get`; a `get` that fails or stalls on the first file (503 `unavailable` in JSON), one that finds no object there (500 `internal`), and both on a later one (an errored stream, `operation.failed`); a body that stalls past the timeout between chunks; an object shorter and one longer than its listing; the app-host download without a JWT and with the content audience (403); REST without a credential (401)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | PL-63 | When the CLI exports, it shall write the archive to a temporary file beside the target and put it at the target without overwriting, only after a whole stream of the announced length; if anything fails, then it shall leave an existing target as it was, remove what it created when it can and name what it cannot.                                    | section 9                 | against the Worker: the latest version without `--version`, a pinned one, `-o`; an existing target refused before the request; a target created during the download kept byte for byte, the command failing and naming it; where `link` is refused, the copy with and without a target, a target taken and the part unreadable before the copy (the target kept), a write and a close failing after the create (the target removed), and the copy moved away and another file put at its path before a write fails (that file kept, the moved copy named); against a local stand-in: a stream cut midway, a stream shorter and one longer than its `Content-Length`, none and another type, a stall past 60 s before the headers and midway, a download longer than 60 s that never stalls, a 409 printing its paths escaped, 404, 503 and another error, an interrupt, a part that cannot be removed named after the failure, a stored login's refresh, before the request and after a 401, slower than the limit not counted against it and an interrupt during it awaited, and a 401 body that never cancels; no `.part` left, no token printed; in the smoke tests, the binary's default name and, on macOS and Linux, SIGINT               |
+| PL-64 | When a gallery page or the frame page shows a time, the Worker shall write it to the minute in the request's time zone (`request.cf.timezone`), or in UTC where the request has none or `Intl` rejects it, keep the UTC instant in `datetime` and name the zone in `title`, and cover the zone in the page's `ETag`.                                        | section 10                | Tokyo and Los Angeles, with a version on another date than in UTC, and both of Los Angeles's daylight saving changes; no `cf`, `cf` without a zone and a zone `Intl` rejects (UTC, 200); a list's relative times alike in every zone; a gallery page's and the frame's tag by zone, another zone's tag answered 200; in a browser, the menu's time after a navigation to `/_v/<m>/` taken from the history                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ## OAuth delivery
 

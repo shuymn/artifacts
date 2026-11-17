@@ -224,9 +224,18 @@ do in CSS.
   container) the table becomes one card per row, each cell prefixed by its `data-label`. The header row is hidden
   visually but stays for screen readers, and the prefix is hidden from them. The consent pages' column is `size.prose`
   wide, narrowed to the same gutter; the input stretches to it, border included, and the buttons wrap.
-- **Times** are UTC, `YYYY-MM-DD HH:MM`, in `<time datetime="YYYY-MM-DDTHH:MM:00Z">`; list rows show a relative time
-  (`2 hours ago`) with the same `datetime`. The viewer's history shows the date alone, `YYYY-MM-DD`, and no relative
-  time, so the frame page's bytes, and its `ETag`, change only with its data.
+- **Times** are in the time zone Cloudflare estimates for the request from its IP address (`request.cf.timezone`, an
+  IANA name such as `Asia/Tokyo`), converted by the Worker with `Intl.DateTimeFormat` (the gallery's pages run no
+  script): `YYYY-MM-DD HH:MM` in `<time datetime="YYYY-MM-DDTHH:MM:00Z" title="Asia/Tokyo">`. `datetime` is the UTC
+  instant, and `title` names the zone, which the text leaves out: a label such as `JST` would wrap the viewer menu's
+  first line. A request without a zone, or with one `Intl` rejects, gets UTC and `title="UTC"`; the zone never fails a
+  page. Through a VPN or a relay the zone is the exit's, which the title shows on hover. List rows show a relative time
+  (`2 hours ago`), the same in every zone, with the same `datetime` and no `title`. The viewer's history shows the date
+  alone, `YYYY-MM-DD` by the zone's calendar, and no relative time, so the frame page's bytes change only with its data
+  and its zone; each date carries its minute in `data-minute`, which the frame's script copies into the menu's first
+  line after a navigation to that version. A page's `ETag` covers the zone as well as the bytes
+  ([design.md](../design.md), section 10). The reference pages show UTC. The API, MCP, the CLI and the logs keep
+  ISO 8601 times in UTC.
 - **The viewer's header** keeps one line at every width: the title gives up its width first, down to its ellipsis,
   while the icon, the version and the menu button keep theirs. The frame below it takes the rest of the viewport.
 - **The viewer's menu** has one fixed width, whatever the title or the version, and opens under its button at the
