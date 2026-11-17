@@ -11,7 +11,7 @@
  * reason only (DATA-1). No cookie is read or set (ISO-4).
  */
 import { readBytes } from "./body.ts";
-import { encodeBase64 } from "./encoding.ts";
+import { scriptSource } from "./encoding.ts";
 import type { OperationErrorCode } from "./errors.ts";
 import type { Markup } from "./gallery/html.ts";
 import { deletePage, RESULT_SCRIPT_TEXT, resultPage, visibilityPage } from "./gallery/pages.ts";
@@ -123,19 +123,13 @@ function desiredState(fields: readonly [string, string][]): boolean | undefined 
   return field[1] === "true" ? true : field[1] === "false" ? false : undefined;
 }
 
-/** The `sha256-…` source of the result page's script, for its CSP. */
-async function scriptSource(): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(RESULT_SCRIPT_TEXT));
-  return `sha256-${encodeBase64(new Uint8Array(digest))}`;
-}
-
 /** `POST`: the checks of design.md section 10 in its order, then the change and the result page. */
 async function decide(request: Request, confirmation: Confirmation, deps: OperationDeps): Promise<ConfirmationAnswer> {
   if (request.headers.get("Origin") !== appOrigin(deps.config)) return refused("origin", 403);
   if (request.headers.get("Sec-Fetch-Site") !== "same-origin") return refused("site", 403);
   const fields = await readFields(request);
   if (!Array.isArray(fields)) return refused("body", fields);
-  const policy = { script: await scriptSource() };
+  const policy = { script: await scriptSource(RESULT_SCRIPT_TEXT) };
   if (confirmation.action === "delete") {
     // The delete form has no field.
     if (fields.length > 0) return refused("body", 400);
