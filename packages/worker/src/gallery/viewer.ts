@@ -32,13 +32,12 @@ function versionLine(shown: number, latest: number): string {
   return shown === latest ? `v${shown} · latest` : `v${shown} of ${latest}`;
 }
 
-/** A link of the menu or the history: its icon, its label and an optional trailing icon. */
+/** A link of the menu or the history: its icon and its label. */
 function item(
   href: string,
   lead: IconName,
   label: Value,
   options: {
-    readonly trailing?: IconName;
     readonly danger?: boolean;
     /** A confirmation page: the script opens it in a popup, the link in a new tab. */
     readonly popup?: boolean;
@@ -52,9 +51,7 @@ function item(
     ${options.id !== undefined && html`id="${options.id}"`}
     ${options.popup === true && html`target="_blank"`}
     ${options.current === true && html`aria-current="page"`}
-    >${icon(lead, "menu-item__icon")}<span class="menu-item__label">${label}</span>${
-      options.trailing !== undefined && icon(options.trailing, "menu-item__trailing")
-    }</a
+    >${icon(lead, "menu-item__icon")}<span class="menu-item__label">${label}</span></a
   >`;
 }
 
@@ -90,7 +87,7 @@ function menu(view: ViewerView): Markup {
     <p class="viewer-menu__shown">${shownLine(shown, latest)}</p>
     <ul role="list">
       <li>${item(`${view.app}/`, "arrow-left", "Back to gallery")}</li>
-      <li>${item(page, "info", "Artifact details", { trailing: "arrow-up-right" })}</li>
+      <li>${item(page, "info", "Artifact details")}</li>
       <li>
         <button class="menu-item" type="button" popovertarget="viewer-history">
           ${icon("history", "menu-item__icon")}<span class="menu-item__label">History</span>${icon(
@@ -132,7 +129,7 @@ function history(view: ViewerView): Markup {
       ${listed.map((version) => historyItem(version, latest, shown.number))}
     </ul>
     <hr class="viewer-history__divider" />
-    ${item(`${artifact.gallery_url}#versions`, "layout-grid", "All versions in gallery", { trailing: "arrow-up-right" })}
+    ${item(`${artifact.gallery_url}#versions`, "layout-grid", "All versions in gallery")}
   </div>`;
 }
 

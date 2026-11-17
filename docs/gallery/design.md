@@ -174,9 +174,11 @@ runs no script), the `icon-button` that opens the menu, and the two panels. `vie
 `ul[role=list]` of `li` > `menu-item`, `hr.viewer-menu__divider`, a second list with Delete, another divider and
 `p.viewer-menu__footer`. `viewer-history` holds `p.viewer-history__head`, `ul[role=list]` of `li` > `a.menu-item` with
 `aria-current="page"` on the shown version, `hr.viewer-history__divider`, then the `menu-item` that links to all
-versions. A `menu-item` is `svg.menu-item__icon`, `span.menu-item__label` and, on some items, `svg.menu-item__trailing`;
-its icons are Lucide's, as `gallery.pen` draws them, in [`icons.ts`](../../packages/worker/src/gallery/icons.ts). In the
-history, the icon is a check, shown on the marked version and holding its place on the others.
+versions. A `menu-item` is `svg.menu-item__icon` and `span.menu-item__label`; History, which opens its list beside the
+menu, ends with `svg.menu-item__trailing`, a chevron. The other items have no trailing icon: each navigates in the same
+tab, or opens a confirmation in a popup. The icons are Lucide's, as `gallery.pen` draws them, in
+[`icons.ts`](../../packages/worker/src/gallery/icons.ts). In the history, the icon is a check, shown on the marked
+version and holding its place on the others.
 
 Screens also use `main.page` (`.page--detail` on an artifact page, `.page--narrow` on the consent pages, `.page--popup`,
 the popup window's full width with `space.6` padding at the top and sides and `space.7` below, on the confirmation
