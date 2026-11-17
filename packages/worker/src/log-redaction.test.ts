@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   API,
+  APP_AUD,
+  APP_HOST,
   BucketProbe,
   callTool,
   captureLogs,
@@ -64,6 +66,19 @@ describe("DATA-1: log redaction", () => {
     const jwt = await world.jwt();
     await keep(world.content(id, `/${MARKERS.path}.txt`, { jwt }));
     await keep(world.public(id, `/_v/1/${MARKERS.path}.txt`));
+    // Exports: the archive on REST and the app host, and a version whose paths cannot be extracted, which the answer
+    // names and the log never does.
+    await (await keep(world.api("GET", `/v1/artifacts/${id}/versions/1/export`))).arrayBuffer();
+    const download = world.fetch(`https://${APP_HOST}/a/${id}/v/1/export`, {
+      headers: { "Cf-Access-Jwt-Assertion": await world.jwt({ aud: APP_AUD }) },
+    });
+    await (await keep(download)).arrayBuffer();
+    const clash = await (
+      await keep(
+        world.create({ title: "clash", files: { "index.html": "x", [MARKERS.path]: "x", [`${MARKERS.path}/x`]: "x" } }),
+      )
+    ).json<{ artifact: { id: string } }>();
+    expect((await keep(world.api("GET", `/v1/artifacts/${clash.artifact.id}/versions/1/export`))).status).toBe(409);
 
     // Refusals.
     await keep(world.api("GET", "/v1/artifacts", { token: MARKERS.badToken }));
@@ -87,6 +102,13 @@ describe("DATA-1: log redaction", () => {
     await keep(world.create({ title: MARKERS.title, files: { "index.html": `${MARKERS.bytes}-new` } }));
     bucket.behave = (op) => (op === "get" ? never() : undefined);
     await keep(world.content(id, "/"));
+    await keep(world.api("GET", `/v1/artifacts/${id}/versions/1/export`));
+    // An export that fails after its headers: the second file's get (the marker path's) fails.
+    let gets = 0;
+    bucket.behave = (op) => (op === "get" && ++gets === 2 ? Promise.reject(new Error(MARKERS.error)) : undefined);
+    const aborted = await world.api("GET", `/v1/artifacts/${id}/versions/1/export`);
+    expect(aborted.status).toBe(200);
+    await expect(aborted.arrayBuffer()).rejects.toBeDefined();
     bucket.behave = () => undefined;
     database.behave = (_index, statements) =>
       statements.length > 2 ? Promise.reject(new Error(MARKERS.error)) : undefined;

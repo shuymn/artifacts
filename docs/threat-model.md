@@ -136,8 +136,10 @@ and the threats are the three adversaries below, not untrusted users.
   for 7 days, a 5 s key fetch) are checked by review, not by tests, which substitute short ones. `/oauth/authorize` is
   verified with the app audience like the gallery, its `POST` included: _Enforced (main)_ in `src/index.ts`, pinned by
   behavior (`src/consent.test.ts`: `GET` and `POST` without a JWT and with the content audience's answer 403 before
-  the library) (PL-37). The confirmation pages and the version download are verified with the app audience too, a `POST`
-  before its body is read: _Planned (viewer)_ (PL-56, PL-62).
+  the library) (PL-37). The version download is verified with the app audience like the gallery, before any D1 or R2
+  call: _Enforced (main)_ in `src/index.ts`, pinned by behavior (`src/export.test.ts`: without a JWT and with the
+  content audience's, 403 with no D1 or R2 call) (PL-62). The confirmation pages are verified with the app audience
+  too, a `POST` before its body is read: _Planned (viewer)_ (PL-56).
 - **ACC-2: Access verification is skipped only for a `localhost` configuration.** Every configured host must be a
   `localhost` name; no variable turns verification off, and the deployment script refuses `localhost` hosts and ports.
   OAuth is off there too, so no consent page runs without Access: every OAuth path answers 404. _Enforced (main)_ in
@@ -215,7 +217,8 @@ and the threats are the three adversaries below, not untrusted users.
   owner without giving the framer its content; for one owner, no framing policy is added. Public hosts do not send
   CORP: their content needs no credential, so loading it reveals nothing a direct request does not.
   _Enforced (main)_ in `src/serve.ts`, `src/gallery/route.ts`. Pinned by behavior (`src/serve.test.ts`,
-  `src/routing.test.ts`, `src/gallery/gallery.test.ts`: every route and status, both host classes) and deployed check
+  `src/routing.test.ts`, `src/gallery/gallery.test.ts`: every route and status, both host classes;
+  `src/export.test.ts`: the version download's 200 and 409) and deployed check
   (design AC-8: artifact A's `<script src>` to artifact B fails, B loads its own). **Gap:** the deployed check has not
   run. The OAuth library adds CORS headers for browser clients; the router removes them, and `OPTIONS` answers 405 on
   every API route before authentication, and 404 on a path no route takes: _Enforced (main)_ in `src/oauth.ts`,
@@ -348,8 +351,13 @@ and the threats are the three adversaries below, not untrusted users.
   token's record and its grant's revocation record, wait 10 s each and answer 503 before any D1 or R2 call: _Enforced
   (main)_ in `src/credentials.ts`, pinned by behavior (`src/credentials.test.ts`: each read failing and never
   answering, on `/mcp` and `/v1/`) (PL-40). An export holds at most one R2 body open, waits the R2 timeout at most for
-  each `get` and each chunk, and cancels the body on every exit, the client's cancellation included: _Planned (viewer)_
-  (PL-62).
+  each `get` and each chunk, and cancels the body on every exit, the client's cancellation included: _Enforced (main)_
+  in `src/archive.ts`, `src/objects.ts`, `src/operations.ts`, pinned by behavior (`src/export.test.ts`: a bucket
+  counting open bodies; a response cancelled mid-file, its body cancelled and no later `get`; a `get` that fails,
+  stalls or finds no object, on the first file and on a later one; a body that stalls between chunks; an object
+  shorter and one longer than its listing; `src/archive.test.ts`: a cancellation before the first entry and one while
+  a body's open is pending) (PL-62). The runtime tells the export of a cancelled response at its next
+  write, so a body that R2 stalls as the client goes away ends at the R2 timeout, and is logged as one.
 
 ### Data (DATA)
 
@@ -377,14 +385,16 @@ and the threats are the three adversaries below, not untrusted users.
   handle and cookie, a code, a form value and a KV error's message, none appearing; `src/credentials.test.ts`: changes,
   refusals and KV failures with OAuth tokens, no token, secret, client ID or name or KV error appearing, and a grant's
   ID only beside its publisher name in a change or in the refusal of a revoked grant) and source check
-  (`src/source.test.ts`: `console` only in the logging module; `wrangler.jsonc`). **Gap:** the gallery's routes are
-  not among the redaction
-  markers yet. **Changed for OAuth:** "only `logEvent`" covers the Worker's own sources, since the dependency's two
-  lines are bounded here rather than suppressed by patching it, and the first can quote a public artifact's values
-  when a client ID names it or redirects to it. What DATA-1 protected holds: no credential or private content reaches
-  the logs, and a public artifact's values are open to anyone with its link. The confirmation pages add one closed
-  field, `via`, the browser path a change came by, and log reason codes only; an export logs its failure's class, never
-  a path, though a `not_extractable` answer names paths to its caller: _Planned (viewer)_ (PL-59, PL-62).
+  (`src/source.test.ts`: `console` only in the logging module; `wrangler.jsonc`). **Gap:** the gallery's pages are
+  not among the redaction markers yet. **Changed for OAuth:** "only `logEvent`" covers the Worker's own sources, since
+  the dependency's two lines are bounded here rather than suppressed by patching it, and the first can quote a public
+  artifact's values when a client ID names it or redirects to it. What DATA-1 protected holds: no credential or
+  private content reaches the logs, and a public artifact's values are open to anyone with its link. An export logs its
+  failure's class, never a path, though a `not_extractable` answer names paths to its caller: _Enforced (main)_ in
+  `src/operations.ts`, pinned by log redaction (`src/log-redaction.test.ts`: an export, the download, a
+  `not_extractable` answer, and failures before and after the headers, with markers in a path and an error's message)
+  (PL-62). The confirmation pages add one closed field, `via`, the browser path a change came by, and log reason codes
+  only: _Planned (viewer)_ (PL-59).
 - **DATA-2: deployment values stay out of the repository.** `wrangler.jsonc` sets no variable, route or identifier,
   and binds `OAUTH_KV` without an ID; the deployment values live in the gitignored `wrangler.deploy.jsonc` or a Workers
   Builds variable, the committed example holds placeholders only, and `API_TOKENS` is a secret. _Enforced (main)_ in

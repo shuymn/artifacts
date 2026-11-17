@@ -4,6 +4,7 @@
  * or an operation error from errors.ts's closed set. REST (rest.ts) and MCP decode, call and encode only, so both give
  * the same results and errors for the same input.
  */
+import { archiveLength, archiveStream, unextractablePaths } from "./archive.ts";
 import type { Config } from "./config.ts";
 import { contentTypeFor } from "./content-type.ts";
 import type { Publisher } from "./credentials.ts";
@@ -51,6 +52,7 @@ import {
   readBody,
   sha256Hex,
   StorageError,
+  streamBody,
   uploadObjects,
   type ObjectStore,
 } from "./objects.ts";
@@ -548,6 +550,81 @@ export async function readFile(deps: OperationDeps, id: ArtifactId, file: FileJs
   return guarded(id, async () => {
     const store = objectStore(deps);
     return succeed(await readBody(store, await getObject(store, id, file.sha256), file.size));
+  });
+}
+
+export type ExportInput = {
+  readonly id: string;
+  readonly version: number;
+  /** False for a `HEAD`, which answers the headers without reading R2. */
+  readonly body: boolean;
+};
+
+/** A version's archive: what its headers name, and its bytes unless a `HEAD` asked. */
+export type VersionArchive = {
+  readonly id: ArtifactId;
+  readonly number: number;
+  readonly length: bigint;
+  readonly body: ReadableStream<Uint8Array> | null;
+};
+
+/**
+ * Export (design.md section 8): one live version's files as a ZIP archive, in path order. The file list comes from one
+ * D1 read; paths that cannot be extracted as stored are refused with `not_extractable`, naming each; the first file's
+ * object is fetched before the answer, so every failure until then is an operation error. After that the archive
+ * streams one R2 body at a time, each `get` and each chunk under the R2 timeout, and a failure aborts the stream and
+ * logs `operation.failed` with its class.
+ */
+export async function exportVersion(deps: OperationDeps, input: ExportInput): Promise<Result<VersionArchive>> {
+  const id = input.id;
+  if (!isArtifactId(id)) return NOT_FOUND;
+  return guarded(id, async (): Promise<Result<VersionArchive>> => {
+    const [versionResult, filesResult] = await read(database(deps), [
+      selectVersion(deps.db, id, input.version),
+      selectFiles(deps.db, id, input.version),
+    ]);
+    const version = rows(versionResult, VERSION_ROW)[0];
+    if (version === undefined) return NOT_FOUND;
+    const files = rows(filesResult, FILE_ROW);
+    const paths = unextractablePaths(files.map((file) => file.path));
+    if (paths.length > 0) return fail({ code: "not_extractable", paths });
+    const length = archiveLength(files);
+    const number = version.number;
+    if (!input.body) return succeed({ id, number, length, body: null });
+    // Every version holds index.html, so a version without files is not one D1 can return.
+    const first = files[0];
+    if (first === undefined) return fail({ code: "internal" });
+
+    const store = objectStore(deps);
+    const open = async (file: FileRow) => (await getObject(store, id, file.sha256)).body;
+    let firstBody: ReadableStream<Uint8Array>;
+    try {
+      firstBody = await open(first);
+    } catch (error) {
+      // A read that fails or stalls is `unavailable` (design.md section 8, "Errors"); an object the version lists that
+      // R2 does not hold is an inconsistency, `internal` as `guarded` answers it.
+      if (!(error instanceof StorageError) || error.failure === "object_missing") throw error;
+      logEvent("operation.failed", { reason: error.failure, error: errorName(error), artifact: id });
+      return fail({ code: "unavailable" });
+    }
+    const body = archiveStream(
+      {
+        files,
+        modified: new Date(version.created_at),
+        first: firstBody,
+        open,
+        read: (reader, size) => streamBody(store, reader, size),
+        failed: (error) =>
+          logEvent("operation.failed", {
+            reason: error instanceof StorageError ? error.failure : "error",
+            error: errorName(error),
+            artifact: id,
+            version: number,
+          }),
+      },
+      length,
+    );
+    return succeed({ id, number, length, body });
   });
 }
 
