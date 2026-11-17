@@ -19,7 +19,15 @@ import iconSvg from "./icon.svg";
 import fontsCss from "./fonts.css";
 import galleryCss from "./gallery.css";
 
-export type Asset = { readonly contentType: string; readonly body: string | ArrayBuffer };
+export type Asset = {
+  readonly contentType: string;
+  readonly body: string | ArrayBuffer;
+  /**
+   * The zone a rendered page shows its times in (format.ts), which its tag covers with its bytes, so a 304 never
+   * revalidates a page rendered for another zone.
+   */
+  readonly zone?: string;
+};
 
 const CSS = "text/css; charset=utf-8";
 const WOFF2 = "font/woff2";
@@ -135,7 +143,11 @@ export function assetPath(name: AssetName): string {
   return path;
 }
 
-/** A strong entity tag of an asset: 128 bits of the SHA-256 of its bytes, which only a deployment changes. */
+/**
+ * A strong entity tag of an asset: 128 bits of the SHA-256 of its bytes, which only a deployment changes, followed for
+ * a rendered page by a line feed and its zone. A zone name holds no line feed, so the last one ends the bytes.
+ */
 export async function assetTag(asset: Asset): Promise<string> {
-  return `"${(await sha256Hex(new Blob([asset.body]))).slice(0, 32)}"`;
+  const parts = asset.zone === undefined ? [asset.body] : [asset.body, `\n${asset.zone}`];
+  return `"${(await sha256Hex(new Blob(parts))).slice(0, 32)}"`;
 }

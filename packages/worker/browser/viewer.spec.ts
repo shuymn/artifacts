@@ -5,7 +5,7 @@ import { inflateSync } from "node:zlib";
 
 import { expect, test, type Frame, type Page } from "@playwright/test";
 
-import { appOrigin, contentOrigin, create, update, withoutPopover } from "./support.ts";
+import { appOrigin, contentOrigin, create, TIME_ZONE, update, withoutPopover } from "./support.ts";
 
 /**
  * A page that fills the viewport and shows its fragment, links to another page of the artifact, to version 1 and to
@@ -179,7 +179,19 @@ test.describe("PL-55: the frame's script", () => {
     await frameOf(page).locator("#pinned").click();
     await expect(page).toHaveURL(`${contentOrigin(id)}/_v/1/`);
     await expect(page.locator(".viewer-header__version")).toHaveText("v1 of 2");
-    await expect(page.locator(".viewer-menu__shown")).toHaveText(/^v1 · published \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    // The menu's head takes v1's minute and zone from the history, as the server wrote them in the harness's zone, which
+    // is never UTC: the minute differs from the one in `datetime`.
+    const v1Time = page.locator(".viewer-history li a[href='/_v/1/'] time");
+    await expect(v1Time).toHaveAttribute("title", TIME_ZONE);
+    const minute = (await v1Time.getAttribute("data-minute")) ?? "";
+    expect(minute).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(minute).not.toBe((await v1Time.getAttribute("datetime"))?.slice(0, 16).replace("T", " "));
+    await expect(page.locator(".viewer-menu__shown")).toHaveText(`v1 · published ${minute}`);
+    await expect(page.locator(".viewer-menu__shown time")).toHaveAttribute("title", TIME_ZONE);
+    await expect(page.locator(".viewer-menu__shown time")).toHaveAttribute(
+      "datetime",
+      (await v1Time.getAttribute("datetime")) ?? "",
+    );
     await expect(page.locator(".viewer-history li a[aria-current=page]")).toHaveAttribute("href", "/_v/1/");
     await expect(page.locator("#viewer-export")).toHaveAttribute("href", `${appOrigin()}/a/${id}/v/1/export`);
     await expect(page.locator("#viewer-export .menu-item__label")).toHaveText("Export v1 (.zip)");

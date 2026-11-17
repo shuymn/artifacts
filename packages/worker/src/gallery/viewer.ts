@@ -6,7 +6,7 @@
  * hash is fixed, and reads each page's values from its markup.
  */
 import type { VersionJson, ViewerData } from "../operations.ts";
-import { utcMinute } from "./format.ts";
+import { minuteIn, type TimeZone } from "./format.ts";
 import { html, VIEWER_ICON, VIEWER_STYLE, type Markup, type Value } from "./html.ts";
 import { icon, type IconName } from "./icons.ts";
 import { VERSION } from "./pages.ts";
@@ -18,6 +18,8 @@ export type ViewerView = {
   readonly app: string;
   /** Open page directly before the script runs: the request's path and query with `_viewer=off` appended. */
   readonly direct: string;
+  /** The zone times are shown in: the request's (format.ts). */
+  readonly zone: TimeZone;
 };
 
 /**
@@ -56,19 +58,23 @@ function item(
 }
 
 /** The menu's head: the shown version and its time, `updated` for the latest and `published` for an older one. */
-function shownLine(shown: VersionJson, latest: number): Markup {
-  const minute = utcMinute(shown.created_at);
+function shownLine(shown: VersionJson, latest: number, zone: TimeZone): Markup {
+  const minute = minuteIn(zone, shown.created_at);
   return html`v${shown.number} · ${shown.number === latest ? "updated" : "published"}
-    <time datetime="${minute.datetime}">${minute.text}</time>`;
+    <time datetime="${minute.datetime}" title="${zone.name}">${minute.text}</time>`;
 }
 
 /**
  * A version in the history: its number, `latest` on the latest, and its date alone (docs/gallery/design.md), so the
- * page's bytes change only with its data. The latest links to `/`, any other version to `/_v/<n>/`.
+ * page's bytes change only with its data and its zone. The time carries its minute in `data-minute` for the script,
+ * which shows it in the menu's head after a navigation to that version. The latest links to `/`, any other version to
+ * `/_v/<n>/`.
  */
-function historyItem(version: VersionJson, latest: number, shown: number): Markup {
-  const minute = utcMinute(version.created_at);
-  const date = html`<time datetime="${minute.datetime}">${minute.text.slice(0, 10)}</time>`;
+function historyItem(version: VersionJson, latest: number, shown: number, zone: TimeZone): Markup {
+  const minute = minuteIn(zone, version.created_at);
+  const date = html`<time datetime="${minute.datetime}" title="${zone.name}" data-minute="${minute.text}"
+    >${minute.date}</time
+  >`;
   const isLatest = version.number === latest;
   // Two spaces after the number, as the design sets them: a no-break space keeps the first from collapsing.
   const label = isLatest ? html`v${version.number}&#160; latest · ${date}` : html`v${version.number}&#160; ${date}`;
@@ -84,7 +90,7 @@ function menu(view: ViewerView): Markup {
   const latest = artifact.latest_version;
   const page = artifact.gallery_url;
   return html`<div class="viewer-menu" popover id="viewer-menu">
-    <p class="viewer-menu__shown">${shownLine(shown, latest)}</p>
+    <p class="viewer-menu__shown">${shownLine(shown, latest, view.zone)}</p>
     <ul role="list">
       <li>${item(`${view.app}/`, "arrow-left", "Back to gallery")}</li>
       <li>${item(page, "info", "Artifact details")}</li>
@@ -126,7 +132,7 @@ function history(view: ViewerView): Markup {
   return html`<div class="viewer-history" popover id="viewer-history">
     <p class="viewer-history__head">History · ${counted(latest, "version")}</p>
     <ul role="list">
-      ${listed.map((version) => historyItem(version, latest, shown.number))}
+      ${listed.map((version) => historyItem(version, latest, shown.number, view.zone))}
     </ul>
     <hr class="viewer-history__divider" />
     ${item(`${artifact.gallery_url}#versions`, "layout-grid", "All versions in gallery")}
@@ -191,10 +197,10 @@ const VIEWER_SCRIPT = html`<script>
       }
       shown.textContent = "v" + number;
       if (time !== null) {
-        const datetime = time.getAttribute("datetime");
         const stamp = document.createElement("time");
-        stamp.setAttribute("datetime", datetime);
-        stamp.textContent = datetime.slice(0, 10) + " " + datetime.slice(11, 16);
+        stamp.setAttribute("datetime", time.getAttribute("datetime"));
+        stamp.title = time.title;
+        stamp.textContent = time.dataset.minute;
         shown.append(isLatest ? " · updated " : " · published ", stamp);
       }
       exported.href = exported.href.replace(new RegExp("/v/[0-9]+/export$"), "/v/" + number + "/export");

@@ -1,16 +1,74 @@
 /**
  * How the gallery writes times and sizes (docs/gallery/design.md, "Behavior the static design does not show"): times
- * in UTC to the minute, list rows relative to now, sizes in decimal units.
+ * to the minute in the request's time zone, list rows relative to now, sizes in decimal units.
  */
+
+/**
+ * The fields of a time to the minute, read from their parts, so the locale sets nothing but these options:
+ * `numberingSystem` keeps the digits Latin, and `hourCycle` the hours 00 to 23.
+ */
+const FIELDS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  numberingSystem: "latn",
+};
+
+/**
+ * The zone a page shows its times in: its IANA name as `Intl` resolves it, which each time's `title` shows and the
+ * page's `ETag` covers, and the formatter of its parts.
+ */
+export type TimeZone = { readonly name: string; readonly format: Intl.DateTimeFormat };
+
+const formatIn = (zone: string) => new Intl.DateTimeFormat("en-US", { ...FIELDS, timeZone: zone });
+
+const UTC: TimeZone = { name: "UTC", format: formatIn("UTC") };
+
+/** A zone by its IANA name, or UTC when there is none or `Intl` rejects it: a zone never fails a page. */
+export function timeZone(name: string | undefined): TimeZone {
+  if (name === undefined) return UTC;
+  try {
+    const format = formatIn(name);
+    return { name: format.resolvedOptions().timeZone, format };
+  } catch {
+    return UTC;
+  }
+}
+
+/**
+ * The zone Cloudflare estimates for the request (`request.cf.timezone`, from its IP address, so a VPN or a relay gives
+ * its exit's), or UTC without one.
+ */
+export function requestTimeZone(request: Request): TimeZone {
+  const cf: unknown = request.cf;
+  const name = typeof cf === "object" && cf !== null && "timezone" in cf ? cf.timezone : undefined;
+  return timeZone(typeof name === "string" ? name : undefined);
+}
+
+/**
+ * A time of the API's JSON (`toISOString`, so always `YYYY-MM-DDTHH:MM:SS.sssZ`) as a `<time>`'s `datetime`: its UTC
+ * instant to the minute, `2026-11-16T09:12:00Z`, whatever zone the text is in.
+ */
+export const instant = (iso: string): string => `${iso.slice(0, 16)}:00Z`;
+
+/** A time to the minute: its `instant`, then its date and its minute in a zone. */
+export type Minute = { readonly datetime: string; readonly date: string; readonly text: string };
+
+/** A time of the API's JSON to the minute in `zone`, `2026-11-16 18:12`, and its date by that zone's calendar. */
+export function minuteIn(zone: TimeZone, iso: string): Minute {
+  const datetime = instant(iso);
+  const parts = zone.format.formatToParts(Date.parse(datetime));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((found) => found.type === type)?.value ?? "";
+  const date = `${part("year")}-${part("month")}-${part("day")}`;
+  return { datetime, date, text: `${date} ${part("hour")}:${part("minute")}` };
+}
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
-
-/** A time of the API's JSON (`toISOString`, so always `YYYY-MM-DDTHH:MM:SS.sssZ`) to the minute. */
-export function utcMinute(iso: string): { readonly datetime: string; readonly text: string } {
-  return { datetime: `${iso.slice(0, 16)}:00Z`, text: `${iso.slice(0, 10)} ${iso.slice(11, 16)}` };
-}
 
 const ago = (count: number, unit: string) => `${count} ${unit}${count === 1 ? "" : "s"} ago`;
 

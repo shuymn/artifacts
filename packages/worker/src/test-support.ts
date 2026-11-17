@@ -103,6 +103,9 @@ export class Clock {
   now = START;
 }
 
+/** Request properties Cloudflare attaches (`request.cf`), such as the `timezone` it estimates for the request. */
+export type RequestCf = Record<string, unknown>;
+
 /** A mutable world: the Worker under test, its clock, key endpoint, ID queue and environment. */
 export class World {
   readonly clock = new Clock();
@@ -208,16 +211,21 @@ export class World {
     });
   }
 
-  /** A request to the artifact's private content host, with a valid content JWT unless `jwt` is given. */
+  /**
+   * A request to the artifact's private content host, with a valid content JWT unless `jwt` is given, and `cf` as
+   * Cloudflare would attach it.
+   */
   async content(
     id: string,
     path: string,
-    options: { jwt?: string | null; headers?: Record<string, string>; method?: string } = {},
+    options: { jwt?: string | null; headers?: Record<string, string>; method?: string; cf?: RequestCf } = {},
   ): Promise<Response> {
     const headers = new Headers(options.headers);
     const jwt = options.jwt === undefined ? await this.jwt() : options.jwt;
     if (jwt !== null) headers.set("Cf-Access-Jwt-Assertion", jwt);
-    return this.fetch(`https://${id}${CONTENT_SUFFIX}${path}`, { method: options.method ?? "GET", headers });
+    const init: RequestInit = { method: options.method ?? "GET", headers };
+    if (options.cf !== undefined) init.cf = options.cf;
+    return this.fetch(`https://${id}${CONTENT_SUFFIX}${path}`, init);
   }
 
   async public(id: string, path: string, options: { headers?: Record<string, string>; method?: string } = {}) {

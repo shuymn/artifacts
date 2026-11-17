@@ -7,9 +7,10 @@
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-import { createTestHarness } from "wrangler";
+import { createTestHarness, type TestHarness } from "wrangler";
 
-import { PORT_VARIABLE, TOKEN } from "./support.ts";
+import { pinCf } from "./cf.ts";
+import { PORT_VARIABLE, TIME_ZONE, TOKEN } from "./support.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 
@@ -27,12 +28,29 @@ function worker(port: string) {
   };
 }
 
-/** Starts the Worker, gives the tests its port, and returns the teardown that stops it. */
+/**
+ * Starts the Worker with `request.cf` pinned to `TIME_ZONE` (cf.ts), gives the tests its port, and returns the
+ * teardown that stops it and undoes the pin; a start that fails does the same.
+ */
 export default async function start(): Promise<() => Promise<void>> {
-  const server = createTestHarness({ root: ROOT, workers: [worker("1")] });
-  const { url } = await server.listen();
-  await server.update({ root: ROOT, workers: [worker(url.port)] });
-  await server.getWorker().applyD1Migrations("DB");
-  process.env[PORT_VARIABLE] = url.port;
-  return () => server.close();
+  const unpin = await pinCf(TIME_ZONE);
+  let server: TestHarness | undefined;
+  const stop = async () => {
+    try {
+      await server?.close();
+    } finally {
+      await unpin();
+    }
+  };
+  try {
+    server = createTestHarness({ root: ROOT, workers: [worker("1")] });
+    const { url } = await server.listen();
+    await server.update({ root: ROOT, workers: [worker(url.port)] });
+    await server.getWorker().applyD1Migrations("DB");
+    process.env[PORT_VARIABLE] = url.port;
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+  return stop;
 }

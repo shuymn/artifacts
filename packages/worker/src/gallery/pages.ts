@@ -17,7 +17,7 @@ import type {
   VersionJson,
 } from "../operations.ts";
 import { assetPath } from "./assets.ts";
-import { byteSize, relativeTime, utcMinute } from "./format.ts";
+import { byteSize, instant, minuteIn, relativeTime, type TimeZone } from "./format.ts";
 import { html, type Markup, type Value } from "./html.ts";
 
 /** The section a page belongs to: `/` lists active artifacts, `/archived` archived ones. */
@@ -30,6 +30,8 @@ export type Chrome = {
   readonly now: number;
   /** ARCHIVE_AFTER_DAYS, for the archive's explanations. */
   readonly archiveAfterDays: number;
+  /** The zone times are shown in: the request's (format.ts). */
+  readonly zone: TimeZone;
 };
 
 const STYLESHEETS = ["fonts.css", "gallery.css"].map(
@@ -126,9 +128,15 @@ function document(title: string, chrome: Chrome, current: Section, page: "list" 
   );
 }
 
-function time(iso: string, text?: string): Markup {
-  const minute = utcMinute(iso);
-  return html`<time datetime="${minute.datetime}">${text ?? minute.text}</time>`;
+/** A time to the minute in the request's zone, which its `title` names; `datetime` is its UTC instant. */
+function time(iso: string, chrome: Chrome): Markup {
+  const minute = minuteIn(chrome.zone, iso);
+  return html`<time datetime="${minute.datetime}" title="${chrome.zone.name}">${minute.text}</time>`;
+}
+
+/** A time relative to now, which no zone changes. */
+function relative(iso: string, chrome: Chrome): Markup {
+  return html`<time datetime="${instant(iso)}">${relativeTime(iso, chrome.now)}</time>`;
 }
 
 /** The badges after a title, Archived before Public, each after a space as in the reference pages. */
@@ -176,8 +184,8 @@ function row(artifact: ListedArtifact, chrome: Chrome): Markup {
       </div>
       ${artifact.description !== "" && html`<p class="artifact-row__description">${startOf(artifact.description)}</p>`}
       <p class="artifact-row__meta">
-        v${artifact.latest_version} · updated
-        ${time(artifact.updated_at, relativeTime(artifact.updated_at, chrome.now))} by ${artifact.published_by}${reason}
+        v${artifact.latest_version} · updated ${relative(artifact.updated_at, chrome)} by
+        ${artifact.published_by}${reason}
       </p>
     </div>
     <a class="artifact-row__open" href="${artifact.url}">Open ↗</a>
@@ -265,11 +273,11 @@ function table(id: string, columns: readonly string[], body: readonly Markup[]):
 const VERSION_COLUMNS = ["Version", "Published", "By", "Title", "Files", "Size", "Pinned"] as const;
 const FILE_COLUMNS = ["Path", "Type", "Size"] as const;
 
-function versionRow(version: VersionJson): Markup {
+function versionRow(version: VersionJson, chrome: Chrome): Markup {
   return html` <tr role="row">
     ${[
       cell("Version", `v${version.number}`, "cell--mono"),
-      cell("Published", time(version.created_at), "cell--muted"),
+      cell("Published", time(version.created_at, chrome), "cell--muted"),
       cell("By", version.published_by),
       cell("Title", version.title, "cell--grow"),
       cell("Files", version.file_count, "cell--muted"),
@@ -303,8 +311,8 @@ export function artifactPage(chrome: Chrome, data: GalleryArtifact): Markup {
         infoAction("Visibility", `/a/${artifact.id}/public`, artifact.public ? "Make private…" : "Make public…"),
         infoAction("Download", `/a/${artifact.id}/v/${latest.number}/export`, `Export v${latest.number} (.zip)`),
         infoAction("Deletion", `/a/${artifact.id}/delete`, "Delete…"),
-        infoText("Latest", html`v${latest.number} · ${time(latest.created_at)} by ${latest.published_by}`),
-        infoText("Created", html`${time(artifact.created_at)} by ${first.published_by}`),
+        infoText("Latest", html`v${latest.number} · ${time(latest.created_at, chrome)} by ${latest.published_by}`),
+        infoText("Created", html`${time(artifact.created_at, chrome)} by ${first.published_by}`),
         infoText("Archive", archiveState(artifact, chrome)),
       ]}
     </dl>
@@ -312,7 +320,11 @@ export function artifactPage(chrome: Chrome, data: GalleryArtifact): Markup {
       <h2 class="section-heading" id="versions">
         Versions <span class="section-heading__count">${artifact.latest_version}</span>
       </h2>
-      ${table("versions", VERSION_COLUMNS, versions.versions.map(versionRow))}
+      ${table(
+        "versions",
+        VERSION_COLUMNS,
+        versions.versions.map((version) => versionRow(version, chrome)),
+      )}
       ${pager("Version pagination", "versions_cursor", versions.next_cursor, "Older versions →", "#versions")}
     </section>
     <section class="section">
