@@ -180,8 +180,9 @@ describe("REST contract", () => {
     expect(await (await world.api("GET", `/v1/artifacts/${artifact.id}/versions/1/files/docs/`)).text()).toBe("d");
   });
 
-  // Section 8, "Errors": an R2 read that fails or stalls is unavailable; an object the version lists that R2 does not
-  // hold is internal.
+  // Section 8, "Storage failures": an R2 read that fails or stalls is unavailable; an object the version lists that R2
+  // does not hold is internal. The stalled get and the missing object pin answers the timeout and `guarded` already
+  // gave; the failing get is the one `readObject` decides.
   it.each<[string, () => Promise<unknown>, number, string, string]>([
     ["fails", () => Promise.reject(new Error("get failed")), 503, "unavailable", "error"],
     ["stalls", never, 503, "unavailable", "timeout"],

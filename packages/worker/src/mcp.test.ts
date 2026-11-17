@@ -782,8 +782,9 @@ describe("read_file", () => {
     expect(outcome).toBe("cancelled");
   });
 
-  // Design.md section 8, "Errors": an R2 read that fails is unavailable, as one that stalls (above); an object the
-  // version lists that R2 does not hold is internal.
+  // Design.md section 8, "Storage failures": an R2 read that fails is unavailable, as one that stalls (above); an object
+  // the version lists that R2 does not hold is internal. The missing object pins the answer `guarded` already gave; the
+  // failing get and body read are the ones `readObject` decides.
   it.each<[string, string, () => Promise<unknown>, string]>([
     ["the get fails", "unavailable", () => Promise.reject(new Error("get failed")), "error"],
     [

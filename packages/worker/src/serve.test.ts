@@ -564,8 +564,9 @@ const FAILED_GETS: readonly [string, () => Promise<unknown>, number, string][] =
   ["finds no object", () => Promise.resolve(null), 500, "object_missing"],
 ];
 
-// Design.md section 8, "Errors": an R2 read that fails or stalls is unavailable, which a retry may mend; an object the
-// version lists that R2 does not hold is internal.
+// Design.md section 8, "Storage failures": an R2 read that fails or stalls is unavailable, which a retry may mend; an
+// object the version lists that R2 does not hold is internal. The stalled get and the missing object pin answers the
+// timeout and `guarded` already gave; the failing get is the one `readObject` decides.
 describe("section 8: a served file's R2 read", () => {
   it.each(FAILED_GETS)(
     "answers a content and a public host when the get %s, and serves the file once it succeeds",
