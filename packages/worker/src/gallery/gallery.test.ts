@@ -206,6 +206,9 @@ describe("section 10: the pages", () => {
     expect(infoOf(doc)).toEqual({
       "Artifact URL": `https://${id}${CONTENT_SUFFIX}/ ↗`,
       "Public URL": "Not public",
+      Visibility: "Make public…",
+      Download: "Export v2 (.zip)",
+      Deletion: "Delete…",
       Latest: "v2 · 2026-11-16 10:00 by claude",
       Created: "2026-11-16 09:00 by codex",
       Archive: "Active · archives automatically after 30 days without updates",
@@ -234,9 +237,30 @@ describe("section 10: the pages", () => {
     const shared = await page(world, `/a/${id}`);
     expect(infoOf(shared)).toMatchObject({
       "Public URL": `https://${id}${PUBLIC_SUFFIX}/ ↗`,
+      Visibility: "Make private…",
       Archive: "Active · kept out of the archive by hand",
     });
     expect(byClass(shared, "badge").map(textOf)).toEqual(["Public"]);
+  });
+
+  // PL-56: the artifact page links both confirmation pages and its latest version's download, without script or form.
+  it("links the confirmation pages and the latest version's download", async () => {
+    const world = new World();
+    const id = await create(world, "Linked");
+    await world.updated(id, { base_version: 1, files: { "b.html": "b" } });
+    const doc = await page(world, `/a/${id}`);
+    const links = byClass(doc, "info-row__link").flatMap((value) => elements(value).filter((node) => node.tag === "a"));
+    expect(links.map((link) => [textOf(link), link.attributes.get("href")])).toEqual([
+      [`https://${id}${CONTENT_SUFFIX}/ ↗`, `https://${id}${CONTENT_SUFFIX}/`],
+      ["Make public…", `/a/${id}/public`],
+      ["Export v2 (.zip)", `/a/${id}/v/2/export`],
+      ["Delete…", `/a/${id}/delete`],
+    ]);
+    expect(elements(doc).filter((node) => node.tag === "form" || node.tag === "script")).toEqual([]);
+    // Each answers on the app host.
+    for (const href of links.slice(1).map((link) => link.attributes.get("href") ?? "")) {
+      expect({ href, status: (await app(world, href, { method: "HEAD" })).status }).toEqual({ href, status: 200 });
+    }
   });
 
   it("marks the artifact's section and links back to it", async () => {

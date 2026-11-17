@@ -7,6 +7,14 @@
  */
 import { AccessVerifier, type AccessSettings } from "./access.ts";
 import { parseConfig, type Config } from "./config.ts";
+import {
+  CONFIRMATION_METHODS,
+  confirmationOf,
+  serveConfirmation,
+  withConfirmHeaders,
+  type Confirmation,
+  type ConfirmationAnswer,
+} from "./confirm.ts";
 import { serveConsent, withConsentHeaders, type ConsentAnswer } from "./consent.ts";
 import { checkCredential, resourceMetadataAllow, resourceOfPath, serveResourceMetadata } from "./credentials.ts";
 import { serveGallery, withGalleryPolicy } from "./gallery/route.ts";
@@ -154,12 +162,43 @@ async function authorize(
   return serveConsent(request, url, env.OAUTH_KV, config, { now: deps.now, kvReadMs: deps.timeouts.kvReadMs });
 }
 
+/**
+ * The confirmation pages on the app host (design.md section 10): GET, HEAD and POST, any other method 405 (ISO-3),
+ * then Access with the app audience (ACC-1), before the body is read or storage touched. Every answer, these refusals
+ * included, gets the pages' headers (`withConfirmHeaders`) where `fetch` returns it.
+ */
+async function confirm(
+  request: Request,
+  env: Env,
+  config: Config,
+  deps: WorkerDeps,
+  confirmation: Confirmation,
+): Promise<ConfirmationAnswer> {
+  if (!CONFIRMATION_METHODS.some((method) => method === request.method)) {
+    return { response: plainResponse("private", 405, { Allow: CONFIRMATION_METHODS.join(", ") }) };
+  }
+  const refusal = await refuseWithoutAccess(request, config, deps, "app");
+  if (refusal !== undefined) return { response: refusal };
+  return serveConfirmation(request, confirmation, operationDeps(env, config, deps));
+}
+
+/**
+ * A refusal before the host is classified, which an invalid configuration prevents: the private class's headers, and
+ * on a confirmation path also that route's headers and the gallery's policy without forms or scripts (design.md
+ * section 10), whichever host the request reached, since they only restrict.
+ */
+function unconfigured(url: URL): Response {
+  const response = plainResponse("private", 503);
+  return confirmationOf(url.pathname) === undefined ? response : withGalleryPolicy(withConfirmHeaders(response));
+}
+
 /** The Worker's fetch handler; the execution context goes to the OAuth library only, and `cf` is not used. */
 export type Worker = { fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> };
 
 export function createWorker(deps: WorkerDeps): Worker {
   return {
     async fetch(request, env, ctx): Promise<Response> {
+      const url = new URL(request.url);
       const parsed = parseConfig(env);
       if (!parsed.ok) {
         logEvent("config.invalid", {
@@ -167,16 +206,15 @@ export function createWorker(deps: WorkerDeps): Worker {
           ...(parsed.variable === undefined ? {} : { variable: parsed.variable }),
         });
         // The host class is unknown, so the answer carries the private class's headers.
-        return plainResponse("private", 503);
+        return unconfigured(url);
       }
       const { config } = parsed;
       // Section 11: with OAuth on, a Worker without its storage answers as for an invalid variable, so a deployment
       // never runs with OAuth silently off.
       if (config.oauth && env.OAUTH_KV === undefined) {
         logEvent("config.invalid", { reason: "missing", binding: "OAUTH_KV" });
-        return plainResponse("private", 503);
+        return unconfigured(url);
       }
-      const url = new URL(request.url);
       const route = classifyHost(url.host, config);
       try {
         switch (route.kind) {
@@ -187,7 +225,14 @@ export function createWorker(deps: WorkerDeps): Worker {
           case "app": {
             if (url.pathname === AUTHORIZE_PATH) {
               const answer = await authorize(request, url, env, config, deps);
-              return withGalleryPolicy(withConsentHeaders(answer.response), answer.formAction);
+              const origin = answer.formAction;
+              const policy = origin === undefined ? {} : { forms: { origin } };
+              return withGalleryPolicy(withConsentHeaders(answer.response), policy);
+            }
+            const confirmation = confirmationOf(url.pathname);
+            if (confirmation !== undefined) {
+              const answer = await confirm(request, env, config, deps, confirmation);
+              return withGalleryPolicy(withConfirmHeaders(answer.response), answer.policy);
             }
             return withGalleryPolicy(await browser(request, url, env, config, deps, "app", undefined));
           }
@@ -207,7 +252,9 @@ export function createWorker(deps: WorkerDeps): Worker {
         if (route.kind === "api") return jsonResponse(500, { error: { code: "internal", message: "internal error" } });
         const failure = plainResponse(route.kind === "public" ? "public" : "private", 500);
         if (route.kind !== "app") return failure;
-        return withGalleryPolicy(url.pathname === AUTHORIZE_PATH ? withConsentHeaders(failure) : failure);
+        if (url.pathname === AUTHORIZE_PATH) return withGalleryPolicy(withConsentHeaders(failure));
+        if (confirmationOf(url.pathname) !== undefined) return withGalleryPolicy(withConfirmHeaders(failure));
+        return withGalleryPolicy(failure);
       }
     },
   };

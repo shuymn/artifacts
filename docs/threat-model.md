@@ -139,7 +139,9 @@ and the threats are the three adversaries below, not untrusted users.
   the library) (PL-37). The version download is verified with the app audience like the gallery, before any D1 or R2
   call: _Enforced (main)_ in `src/index.ts`, pinned by behavior (`src/export.test.ts`: without a JWT and with the
   content audience's, 403 with no D1 or R2 call) (PL-62). The confirmation pages are verified with the app audience
-  too, a `POST` before its body is read: _Planned (viewer)_ (PL-56).
+  too, a `POST` before its body is read: _Enforced (main)_ in `src/index.ts`, pinned by behavior
+  (`src/confirm.test.ts`: `GET`, `HEAD` and `POST` without a JWT and with the content audience's answer 403 with no D1
+  or R2 call and the `POST`'s body unread) (PL-56).
 - **ACC-2: Access verification is skipped only for a `localhost` configuration.** Every configured host must be a
   `localhost` name; no variable turns verification off, and the deployment script refuses `localhost` hosts and ports.
   OAuth is off there too, so no consent page runs without Access: every OAuth path answers 404. _Enforced (main)_ in
@@ -197,7 +199,8 @@ and the threats are the three adversaries below, not untrusted users.
   consent page as `published_by`; `src/consent.test.ts`: a name of the wrong form creates no grant and keeps the
   transaction, a corrected one succeeds (PL-39)). A change made on a confirmation page has no credential and logs `via:
   "gallery"` in place of a publisher name and grant, which an API token named `gallery` could otherwise be taken for:
-  _Planned (viewer)_ (PL-59). **Changed for the viewer:** such a change records the browser path instead of a publisher.
+  _Enforced (main)_ in `src/operations.ts`, `src/confirm.ts`, pinned by behavior (`src/confirm.test.ts`:
+  `artifact.changed` and `artifact.deleted` with `via` and neither `token` nor `grant`) (PL-59). **Changed for the viewer:** such a change records the browser path instead of a publisher.
   What TOK-3 protected holds: a change made with a leaked credential still names that credential, and one made in the
   browser needed the owner's Access session (ACC-1).
 
@@ -236,8 +239,12 @@ and the threats are the three adversaries below, not untrusted users.
   confirmation routes `/a/<id>/public` and `/a/<id>/delete` answer `GET`, `HEAD` and `POST`; their `POST` changes an
   artifact only with an app-audience Access JWT (ACC-1), `Origin` equal to the configured app origin and
   `Sec-Fetch-Site: same-origin`, a missing or `null` value failing, and a counted form that names the desired state. The
-  pages cannot be framed (`frame-ancestors 'none'`), and the viewer frame, which shares an artifact's origin, sends no
-  write of its own: _Planned (viewer)_ (PL-11, PL-56, PL-57). **Changed for the viewer:** the owner changes artifacts
+  pages cannot be framed (`frame-ancestors 'none'`): _Enforced (main)_ in `src/index.ts`, `src/confirm.ts`, pinned by
+  behavior (`src/confirm.test.ts`: `PUT`, `DELETE`, `PATCH`, `OPTIONS` and `PROPFIND` answer 405 before Access and
+  storage; `Origin` missing, `null`, a content and a public host's, and the app host's with another scheme or port;
+  `Sec-Fetch-Site` missing, `same-site`, `cross-site` and `none`; an artifact page's, another subdomain's and another
+  site's form; each refused with D1 unchanged) (PL-11, PL-56, PL-57). The viewer frame, which shares an artifact's
+  origin, sends no write of its own: _Planned (viewer)_ (PL-54). **Changed for the viewer:** the owner changes artifacts
   from the browser (design.md, purpose layer, Viewer), so "no request authenticated by a cookie changes an artifact"
   became "only the app host's own confirmation form does". What ISO-3 kept from artifact pages holds: an artifact page,
   even same-site in the shared-domain layout, sends its own origin and `same-site` or `cross-site`, so its `POST` is
@@ -252,8 +259,9 @@ and the threats are the three adversaries below, not untrusted users.
   sets one `__Host-` binding, `Secure; HttpOnly; SameSite=Lax`, the answers that use it clear it, and no other answer
   of the endpoint sets one) (PL-11, PL-37). **Changed for OAuth:** the cookie is the library's
   protection of the consent form against cross-site requests. `__Host-` keeps what ISO-4 protected in the
-  shared-domain layout: no other host, artifact pages included, can set or replace it. The viewer frame and the
-  confirmation pages set no cookie either: _Planned (viewer)_ (PL-11).
+  shared-domain layout: no other host, artifact pages included, can set or replace it. The confirmation pages set no
+  cookie either: _Enforced (main)_, pinned by behavior (`src/confirm.test.ts`: no `Set-Cookie` on any of their answers)
+  (PL-11). The viewer frame neither: _Planned (viewer)_ (PL-11, PL-54).
 - **ISO-5: the app host runs no supplied markup.** Artifact titles, descriptions, paths and every other value, and
   on the consent page every value a client supplied (its name, URI and redirect URI), are escaped by the one template
   that builds the pages; every app-host response's `Content-Security-Policy`, refusals and failures included, forbids
@@ -268,7 +276,15 @@ and the threats are the three adversaries below, not untrusted users.
   the client. The origin added to `form-action` is the one the page shows the owner, and only of the forms design.md
   section 7 lists. The confirmation pages' policy admits a form to the page itself (`form-action 'self'`), and the
   result page's admits its one script by hash: the Worker's own bytes, the same on every result page, which take their
-  target from an escaped link: _Planned (viewer)_ (PL-56, PL-58).
+  target from an escaped link: _Enforced (main)_ in `src/confirm.ts`, `src/gallery/pages.ts`, `src/gallery/route.ts`,
+  pinned by behavior (`src/confirm.test.ts`: markup in a title on both pages and the result page; the policy on every
+  status, a misconfiguration's 503 included; the script's SHA-256 equal to the policy's after a visibility change and
+  a delete, the same bytes for two artifacts, its target per result, and its one navigation, the opener's
+  `location.replace`; `src/gallery/reference.test.ts`: the confirmation pages' markup) (PL-56, PL-58). **Gap:** that
+  the script sends the opener to its target and closes the popup, and leaves a tab without an opener as it is, needs
+  a browser: the frame's script that opens the popup comes with the viewer (PL-58). A misconfiguration (an invalid
+  variable, or OAuth without `OAUTH_KV`) answers 503 before the host is classified; that answer carries the policy on
+  the confirmation paths only, so on any other app-host path it has no CSP, and it has no body but its status text.
 
 ### Serving (SRV)
 
@@ -297,7 +313,8 @@ and the threats are the three adversaries below, not untrusted users.
   while public; the next request after making it private answers 404).
 - **PUB-2: only the API, with a credential (TOK-1), and the app host's confirmation form (ISO-3) change the flag**;
   the flag is off when an artifact is created. _Enforced (main)_ for the API. Pinned by behavior (`src/serve.test.ts`,
-  `src/routing.test.ts`). The confirmation form: _Planned (viewer)_ (PL-57).
+  `src/routing.test.ts`). The confirmation form: _Enforced (main)_ in `src/confirm.ts`, pinned by behavior (`src/confirm.test.ts`: the
+  desired state applied, twice without reversal, through the operation REST calls) (PL-57).
 
 ### Versions (VER)
 
@@ -332,7 +349,8 @@ and the threats are the three adversaries below, not untrusted users.
   pinned by behavior (`src/oauth.test.ts`: at and one past each bound, with and without `Content-Length`, the library
   not called) (PL-44). The consent form, at most 4 KiB, is counted before it is parsed: _Enforced (main)_ in
   `src/consent.ts`, pinned by behavior (`src/consent.test.ts`: at and one past the bound). The confirmation form, at
-  most 1 KiB, likewise: _Planned (viewer)_ (PL-57).
+  most 1 KiB, likewise: _Enforced (main)_ in `src/confirm.ts`, pinned by behavior (`src/confirm.test.ts`: at and one
+  past the bound, with and without `Content-Length`) (PL-57).
 - **RES-2: waits are bounded where the outcome stays known.** Fetching Access keys, each R2 call and each D1 read have a
   timeout and answer 503 `unavailable`; a publish that times out before its commit leaves no version. The D1 commit
   has none: a timed-out commit could still apply. _Enforced (main)_ in `src/timeout.ts`, `src/objects.ts`, `src/db.ts`,
@@ -394,7 +412,8 @@ and the threats are the three adversaries below, not untrusted users.
   `src/operations.ts`, pinned by log redaction (`src/log-redaction.test.ts`: an export, the download, a
   `not_extractable` answer, and failures before and after the headers, with markers in a path and an error's message)
   (PL-62). The confirmation pages add one closed field, `via`, the browser path a change came by, and log reason codes
-  only: _Planned (viewer)_ (PL-59).
+  only: _Enforced (main)_ in `src/confirm.ts`, `src/log.ts`, pinned by log redaction (`src/log-redaction.test.ts`: the
+  pages, their changes, refusals and failures, with markers in a title, `Origin` values and form bodies) (PL-59).
 - **DATA-2: deployment values stay out of the repository.** `wrangler.jsonc` sets no variable, route or identifier,
   and binds `OAUTH_KV` without an ID; the deployment values live in the gitignored `wrangler.deploy.jsonc` or a Workers
   Builds variable, the committed example holds placeholders only, and `API_TOKENS` is a secret. _Enforced (main)_ in

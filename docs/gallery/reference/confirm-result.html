@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="text-scale" content="scale" />
+    <title>Made public · artifacts</title>
+    <!-- Reference only: the Worker serves the fonts itself. -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    />
+    <link rel="stylesheet" href="../../../packages/worker/src/gallery/gallery.css" />
+    <link rel="icon" href="../../../packages/worker/src/gallery/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="../../../packages/worker/src/gallery/icon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <a class="brand__link" href="/"
+          ><img
+            class="brand__icon"
+            src="../../../packages/worker/src/gallery/icon.svg"
+            alt=""
+            width="16"
+            height="16"
+          />artifacts</a
+        >
+        <span class="brand__version">v0.3.0</span>
+      </div>
+    </header>
+    <main class="page page--popup">
+      <hgroup class="page-heading">
+        <h1>The artifact is public</h1>
+        <p>Anyone with its public link can open it without signing in.</p>
+      </hgroup>
+      <dl class="info">
+        <div class="info-row">
+          <dt>Artifact</dt>
+          <dd>Quarterly revenue chart</dd>
+        </div>
+        <div class="info-row">
+          <dt>Artifact URL</dt>
+          <dd class="info-row__link">
+            <a href="https://ak2x7m4q9wz3c5v8b2n6r4t7y1-art.example.com/" data-opener
+              >https://ak2x7m4q9wz3c5v8b2n6r4t7y1-art.example.com/ ↗</a
+            >
+          </dd>
+        </div>
+        <div class="info-row">
+          <dt>Public URL</dt>
+          <dd class="info-row__link">
+            <a href="https://ak2x7m4q9wz3c5v8b2n6r4t7y1-pub.example.com/"
+              >https://ak2x7m4q9wz3c5v8b2n6r4t7y1-pub.example.com/ ↗</a
+            >
+          </dd>
+        </div>
+        <div class="info-row">
+          <dt>Details</dt>
+          <dd class="info-row__link"><a href="/a/ak2x7m4q9wz3c5v8b2n6r4t7y1">Artifact page</a></dd>
+        </div>
+        <div class="info-row">
+          <dt>Gallery</dt>
+          <dd class="info-row__link"><a href="/">All artifacts</a></dd>
+        </div>
+      </dl>
+    </main>
+    <script>
+      const target = document.querySelector("a[data-opener]");
+      if (target !== null && window.opener !== null && !window.opener.closed) {
+        window.opener.location.replace(target.href);
+        window.close();
+      }
+    </script>
+  </body>
+</html>

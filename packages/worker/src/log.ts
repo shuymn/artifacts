@@ -6,6 +6,7 @@
  */
 import type { AccessReason } from "./access.ts";
 import type { ConfigErrorCode, ConfigVariable } from "./config.ts";
+import type { ConfirmRefusal } from "./confirm.ts";
 import type { ClientKind, ConsentRefusal, ResourceKind } from "./consent.ts";
 import type { ArtifactId } from "./id.ts";
 import type { OAuthErrorCategory, OAuthErrorCode } from "./oauth.ts";
@@ -30,6 +31,7 @@ export const LOG_EVENTS = [
   "grant.revoke_failed",
   "grant.created",
   "consent.refused",
+  "confirm.refused",
 ] as const;
 export type LogEvent = (typeof LOG_EVENTS)[number];
 
@@ -51,6 +53,7 @@ const LEVEL: Record<LogEvent, "log" | "error"> = {
   "grant.revoke_failed": "error",
   "grant.created": "log",
   "consent.refused": "log",
+  "confirm.refused": "log",
 };
 
 /** Error classes logged by name. Any other value, a custom error class included, is logged as `other`. */
@@ -67,13 +70,18 @@ export type HostKind = (typeof HOST_KINDS)[number];
 /** Every field a log line can carry, each typed by a closed set, a validated name or a number. */
 export type LogFields = {
   /** `revoked`: a grant with a revocation record, refused at the token endpoint or on `/mcp` and `/v1/`. */
-  readonly reason?: ConfigErrorCode | AccessReason | TokenRefusal | StorageFailure | ConsentRefusal;
+  readonly reason?: ConfigErrorCode | AccessReason | TokenRefusal | StorageFailure | ConsentRefusal | ConfirmRefusal;
   readonly variable?: ConfigVariable;
   /** A binding the configuration needs and the Worker lacks. */
   readonly binding?: "OAUTH_KV";
   readonly host?: HostKind;
   readonly error?: ErrorName;
   readonly token?: TokenName;
+  /**
+   * The browser path a change came by, in place of `token` and `grant`: `gallery` for the app host's confirmation pages
+   * (design.md section 10), where the owner's browser holds no credential.
+   */
+  readonly via?: "gallery";
   readonly artifact?: ArtifactId;
   readonly version?: number;
   readonly public?: boolean;

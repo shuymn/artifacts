@@ -276,4 +276,67 @@ describe("DATA-1: log redaction", () => {
       for (const token of [TOKENS.codex, MARKERS.badToken]) expect(echoed).not.toContain(token);
     }
   });
+
+  // PL-59: the confirmation pages log reason codes and `via`, never a title, an `Origin` value or a form body.
+  it("logs no title, Origin value or form body from the confirmation pages", async () => {
+    const world = new World({ timeouts: { r2Ms: 50, d1ReadMs: 50, kvReadMs: 50 } });
+    const created = await world.created({
+      title: MARKERS.title,
+      description: MARKERS.description,
+      files: { "index.html": "x" },
+    });
+    const id = created.artifact.id;
+    const logs = captureLogs();
+    const app = `https://${APP_HOST}`;
+    const jwt = await world.jwt({ aud: APP_AUD });
+    const request = (path: string, method = "GET", headers: Record<string, string> = {}, body?: string) =>
+      world.fetch(`${app}${path}`, {
+        method,
+        headers: { "Cf-Access-Jwt-Assertion": jwt, ...headers },
+        ...(body === undefined ? {} : { body }),
+      });
+    const form = { Origin: app, "Sec-Fetch-Site": "same-origin", "Content-Type": "application/x-www-form-urlencoded" };
+    const statuses = [
+      (await request(`/a/${id}/public`)).status,
+      (await request(`/a/${id}/delete`)).status,
+      (
+        await request(
+          `/a/${id}/public`,
+          "POST",
+          { ...form, Origin: `https://${MARKERS.origin}.example.org` },
+          "public=true",
+        )
+      ).status,
+      (await request(`/a/${id}/public`, "POST", { ...form, "Sec-Fetch-Site": MARKERS.origin }, "public=true")).status,
+      (await request(`/a/${id}/public`, "POST", form, `public=${MARKERS.body}`)).status,
+      (await request(`/a/${id}/public`, "POST", form, `${MARKERS.body}=true`)).status,
+      (await request(`/a/${id}/public`, "POST", { ...form, "Content-Type": `text/${MARKERS.body}` }, "public=true"))
+        .status,
+      (await request(`/a/${id}/public`, "POST", form, `public=true&${MARKERS.body}`.padEnd(2_000, "x"))).status,
+      (await request(`/a/${MARKERS.path}/public`, "POST", form, "public=true")).status,
+      (await request(`/a/${id}/public`, "POST", form, "public=true")).status,
+    ];
+    // A failed read and a failed delete, with marker messages.
+    const database = new DatabaseProbe();
+    const bucket = new BucketProbe();
+    world.env = { ...world.env, DB: database.binding, FILES: bucket.binding };
+    database.behave = () => Promise.reject(new Error(MARKERS.error));
+    statuses.push((await request(`/a/${id}/delete`)).status);
+    database.behave = () => undefined;
+    bucket.behave = (op) => (op === "delete" ? Promise.reject(new Error(MARKERS.error)) : undefined);
+    statuses.push((await request(`/a/${id}/delete`, "POST", form, "")).status);
+    expect(statuses).toEqual([200, 200, 403, 403, 400, 400, 400, 413, 404, 200, 500, 200]);
+
+    const text = logs.text();
+    for (const event of [
+      "artifact.changed",
+      "artifact.deleted",
+      "confirm.refused",
+      "operation.failed",
+      "cleanup.failed",
+    ]) {
+      expect(text).toContain(event);
+    }
+    for (const marker of Object.values(MARKERS)) expect(text).not.toContain(marker);
+  });
 });
